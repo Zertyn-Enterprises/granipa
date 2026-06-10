@@ -66,11 +66,73 @@ struct AppDatabase: Sendable {
                 try template.insert(db)
             }
         }
+        migrator.registerMigration("v3-webhooks") { db in
+            try db.create(table: "webhook") { t in
+                t.primaryKey("id", .text)
+                t.column("url", .text).notNull()
+                t.column("secret", .text).notNull()
+                t.column("events", .text).notNull()
+                t.column("enabled", .boolean).notNull()
+            }
+            try db.create(table: "webhookDelivery") { t in
+                t.primaryKey("id", .text)
+                t.column("webhookID", .text).notNull().indexed()
+                    .references("webhook", onDelete: .cascade)
+                t.column("event", .text).notNull()
+                t.column("payload", .text).notNull()
+                t.column("attempts", .integer).notNull()
+                t.column("nextAttemptAt", .datetime).notNull()
+                t.column("status", .text).notNull()
+            }
+        }
         return migrator
     }
 }
 
 extension AppDatabase {
+    func fetchWebhooks() throws -> [Webhook] {
+        try writer.read { db in try Webhook.order(Column("url")).fetchAll(db) }
+    }
+
+    func save(_ webhook: Webhook) throws {
+        try writer.write { db in try webhook.save(db) }
+    }
+
+    func deleteWebhook(id: String) throws {
+        _ = try writer.write { db in try Webhook.deleteOne(db, key: id) }
+    }
+
+    func enqueueDeliveries(event: WebhookEvent, payload: String) throws {
+        try writer.write { db in
+            let webhooks = try Webhook.filter(Column("enabled") == true).fetchAll(db)
+            for webhook in webhooks where webhook.subscribes(to: event) {
+                try WebhookDelivery.new(webhookID: webhook.id, event: event, payload: payload)
+                    .insert(db)
+            }
+        }
+    }
+
+    func dueDeliveries(now: Date = .now, limit: Int = 20) throws -> [(WebhookDelivery, Webhook)] {
+        try writer.read { db in
+            let deliveries = try WebhookDelivery
+                .filter(Column("status") == "pending")
+                .filter(Column("nextAttemptAt") <= now)
+                .order(Column("nextAttemptAt"))
+                .limit(limit)
+                .fetchAll(db)
+            return try deliveries.compactMap { delivery in
+                guard let webhook = try Webhook.fetchOne(db, key: delivery.webhookID) else {
+                    return nil
+                }
+                return (delivery, webhook)
+            }
+        }
+    }
+
+    func updateDelivery(_ delivery: WebhookDelivery) throws {
+        try writer.write { db in try delivery.save(db) }
+    }
+
     func fetchTemplates() throws -> [MeetingTemplate] {
         try writer.read { db in
             try MeetingTemplate.order(Column("isBuiltin").desc, Column("name")).fetchAll(db)

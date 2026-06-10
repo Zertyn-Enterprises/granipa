@@ -6,10 +6,13 @@ import Observation
 final class AppState {
     private(set) var database: AppDatabase?
     let recorder = RecordingEngine()
+    private let apiServer = APIServer()
+    private var webhookLoop: Task<Void, Never>?
     private(set) var transcription: TranscriptionCoordinator?
     private(set) var enhancingMeetingIDs: Set<String> = []
     var meetings: [Meeting] = []
     var templates: [MeetingTemplate] = []
+    var webhooks: [Webhook] = []
     var selectedMeetingID: String?
     var loadError: String?
 
@@ -24,8 +27,57 @@ final class AppState {
             database = db
             meetings = try db.fetchMeetings()
             templates = try db.fetchTemplates()
+            webhooks = try db.fetchWebhooks()
+            startServices(database: db)
         } catch {
             loadError = error.localizedDescription
+        }
+    }
+
+    static func apiToken() -> String {
+        let defaults = UserDefaults.standard
+        if let token = defaults.string(forKey: "apiToken"), !token.isEmpty {
+            return token
+        }
+        let token = (UUID().uuidString + UUID().uuidString)
+            .replacingOccurrences(of: "-", with: "")
+            .lowercased()
+        defaults.set(token, forKey: "apiToken")
+        return token
+    }
+
+    func startServices(database db: AppDatabase) {
+        let defaults = UserDefaults.standard
+        let apiEnabled = defaults.object(forKey: "apiEnabled") as? Bool ?? true
+        if apiEnabled {
+            let port = UInt16(defaults.integer(forKey: "apiPort"))
+            let token = Self.apiToken()
+            Task {
+                try? await apiServer.start(
+                    port: port == 0 ? 7799 : port,
+                    token: token,
+                    database: db,
+                    enhanceTrigger: { meetingID in
+                        Task { @MainActor [weak self] in
+                            await self?.enhance(meetingID: meetingID)
+                        }
+                    })
+            }
+        }
+        webhookLoop?.cancel()
+        webhookLoop = Task {
+            while !Task.isCancelled {
+                await WebhookService.deliverDue(database: db)
+                try? await Task.sleep(for: .seconds(30))
+            }
+        }
+    }
+
+    func restartAPIServer() {
+        guard let db = database else { return }
+        Task {
+            await apiServer.stop()
+            startServices(database: db)
         }
     }
 
@@ -95,6 +147,12 @@ final class AppState {
             meeting.startedAt = .now
             update(meeting)
             selectedMeetingID = targetID
+            if let db = database {
+                WebhookService.enqueue(
+                    event: .meetingStarted,
+                    payload: MeetingStartedPayload(timestamp: .now, meeting: MeetingSummaryDTO(meeting)),
+                    database: db)
+            }
         } catch {
             loadError = error.localizedDescription
         }
@@ -140,6 +198,18 @@ final class AppState {
             finished.status = .ready
             update(finished)
         }
+
+        if let meeting = try? db.fetchMeeting(id: meetingID) {
+            let segments = (try? db.fetchSegments(meetingID: meetingID, finalOnly: true)) ?? []
+            WebhookService.enqueue(
+                event: .meetingCompleted,
+                payload: MeetingCompletedPayload(
+                    timestamp: .now,
+                    meeting: MeetingDetailDTO(meeting),
+                    transcript: segments.map(SegmentDTO.init)),
+                database: db)
+            Task { await WebhookService.deliverDue(database: db) }
+        }
     }
 
     func enhance(meetingID: String) async {
@@ -173,8 +243,33 @@ final class AppState {
                 updated.title = title
             }
             update(updated)
+            WebhookService.enqueue(
+                event: .notesEnhanced,
+                payload: NotesEnhancedPayload(timestamp: .now, meeting: MeetingDetailDTO(updated)),
+                database: db)
+            Task { await WebhookService.deliverDue(database: db) }
         } catch {
             loadError = "Enhancement failed: \(error.localizedDescription)"
+        }
+    }
+
+    func saveWebhook(_ webhook: Webhook) {
+        guard let db = database else { return }
+        do {
+            try db.save(webhook)
+            webhooks = try db.fetchWebhooks()
+        } catch {
+            loadError = error.localizedDescription
+        }
+    }
+
+    func deleteWebhook(id: String) {
+        guard let db = database else { return }
+        do {
+            try db.deleteWebhook(id: id)
+            webhooks = try db.fetchWebhooks()
+        } catch {
+            loadError = error.localizedDescription
         }
     }
 
