@@ -112,12 +112,34 @@ final class AppState {
         await transcription?.finishAndWait()
         transcription = nil
 
-        if var finished = meetings.first(where: { $0.id == id }) {
+        await postProcess(meetingID: id)
+    }
+
+    func postProcess(meetingID: String) async {
+        guard let db = database else { return }
+        let defaults = UserDefaults.standard
+        let diarizationEnabled = defaults.object(forKey: "diarizationEnabled") as? Bool ?? true
+        let inferNames = defaults.object(forKey: "inferSpeakerNames") as? Bool ?? true
+        let providerID = defaults.string(forKey: "llmProvider") ?? "claude"
+
+        if diarizationEnabled, let meeting = try? db.fetchMeeting(id: meetingID) {
+            do {
+                try await DiarizationService.diarize(
+                    meetingID: meetingID,
+                    audioSystemPath: meeting.audioSystemPath,
+                    database: db,
+                    nameInferenceProviderID: inferNames ? providerID : nil)
+            } catch {
+                // Diarization is best-effort; segments keep their "Them" label.
+            }
+        }
+
+        await enhance(meetingID: meetingID)
+
+        if var finished = meetings.first(where: { $0.id == meetingID }) {
             finished.status = .ready
             update(finished)
         }
-
-        await enhance(meetingID: id)
     }
 
     func enhance(meetingID: String) async {

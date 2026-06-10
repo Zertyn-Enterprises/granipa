@@ -138,12 +138,21 @@ struct MeetingDetailView: View {
 struct SegmentRow: View {
     let segment: TranscriptSegment
 
+    private static let palette: [Color] = [.orange, .purple, .teal, .pink, .indigo, .mint]
+
+    private var speakerColor: Color {
+        if segment.channel == .mic { return .blue }
+        if segment.speaker == "Them" { return .orange }
+        let index = abs(segment.speaker.hashValue) % Self.palette.count
+        return Self.palette[index]
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack {
                 Text(segment.speaker)
                     .font(.caption.bold())
-                    .foregroundStyle(segment.channel == .mic ? .blue : .orange)
+                    .foregroundStyle(speakerColor)
                 Text(Self.timestamp(segment.startSeconds))
                     .font(.caption2)
                     .foregroundStyle(.secondary)

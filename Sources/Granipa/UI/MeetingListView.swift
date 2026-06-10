@@ -49,6 +49,10 @@ private struct MeetingRow: View {
                     Label("Recording", systemImage: "record.circle")
                         .foregroundStyle(.red)
                         .font(.caption)
+                } else if meeting.status == .processing {
+                    Label("Processing", systemImage: "gearshape.2")
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
                 } else {
                     Text(meeting.createdAt, format: .dateTime.day().month().hour().minute())
                         .font(.caption)

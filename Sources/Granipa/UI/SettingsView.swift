@@ -35,6 +35,8 @@ private struct GeneralSettings: View {
 
 private struct AISettings: View {
     @AppStorage("llmProvider") private var llmProvider = "claude"
+    @AppStorage("diarizationEnabled") private var diarizationEnabled = true
+    @AppStorage("inferSpeakerNames") private var inferSpeakerNames = true
 
     var body: some View {
         Form {
@@ -46,6 +48,15 @@ private struct AISettings: View {
             Text("Uses the CLI's own subscription login — no API keys, no per-token billing.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            Section("Speakers") {
+                Toggle("Identify individual speakers", isOn: $diarizationEnabled)
+                Text("Splits remote participants into Speaker 1, 2, 3… after the meeting (local CoreML model, ~130 MB downloaded on first use).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Toggle("Infer speaker names with AI", isOn: $inferSpeakerNames)
+                    .disabled(!diarizationEnabled)
+            }
 
             Section("Detected CLIs") {
                 ForEach(LLMProviders.all) { spec in
