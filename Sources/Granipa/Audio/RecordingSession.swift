@@ -1,0 +1,131 @@
+import AVFoundation
+
+// Mutable state is queue-confined: mic* fields are touched only from the mic tap
+// callback thread, system* fields only from the tap IO queue. start/stop run on
+// the main actor after callbacks have ceased.
+final class RecordingSession: @unchecked Sendable {
+    let meetingID: String
+    let micURL: URL
+    let systemURL: URL
+    let micChunks: AsyncStream<AudioChunk>
+    let systemChunks: AsyncStream<AudioChunk>
+
+    private let micContinuation: AsyncStream<AudioChunk>.Continuation
+    private let systemContinuation: AsyncStream<AudioChunk>.Continuation
+    private let mic = MicRecorder()
+    private let tap = SystemAudioTap()
+    private let onLevel: @Sendable (AudioChannel, Float) -> Void
+
+    private var micFile: AVAudioFile?
+    private var systemFile: AVAudioFile?
+    private var systemFramesWritten: AVAudioFramePosition = 0
+    private var sessionStartHostSeconds: Double = 0
+    private(set) var systemAudioError: Error?
+
+    init(
+        meetingID: String,
+        directory: URL,
+        onLevel: @escaping @Sendable (AudioChannel, Float) -> Void
+    ) {
+        self.meetingID = meetingID
+        self.micURL = directory.appendingPathComponent("mic.m4a")
+        self.systemURL = directory.appendingPathComponent("system.m4a")
+        self.onLevel = onLevel
+        (micChunks, micContinuation) = AsyncStream.makeStream(of: AudioChunk.self)
+        (systemChunks, systemContinuation) = AsyncStream.makeStream(of: AudioChunk.self)
+    }
+
+    func start(echoCancellation: Bool) throws {
+        sessionStartHostSeconds = AVAudioTime.seconds(forHostTime: mach_absolute_time())
+
+        try mic.start(echoCancellation: echoCancellation) { [weak self] buffer in
+            self?.handleMic(buffer)
+        }
+
+        do {
+            try tap.start { [weak self] buffer, timestamp in
+                self?.handleSystem(buffer, timestamp: timestamp)
+            }
+        } catch {
+            systemAudioError = error
+        }
+    }
+
+    func stop() {
+        mic.stop()
+        tap.stop()
+        micContinuation.finish()
+        systemContinuation.finish()
+        micFile = nil
+        systemFile = nil
+    }
+
+    private func handleMic(_ buffer: AVAudioPCMBuffer) {
+        if micFile == nil {
+            micFile = try? AVAudioFile(
+                forWriting: micURL,
+                settings: Self.aacSettings(for: buffer.format, bitRate: 96_000),
+                commonFormat: buffer.format.commonFormat,
+                interleaved: buffer.format.isInterleaved)
+        }
+        try? micFile?.write(from: buffer)
+        onLevel(.mic, buffer.rmsLevel)
+        if let copy = buffer.deepCopy() {
+            micContinuation.yield(AudioChunk(buffer: copy, startSeconds: nil))
+        }
+    }
+
+    private func handleSystem(_ buffer: AVAudioPCMBuffer, timestamp: AudioTimeStamp) {
+        let sampleRate = buffer.format.sampleRate
+        if systemFile == nil {
+            systemFile = try? AVAudioFile(
+                forWriting: systemURL,
+                settings: Self.aacSettings(for: buffer.format, bitRate: 128_000),
+                commonFormat: buffer.format.commonFormat,
+                interleaved: buffer.format.isInterleaved)
+        }
+
+        var startSeconds: Double?
+        if timestamp.mFlags.contains(.hostTimeValid) {
+            startSeconds =
+                AVAudioTime.seconds(forHostTime: timestamp.mHostTime) - sessionStartHostSeconds
+        }
+
+        // The tap only delivers buffers while system audio is playing. Pad gaps
+        // with silence so file time stays equal to meeting time (transcript and
+        // diarization timestamps must line up across channels).
+        if let file = systemFile, let start = startSeconds, start > 0 {
+            let expectedFrame = AVAudioFramePosition((start * sampleRate).rounded())
+            var gap = expectedFrame - systemFramesWritten
+            if gap > AVAudioFramePosition(sampleRate * 0.25) {
+                while gap > 0 {
+                    let chunkFrames = AVAudioFrameCount(min(gap, 16_384))
+                    guard
+                        let silence = AVAudioPCMBuffer(
+                            pcmFormat: buffer.format, frameCapacity: chunkFrames)
+                    else { break }
+                    silence.frameLength = chunkFrames
+                    try? file.write(from: silence)
+                    systemFramesWritten += AVAudioFramePosition(chunkFrames)
+                    gap -= AVAudioFramePosition(chunkFrames)
+                }
+            }
+        }
+
+        try? systemFile?.write(from: buffer)
+        systemFramesWritten += AVAudioFramePosition(buffer.frameLength)
+        onLevel(.system, buffer.rmsLevel)
+        if let copy = buffer.deepCopy() {
+            systemContinuation.yield(AudioChunk(buffer: copy, startSeconds: startSeconds))
+        }
+    }
+
+    private static func aacSettings(for format: AVAudioFormat, bitRate: Int) -> [String: Any] {
+        [
+            AVFormatIDKey: kAudioFormatMPEG4AAC,
+            AVSampleRateKey: format.sampleRate,
+            AVNumberOfChannelsKey: Int(format.channelCount),
+            AVEncoderBitRateKey: bitRate,
+        ]
+    }
+}

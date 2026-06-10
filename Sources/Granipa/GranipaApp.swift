@@ -10,7 +10,10 @@ struct GranipaApp: App {
                 .environment(appState)
         }
 
-        MenuBarExtra("Grañipa", systemImage: "waveform") {
+        MenuBarExtra(
+            "Grañipa",
+            systemImage: appState.recorder.isRecording ? "record.circle.fill" : "waveform"
+        ) {
             MenuBarView()
                 .environment(appState)
         }

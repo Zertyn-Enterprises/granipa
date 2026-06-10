@@ -9,6 +9,16 @@ struct MenuBarView: View {
             NSApp.activate(ignoringOtherApps: true)
         }
         Divider()
+        if app.recorder.isRecording {
+            Button("Stop Recording") {
+                app.stopRecording()
+            }
+        } else {
+            Button("Record New Meeting") {
+                app.startRecording()
+                NSApp.activate(ignoringOtherApps: true)
+            }
+        }
         Button("New Meeting") {
             app.createMeeting()
             NSApp.activate(ignoringOtherApps: true)

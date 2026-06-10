@@ -36,6 +36,7 @@ struct MeetingDetailView: View {
                 .font(.title2.bold())
                 .textFieldStyle(.plain)
                 .onChange(of: meeting.title) { scheduleSave() }
+            RecordingBar(meeting: meeting)
             Picker("", selection: $tab) {
                 Text("Notes").tag(Tab.notes)
                 Text("Transcript").tag(Tab.transcript)

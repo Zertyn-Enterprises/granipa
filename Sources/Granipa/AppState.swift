@@ -5,6 +5,7 @@ import Observation
 @Observable
 final class AppState {
     private(set) var database: AppDatabase?
+    let recorder = RecordingEngine()
     var meetings: [Meeting] = []
     var selectedMeetingID: String?
     var loadError: String?
@@ -61,6 +62,38 @@ final class AppState {
         } catch {
             loadError = error.localizedDescription
         }
+    }
+
+    func startRecording(meetingID: String? = nil) {
+        guard database != nil else { return }
+        let targetID: String
+        if let meetingID {
+            targetID = meetingID
+        } else {
+            createMeeting()
+            guard let id = selectedMeetingID else { return }
+            targetID = id
+        }
+        guard var meeting = meetings.first(where: { $0.id == targetID }) else { return }
+        do {
+            _ = try recorder.start(meetingID: targetID)
+            meeting.status = .recording
+            meeting.startedAt = .now
+            update(meeting)
+            selectedMeetingID = targetID
+        } catch {
+            loadError = error.localizedDescription
+        }
+    }
+
+    func stopRecording() {
+        guard let id = recorder.meetingID, let urls = recorder.stop() else { return }
+        guard var meeting = meetings.first(where: { $0.id == id }) else { return }
+        meeting.status = .ready
+        meeting.endedAt = .now
+        meeting.audioMicPath = urls.micURL.path
+        meeting.audioSystemPath = urls.systemURL.path
+        update(meeting)
     }
 
     func deleteMeeting(id: String) {
