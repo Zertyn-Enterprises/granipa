@@ -6,14 +6,24 @@ struct MeetingListView: View {
 
     var body: some View {
         List(selection: $selection) {
-            ForEach(app.meetings) { meeting in
-                MeetingRow(meeting: meeting)
-                    .tag(meeting.id)
-                    .contextMenu {
-                        Button("Delete", role: .destructive) {
-                            app.deleteMeeting(id: meeting.id)
-                        }
+            let upcoming = app.calendar.upcoming.filter { $0.end > .now }
+            if !upcoming.isEmpty {
+                Section("Upcoming") {
+                    ForEach(upcoming) { event in
+                        UpcomingRow(event: event)
                     }
+                }
+            }
+            Section(upcoming.isEmpty ? "" : "Meetings") {
+                ForEach(app.meetings) { meeting in
+                    MeetingRow(meeting: meeting)
+                        .tag(meeting.id)
+                        .contextMenu {
+                            Button("Delete", role: .destructive) {
+                                app.deleteMeeting(id: meeting.id)
+                            }
+                        }
+                }
             }
         }
         .navigationTitle("Meetings")
@@ -32,6 +42,39 @@ struct MeetingListView: View {
                     description: Text("Your recorded meetings will appear here.")
                 )
             }
+        }
+    }
+}
+
+private struct UpcomingRow: View {
+    @Environment(AppState.self) private var app
+    let event: CalendarMeeting
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(event.title)
+                    .font(.subheadline)
+                    .lineLimit(1)
+                Text(event.start, format: .dateTime.weekday(.abbreviated).hour().minute())
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if let url = event.joinURL {
+                Link(destination: url) {
+                    Image(systemName: "video")
+                }
+                .help("Join meeting")
+            }
+            Button {
+                app.startRecording(fromEvent: event)
+            } label: {
+                Image(systemName: "record.circle")
+            }
+            .buttonStyle(.borderless)
+            .disabled(app.recorder.isRecording)
+            .help("Record this meeting")
         }
     }
 }

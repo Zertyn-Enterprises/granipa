@@ -19,8 +19,10 @@ struct SettingsView: View {
 }
 
 private struct GeneralSettings: View {
+    @Environment(AppState.self) private var app
     @AppStorage("defaultLocale") private var defaultLocale = "en-US"
     @AppStorage("echoCancellation") private var echoCancellation = true
+    @AppStorage("meetingDetectionEnabled") private var meetingDetection = true
 
     var body: some View {
         Form {
@@ -28,6 +30,10 @@ private struct GeneralSettings: View {
                 Text("English").tag("en-US")
                 Text("Español").tag("es-ES")
             }
+            Toggle("Detect meetings automatically", isOn: $meetingDetection)
+                .onChange(of: meetingDetection) {
+                    meetingDetection ? app.detector.start() : app.detector.stop()
+                }
             Toggle("Echo cancellation (mic)", isOn: $echoCancellation)
             Text("Keep this on if you use speakers; it stops other participants' voices from bleeding into your mic channel.")
                 .font(.caption)

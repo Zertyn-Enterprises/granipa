@@ -5,7 +5,29 @@ struct MainWindow: View {
 
     var body: some View {
         @Bindable var app = app
-        NavigationSplitView {
+        VStack(spacing: 0) {
+            if let appName = app.detector.detectedApp, !app.recorder.isRecording {
+                HStack {
+                    Label("Looks like \(appName) is in a call.", systemImage: "video.fill")
+                    Spacer()
+                    Button("Record") {
+                        app.startRecordingFromDetection()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    Button("Dismiss") {
+                        app.detector.dismiss()
+                    }
+                }
+                .padding(10)
+                .background(.yellow.opacity(0.15))
+            }
+            splitView
+        }
+    }
+
+    private var splitView: some View {
+        @Bindable var app = app
+        return NavigationSplitView {
             MeetingListView(selection: $app.selectedMeetingID)
                 .navigationSplitViewColumnWidth(min: 220, ideal: 280)
         } detail: {

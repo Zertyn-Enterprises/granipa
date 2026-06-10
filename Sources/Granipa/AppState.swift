@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 
@@ -6,6 +7,8 @@ import Observation
 final class AppState {
     private(set) var database: AppDatabase?
     let recorder = RecordingEngine()
+    let calendar = CalendarService()
+    let detector = MeetingDetector()
     private let apiServer = APIServer()
     private var webhookLoop: Task<Void, Never>?
     private(set) var transcription: TranscriptionCoordinator?
@@ -32,6 +35,30 @@ final class AppState {
         } catch {
             loadError = error.localizedDescription
         }
+        calendar.start()
+        setupDetection()
+    }
+
+    private func setupDetection() {
+        NotificationManager.shared.setup()
+        NotificationManager.recordHandler = { [weak self] in
+            self?.startRecordingFromDetection()
+        }
+        detector.onMeetingDetected = { [weak self] appName in
+            guard let self, !self.recorder.isRecording else { return }
+            NotificationManager.shared.notifyMeetingDetected(appName: appName)
+        }
+        let enabled = UserDefaults.standard.object(forKey: "meetingDetectionEnabled") as? Bool ?? true
+        if enabled {
+            detector.start()
+        }
+    }
+
+    func startRecordingFromDetection() {
+        guard !recorder.isRecording else { return }
+        detector.dismiss()
+        startRecording()
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     static func apiToken() -> String {
@@ -96,10 +123,11 @@ final class AppState {
         }
     }
 
-    func createMeeting() {
+    func createMeeting(title: String = "Untitled meeting", calendarEventID: String? = nil) {
         guard let db = database else { return }
         let language = UserDefaults.standard.string(forKey: "defaultLocale") ?? "en-US"
-        let meeting = Meeting.new(title: "Untitled meeting", language: language)
+        var meeting = Meeting.new(title: title, language: language)
+        meeting.calendarEventID = calendarEventID
         do {
             try db.save(meeting)
             meetings.insert(meeting, at: 0)
@@ -107,6 +135,12 @@ final class AppState {
         } catch {
             loadError = error.localizedDescription
         }
+    }
+
+    func startRecording(fromEvent event: CalendarMeeting) {
+        createMeeting(title: event.title, calendarEventID: event.id)
+        guard let id = selectedMeetingID else { return }
+        startRecording(meetingID: id)
     }
 
     func update(_ meeting: Meeting) {
@@ -127,7 +161,10 @@ final class AppState {
         if let meetingID {
             targetID = meetingID
         } else {
-            createMeeting()
+            let event = calendar.currentEvent()
+            createMeeting(
+                title: event?.title ?? "Untitled meeting",
+                calendarEventID: event?.id)
             guard let id = selectedMeetingID else { return }
             targetID = id
         }
