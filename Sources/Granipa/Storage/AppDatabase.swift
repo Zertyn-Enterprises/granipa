@@ -55,7 +55,38 @@ struct AppDatabase: Sendable {
                 t.column("isFinal", .boolean).notNull()
             }
         }
+        migrator.registerMigration("v2-templates") { db in
+            try db.create(table: "meetingTemplate") { t in
+                t.primaryKey("id", .text)
+                t.column("name", .text).notNull()
+                t.column("prompt", .text).notNull()
+                t.column("isBuiltin", .boolean).notNull()
+            }
+            for template in MeetingTemplate.builtins {
+                try template.insert(db)
+            }
+        }
         return migrator
+    }
+}
+
+extension AppDatabase {
+    func fetchTemplates() throws -> [MeetingTemplate] {
+        try writer.read { db in
+            try MeetingTemplate.order(Column("isBuiltin").desc, Column("name")).fetchAll(db)
+        }
+    }
+
+    func fetchTemplate(id: String) throws -> MeetingTemplate? {
+        try writer.read { db in try MeetingTemplate.fetchOne(db, key: id) }
+    }
+
+    func save(_ template: MeetingTemplate) throws {
+        try writer.write { db in try template.save(db) }
+    }
+
+    func deleteTemplate(id: String) throws {
+        _ = try writer.write { db in try MeetingTemplate.deleteOne(db, key: id) }
     }
 }
 

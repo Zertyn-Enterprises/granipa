@@ -7,7 +7,9 @@ final class AppState {
     private(set) var database: AppDatabase?
     let recorder = RecordingEngine()
     private(set) var transcription: TranscriptionCoordinator?
+    private(set) var enhancingMeetingIDs: Set<String> = []
     var meetings: [Meeting] = []
+    var templates: [MeetingTemplate] = []
     var selectedMeetingID: String?
     var loadError: String?
 
@@ -21,6 +23,7 @@ final class AppState {
             let db = try AppDatabase.open()
             database = db
             meetings = try db.fetchMeetings()
+            templates = try db.fetchTemplates()
         } catch {
             loadError = error.localizedDescription
         }
@@ -29,6 +32,7 @@ final class AppState {
     init(database: AppDatabase) {
         self.database = database
         meetings = (try? database.fetchMeetings()) ?? []
+        templates = (try? database.fetchTemplates()) ?? []
     }
 
     func refreshMeetings() {
@@ -111,6 +115,64 @@ final class AppState {
         if var finished = meetings.first(where: { $0.id == id }) {
             finished.status = .ready
             update(finished)
+        }
+
+        await enhance(meetingID: id)
+    }
+
+    func enhance(meetingID: String) async {
+        guard let db = database, !enhancingMeetingIDs.contains(meetingID) else { return }
+        guard let meeting = try? db.fetchMeeting(id: meetingID) else { return }
+        let segments = (try? db.fetchSegments(meetingID: meetingID, finalOnly: true)) ?? []
+        let hasNotes = !meeting.notesMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard !segments.isEmpty || hasNotes else { return }
+
+        enhancingMeetingIDs.insert(meetingID)
+        defer { enhancingMeetingIDs.remove(meetingID) }
+
+        let template =
+            meeting.templateID.flatMap { try? db.fetchTemplate(id: $0) }
+            ?? MeetingTemplate.builtins.first
+        let prompt = EnhancementService.buildPrompt(
+            template: template,
+            notes: meeting.notesMarkdown,
+            transcript: EnhancementService.transcriptText(segments: segments))
+        let providerID = UserDefaults.standard.string(forKey: "llmProvider") ?? "claude"
+
+        do {
+            let raw = try await LLMService.generate(providerID: providerID, prompt: prompt)
+            let result = try EnhancementService.parse(raw)
+            guard var updated = try? db.fetchMeeting(id: meetingID) else { return }
+            updated.summary = result.summary
+            updated.enhancedNotesMarkdown = result.enhancedNotes
+            updated.actionItemsJSON = ActionItem.encodeList(result.actionItems ?? [])
+            updated.emailDraft = result.emailDraft
+            if updated.title == "Untitled meeting", let title = result.title, !title.isEmpty {
+                updated.title = title
+            }
+            update(updated)
+        } catch {
+            loadError = "Enhancement failed: \(error.localizedDescription)"
+        }
+    }
+
+    func saveTemplate(_ template: MeetingTemplate) {
+        guard let db = database else { return }
+        do {
+            try db.save(template)
+            templates = try db.fetchTemplates()
+        } catch {
+            loadError = error.localizedDescription
+        }
+    }
+
+    func deleteTemplate(id: String) {
+        guard let db = database else { return }
+        do {
+            try db.deleteTemplate(id: id)
+            templates = try db.fetchTemplates()
+        } catch {
+            loadError = error.localizedDescription
         }
     }
 

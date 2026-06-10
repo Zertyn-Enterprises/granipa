@@ -9,6 +9,7 @@ struct MeetingDetailView: View {
 
     enum Tab: Hashable {
         case notes
+        case enhanced
         case transcript
     }
 
@@ -23,6 +24,8 @@ struct MeetingDetailView: View {
             switch tab {
             case .notes:
                 notesEditor
+            case .enhanced:
+                EnhancedNotesView(meetingID: meeting.id)
             case .transcript:
                 transcriptList
             }
@@ -37,13 +40,24 @@ struct MeetingDetailView: View {
                 .textFieldStyle(.plain)
                 .onChange(of: meeting.title) { scheduleSave() }
             RecordingBar(meeting: meeting)
-            Picker("", selection: $tab) {
-                Text("Notes").tag(Tab.notes)
-                Text("Transcript").tag(Tab.transcript)
+            HStack {
+                Picker("", selection: $tab) {
+                    Text("Notes").tag(Tab.notes)
+                    Text("Enhanced").tag(Tab.enhanced)
+                    Text("Transcript").tag(Tab.transcript)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 320)
+                Spacer()
+                Picker("Template", selection: $meeting.templateID) {
+                    ForEach(app.templates) { template in
+                        Text(template.name).tag(Optional(template.id))
+                    }
+                }
+                .frame(maxWidth: 200)
+                .onChange(of: meeting.templateID) { scheduleSave() }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(maxWidth: 240)
         }
         .padding()
     }
