@@ -1,0 +1,23 @@
+import SwiftUI
+
+@main
+struct GranipaApp: App {
+    @State private var appState = AppState()
+
+    var body: some Scene {
+        WindowGroup("Grañipa") {
+            MainWindow()
+                .environment(appState)
+        }
+
+        MenuBarExtra("Grañipa", systemImage: "waveform") {
+            MenuBarView()
+                .environment(appState)
+        }
+
+        Settings {
+            SettingsView()
+                .environment(appState)
+        }
+    }
+}

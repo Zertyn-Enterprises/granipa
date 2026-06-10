@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>Grañipa</string>
+	<key>CFBundleDisplayName</key>
+	<string>Grañipa</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.zertyn.granipa</string>
+	<key>CFBundleExecutable</key>
+	<string>Granipa</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>26.0</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Grañipa records your microphone during meetings to transcribe what you say.</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Grañipa records system audio during meetings to transcribe what other participants say.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Grañipa transcribes meeting audio on-device.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Grañipa shows your upcoming meetings and links recordings to calendar events.</string>
+</dict>
+</plist>
