@@ -11,7 +11,7 @@ struct MenuBarView: View {
         Divider()
         if app.recorder.isRecording {
             Button("Stop Recording") {
-                app.stopRecording()
+                Task { await app.stopRecording() }
             }
         } else {
             Button("Record New Meeting") {

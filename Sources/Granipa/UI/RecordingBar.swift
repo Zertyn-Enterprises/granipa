@@ -26,7 +26,7 @@ struct RecordingBar: View {
                     LevelMeter(label: "System", level: app.recorder.systemLevel)
                     Spacer()
                     Button("Stop", systemImage: "stop.fill") {
-                        app.stopRecording()
+                        Task { await app.stopRecording() }
                     }
                     .tint(.red)
                 } else {
@@ -41,6 +41,20 @@ struct RecordingBar: View {
                 Label(warning, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
                     .foregroundStyle(.orange)
+            }
+            if isRecordingThisMeeting, let transcription = app.transcription {
+                switch transcription.phase {
+                case .preparing:
+                    Label("Preparing speech model…", systemImage: "arrow.down.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                case .failed(let message):
+                    Label("Transcription failed: \(message)", systemImage: "xmark.circle")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                default:
+                    EmptyView()
+                }
             }
         }
     }

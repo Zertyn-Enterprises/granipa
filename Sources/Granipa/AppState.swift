@@ -6,6 +6,7 @@ import Observation
 final class AppState {
     private(set) var database: AppDatabase?
     let recorder = RecordingEngine()
+    private(set) var transcription: TranscriptionCoordinator?
     var meetings: [Meeting] = []
     var selectedMeetingID: String?
     var loadError: String?
@@ -76,7 +77,16 @@ final class AppState {
         }
         guard var meeting = meetings.first(where: { $0.id == targetID }) else { return }
         do {
-            _ = try recorder.start(meetingID: targetID)
+            let session = try recorder.start(meetingID: targetID)
+            if let db = database {
+                let coordinator = TranscriptionCoordinator(
+                    meetingID: targetID,
+                    language: meeting.language,
+                    session: session,
+                    database: db)
+                coordinator.start()
+                transcription = coordinator
+            }
             meeting.status = .recording
             meeting.startedAt = .now
             update(meeting)
@@ -86,14 +96,22 @@ final class AppState {
         }
     }
 
-    func stopRecording() {
+    func stopRecording() async {
         guard let id = recorder.meetingID, let urls = recorder.stop() else { return }
         guard var meeting = meetings.first(where: { $0.id == id }) else { return }
-        meeting.status = .ready
+        meeting.status = .processing
         meeting.endedAt = .now
         meeting.audioMicPath = urls.micURL.path
         meeting.audioSystemPath = urls.systemURL.path
         update(meeting)
+
+        await transcription?.finishAndWait()
+        transcription = nil
+
+        if var finished = meetings.first(where: { $0.id == id }) {
+            finished.status = .ready
+            update(finished)
+        }
     }
 
     func deleteMeeting(id: String) {

@@ -56,37 +56,54 @@ struct MeetingDetailView: View {
             .onChange(of: meeting.notesMarkdown) { scheduleSave() }
     }
 
+    private var liveTranscription: TranscriptionCoordinator? {
+        guard let coordinator = app.transcription, coordinator.meetingID == meeting.id else {
+            return nil
+        }
+        return coordinator
+    }
+
     private var transcriptList: some View {
-        Group {
-            if segments.isEmpty {
+        let live = liveTranscription
+        let shown = live.map(\.liveSegments) ?? segments
+        return Group {
+            if shown.isEmpty && live == nil {
                 ContentUnavailableView(
                     "No transcript",
                     systemImage: "text.quote",
                     description: Text("The transcript will appear here once a recording exists.")
                 )
             } else {
-                List(segments) { segment in
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack {
-                            Text(segment.speaker)
-                                .font(.caption.bold())
-                                .foregroundStyle(segment.channel == .mic ? .blue : .orange)
-                            Text(timestamp(segment.startSeconds))
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
+                ScrollViewReader { proxy in
+                    List {
+                        ForEach(shown) { segment in
+                            SegmentRow(segment: segment)
+                                .id(segment.id)
                         }
-                        Text(segment.text)
+                        if let live {
+                            if !live.volatileMic.isEmpty {
+                                VolatileRow(speaker: "Me", text: live.volatileMic)
+                                    .id("volatile-mic")
+                            }
+                            if !live.volatileSystem.isEmpty {
+                                VolatileRow(speaker: "Them", text: live.volatileSystem)
+                                    .id("volatile-system")
+                            }
+                        }
                     }
-                    .padding(.vertical, 2)
+                    .onChange(of: shown.count) {
+                        if let last = shown.last {
+                            proxy.scrollTo(last.id, anchor: .bottom)
+                        }
+                    }
                 }
             }
         }
+        .onChange(of: app.transcription == nil) {
+            loadSegments()
+        }
     }
 
-    private func timestamp(_ seconds: Double) -> String {
-        let total = Int(seconds)
-        return String(format: "%d:%02d", total / 60, total % 60)
-    }
 
     private func loadSegments() {
         guard let db = app.database else { return }
@@ -101,5 +118,46 @@ struct MeetingDetailView: View {
             guard !Task.isCancelled else { return }
             app.update(snapshot)
         }
+    }
+}
+
+struct SegmentRow: View {
+    let segment: TranscriptSegment
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text(segment.speaker)
+                    .font(.caption.bold())
+                    .foregroundStyle(segment.channel == .mic ? .blue : .orange)
+                Text(Self.timestamp(segment.startSeconds))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Text(segment.text)
+        }
+        .padding(.vertical, 2)
+    }
+
+    static func timestamp(_ seconds: Double) -> String {
+        let total = Int(seconds)
+        return String(format: "%d:%02d", total / 60, total % 60)
+    }
+}
+
+struct VolatileRow: View {
+    let speaker: String
+    let text: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(speaker)
+                .font(.caption.bold())
+                .foregroundStyle(.secondary)
+            Text(text)
+                .foregroundStyle(.secondary)
+                .italic()
+        }
+        .padding(.vertical, 2)
     }
 }
