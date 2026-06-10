@@ -18,6 +18,14 @@ struct GranipaApp: App {
                 .environment(appState)
         }
 
+        Window("Recording", id: "recording-hud") {
+            RecordingHUD()
+                .environment(appState)
+        }
+        .windowLevel(.floating)
+        .windowResizability(.contentSize)
+        .defaultPosition(.topTrailing)
+
         Settings {
             SettingsView()
                 .environment(appState)

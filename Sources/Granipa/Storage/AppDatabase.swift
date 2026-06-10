@@ -163,6 +163,29 @@ extension AppDatabase {
         try writer.read { db in try Meeting.fetchOne(db, key: id) }
     }
 
+    func searchMeetings(query: String) throws -> [Meeting] {
+        let escaped = query
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "%", with: "\\%")
+            .replacingOccurrences(of: "_", with: "\\_")
+        let pattern = "%\(escaped)%"
+        return try writer.read { db in
+            try Meeting.fetchAll(
+                db,
+                sql: """
+                    SELECT DISTINCT meeting.* FROM meeting
+                    LEFT JOIN transcriptSegment ON transcriptSegment.meetingID = meeting.id
+                    WHERE meeting.title LIKE :p ESCAPE '\\' COLLATE NOCASE
+                       OR meeting.notesMarkdown LIKE :p ESCAPE '\\' COLLATE NOCASE
+                       OR meeting.enhancedNotesMarkdown LIKE :p ESCAPE '\\' COLLATE NOCASE
+                       OR meeting.summary LIKE :p ESCAPE '\\' COLLATE NOCASE
+                       OR transcriptSegment.text LIKE :p ESCAPE '\\' COLLATE NOCASE
+                    ORDER BY meeting.createdAt DESC
+                    """,
+                arguments: ["p": pattern])
+        }
+    }
+
     func save(_ meeting: Meeting) throws {
         try writer.write { db in try meeting.save(db) }
     }

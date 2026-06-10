@@ -44,6 +44,25 @@ import Testing
         #expect(finals.map(\.text) == ["hola"])
     }
 
+    @Test func searchFindsTitleNotesAndTranscript() throws {
+        let db = try makeDatabase()
+        var byTitle = Meeting.new(title: "Quarterly Roadmap", language: "en-US")
+        try db.save(byTitle)
+        let byTranscript = Meeting.new(title: "Untitled meeting", language: "es-ES")
+        try db.save(byTranscript)
+        try db.save(
+            TranscriptSegment.new(
+                meetingID: byTranscript.id, channel: .system, speaker: "Them",
+                text: "hablemos del presupuesto", startSeconds: 0, endSeconds: 2, isFinal: true))
+        byTitle.notesMarkdown = "remember the budget"
+        try db.save(byTitle)
+
+        #expect(try db.searchMeetings(query: "roadmap").map(\.id) == [byTitle.id])
+        #expect(try db.searchMeetings(query: "presupuesto").map(\.id) == [byTranscript.id])
+        #expect(try db.searchMeetings(query: "budget").map(\.id) == [byTitle.id])
+        #expect(try db.searchMeetings(query: "100%").isEmpty)
+    }
+
     @Test func deleteCascadesToSegments() throws {
         let db = try makeDatabase()
         let meeting = Meeting.new(title: "Test", language: "en-US")

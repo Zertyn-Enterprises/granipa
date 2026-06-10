@@ -3,10 +3,16 @@ import SwiftUI
 struct MeetingListView: View {
     @Environment(AppState.self) private var app
     @Binding var selection: String?
+    @State private var searchQuery = ""
+    @State private var searchResults: [Meeting] = []
+
+    private var shownMeetings: [Meeting] {
+        searchQuery.isEmpty ? app.meetings : searchResults
+    }
 
     var body: some View {
         List(selection: $selection) {
-            let upcoming = app.calendar.upcoming.filter { $0.end > .now }
+            let upcoming = searchQuery.isEmpty ? app.calendar.upcoming.filter { $0.end > .now } : []
             if !upcoming.isEmpty {
                 Section("Upcoming") {
                     ForEach(upcoming) { event in
@@ -15,7 +21,7 @@ struct MeetingListView: View {
                 }
             }
             Section(upcoming.isEmpty ? "" : "Meetings") {
-                ForEach(app.meetings) { meeting in
+                ForEach(shownMeetings) { meeting in
                     MeetingRow(meeting: meeting)
                         .tag(meeting.id)
                         .contextMenu {
@@ -27,6 +33,14 @@ struct MeetingListView: View {
             }
         }
         .navigationTitle("Meetings")
+        .searchable(text: $searchQuery, placement: .sidebar, prompt: "Search notes & transcripts")
+        .onChange(of: searchQuery) {
+            guard !searchQuery.isEmpty, let db = app.database else {
+                searchResults = []
+                return
+            }
+            searchResults = (try? db.searchMeetings(query: searchQuery)) ?? []
+        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button("New Meeting", systemImage: "plus") {
@@ -35,12 +49,16 @@ struct MeetingListView: View {
             }
         }
         .overlay {
-            if app.meetings.isEmpty {
-                ContentUnavailableView(
-                    "No meetings yet",
-                    systemImage: "calendar.badge.plus",
-                    description: Text("Your recorded meetings will appear here.")
-                )
+            if shownMeetings.isEmpty {
+                if searchQuery.isEmpty {
+                    ContentUnavailableView(
+                        "No meetings yet",
+                        systemImage: "calendar.badge.plus",
+                        description: Text("Your recorded meetings will appear here.")
+                    )
+                } else {
+                    ContentUnavailableView.search(text: searchQuery)
+                }
             }
         }
     }

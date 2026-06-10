@@ -2,6 +2,8 @@ import SwiftUI
 
 struct MainWindow: View {
     @Environment(AppState.self) private var app
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
 
     var body: some View {
         @Bindable var app = app
@@ -22,6 +24,13 @@ struct MainWindow: View {
                 .background(.yellow.opacity(0.15))
             }
             splitView
+        }
+        .onChange(of: app.recorder.isRecording) {
+            if app.recorder.isRecording {
+                openWindow(id: "recording-hud")
+            } else {
+                dismissWindow(id: "recording-hud")
+            }
         }
     }
 
