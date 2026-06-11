@@ -39,6 +39,11 @@ struct RecordingHUD: View {
                         }
                         .tint(.red)
                     }
+                    if let warning = app.recorder.micWarning ?? app.recorder.systemAudioWarning {
+                        Label(warning, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    }
                     if let live = app.transcription {
                         VStack(alignment: .leading, spacing: 2) {
                             if let last = live.liveSegments.last {

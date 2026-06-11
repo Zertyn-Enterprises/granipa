@@ -10,6 +10,7 @@ final class RecordingEngine {
     private(set) var micLevel: Float = 0
     private(set) var systemLevel: Float = 0
     private(set) var systemAudioWarning: String?
+    private(set) var micWarning: String?
 
     private(set) var session: RecordingSession?
 
@@ -43,7 +44,34 @@ final class RecordingEngine {
         self.meetingID = meetingID
         self.startedAt = .now
         self.isRecording = true
+        watchForDeadChannels(session: session, echoCancellationWasOn: echoCancellation)
         return session
+    }
+
+    private func watchForDeadChannels(session: RecordingSession, echoCancellationWasOn: Bool) {
+        Task { [weak self, weak session] in
+            try? await Task.sleep(for: .seconds(3))
+            guard let self, let session, self.session === session, self.isRecording else { return }
+            if session.micBufferCount == 0, echoCancellationWasOn {
+                session.restartMicWithoutEchoCancellation()
+                micWarning = "Echo cancellation isn't working on this setup — continuing without it."
+            }
+
+            try? await Task.sleep(for: .seconds(5))
+            guard self.session === session, self.isRecording else { return }
+            if session.micBufferCount == 0 {
+                micWarning =
+                    "No microphone audio is arriving. Check System Settings > Privacy & Security "
+                    + "> Microphone, then stop and start a new recording."
+            } else if session.micBufferCount > 0, micWarning?.hasPrefix("No microphone") == true {
+                micWarning = nil
+            }
+            if session.systemBufferCount == 0, session.systemAudioError == nil {
+                systemAudioWarning =
+                    "No system audio captured yet — it only flows while sound is playing. "
+                    + "If you just granted the permission, stop and start a new recording."
+            }
+        }
     }
 
     func stop() -> (micURL: URL, systemURL: URL)? {
@@ -57,6 +85,7 @@ final class RecordingEngine {
         micLevel = 0
         systemLevel = 0
         systemAudioWarning = nil
+        micWarning = nil
         return urls
     }
 }

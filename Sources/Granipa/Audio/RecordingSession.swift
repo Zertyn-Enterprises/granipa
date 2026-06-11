@@ -1,4 +1,5 @@
 import AVFoundation
+import Synchronization
 
 // Mutable state is queue-confined: mic* fields are touched only from the mic tap
 // callback thread, system* fields only from the tap IO queue. start/stop run on
@@ -12,8 +13,10 @@ final class RecordingSession: @unchecked Sendable {
 
     private let micContinuation: AsyncStream<AudioChunk>.Continuation
     private let systemContinuation: AsyncStream<AudioChunk>.Continuation
-    private let mic = MicRecorder()
+    private var mic = MicRecorder()
     private let tap = SystemAudioTap()
+    private let micBuffers = Mutex(0)
+    private let systemBuffers = Mutex(0)
     private let onLevel: @Sendable (AudioChannel, Float) -> Void
 
     private var micFile: AVAudioFile?
@@ -21,6 +24,9 @@ final class RecordingSession: @unchecked Sendable {
     private var systemFramesWritten: AVAudioFramePosition = 0
     private var sessionStartHostSeconds: Double = 0
     private(set) var systemAudioError: Error?
+
+    var micBufferCount: Int { micBuffers.withLock { $0 } }
+    var systemBufferCount: Int { systemBuffers.withLock { $0 } }
 
     init(
         meetingID: String,
@@ -51,6 +57,16 @@ final class RecordingSession: @unchecked Sendable {
         }
     }
 
+    // Recovery for the two observed zero-buffer cases: voice processing producing
+    // no callbacks on some setups, and an engine started before the mic TCC grant.
+    func restartMicWithoutEchoCancellation() {
+        mic.stop()
+        mic = MicRecorder()
+        try? mic.start(echoCancellation: false) { [weak self] buffer in
+            self?.handleMic(buffer)
+        }
+    }
+
     func stop() {
         mic.stop()
         tap.stop()
@@ -61,6 +77,7 @@ final class RecordingSession: @unchecked Sendable {
     }
 
     private func handleMic(_ buffer: AVAudioPCMBuffer) {
+        micBuffers.withLock { $0 += 1 }
         if micFile == nil {
             micFile = try? AVAudioFile(
                 forWriting: micURL,
@@ -76,6 +93,7 @@ final class RecordingSession: @unchecked Sendable {
     }
 
     private func handleSystem(_ buffer: AVAudioPCMBuffer, timestamp: AudioTimeStamp) {
+        systemBuffers.withLock { $0 += 1 }
         let sampleRate = buffer.format.sampleRate
         if systemFile == nil {
             systemFile = try? AVAudioFile(

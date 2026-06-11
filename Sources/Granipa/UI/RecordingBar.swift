@@ -42,6 +42,11 @@ struct RecordingBar: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
             }
+            if isRecordingThisMeeting, let warning = app.recorder.micWarning {
+                Label(warning, systemImage: "mic.slash")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
             if isRecordingThisMeeting, let transcription = app.transcription {
                 switch transcription.phase {
                 case .preparing:

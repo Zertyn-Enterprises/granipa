@@ -51,6 +51,7 @@ struct MeetingDetailView: View {
                 .frame(maxWidth: 320)
                 Spacer()
                 Picker("Template", selection: $meeting.templateID) {
+                    Text("Default").tag(String?.none)
                     ForEach(app.templates) { template in
                         Text(template.name).tag(Optional(template.id))
                     }

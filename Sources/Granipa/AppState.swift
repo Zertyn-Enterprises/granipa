@@ -29,6 +29,11 @@ final class AppState {
             let db = try AppDatabase.open()
             database = db
             meetings = try db.fetchMeetings()
+            // Recover meetings orphaned mid-recording by a quit or crash.
+            for index in meetings.indices where meetings[index].status != .ready {
+                meetings[index].status = .ready
+                try? db.save(meetings[index])
+            }
             templates = try db.fetchTemplates()
             webhooks = try db.fetchWebhooks()
             startServices(database: db)
