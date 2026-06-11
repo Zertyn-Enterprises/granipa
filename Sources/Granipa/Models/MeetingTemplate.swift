@@ -12,15 +12,18 @@ struct MeetingTemplate: Codable, Identifiable, Hashable, Sendable, FetchableReco
             id: "builtin-general",
             name: "General",
             prompt: """
-                Sections, in this order. Omit a section only when it is truly empty:
+                Format every section as "## Heading" followed by short nested bullets — \
+                one fact per bullet, sub-bullets (two-space indent) for supporting detail.
 
-                ## TL;DR — 2-3 bullets with the outcomes that matter most.
-                ## Decisions — every decision made, who made it, and the reasoning given.
-                ## Key points — the substance of the discussion grouped by topic, each topic \
-                opening with a short bold lead-in. Capture positions, numbers and tradeoffs \
-                discussed — not topic labels.
-                ## Risks & concerns — anything flagged as a problem, worry or blocker.
-                ## Open questions — each unresolved item with who owns finding the answer.
+                1. One "## <topic>" section per major topic, in the order discussed. \
+                Inside: what was decided or learned, exact numbers and dates, who took \
+                which position. Name each section by its content ("## Pricing for the Q3 \
+                renewal"), never generically ("## Discussion").
+                2. "## Risks & concerns" — only if genuine worries or blockers came up.
+                3. "## Open questions" — unresolved items, each with who owns finding the answer.
+
+                Do NOT include any summary, TL;DR or recap section — the separate summary \
+                field already covers that.
                 """,
             isBuiltin: true),
         MeetingTemplate(
