@@ -97,12 +97,22 @@ private struct AISettings: View {
 private struct ProductivitySettings: View {
     @Environment(AppState.self) private var app
     @AppStorage("clipboardHistoryEnabled") private var clipboardEnabled = true
+    @AppStorage("autoPasteEnabled") private var autoPaste = true
 
     var body: some View {
         Form {
             Section("Clipboard history") {
                 Toggle("Capture clipboard history", isOn: $clipboardEnabled)
                 LabeledContent("Open panel", value: "⌥⇧V")
+                Toggle("Paste automatically after selecting", isOn: $autoPaste)
+                    .onChange(of: autoPaste) {
+                        if autoPaste, !PasteService.isTrusted {
+                            PasteService.requestTrust()
+                        }
+                    }
+                Text("Auto-paste sends ⌘V to the active app and needs Accessibility permission (System Settings → Privacy & Security → Accessibility).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Text("Keeps the last 500 items locally. Entries marked confidential by password managers are never captured.")
                     .font(.caption)
                     .foregroundStyle(.secondary)

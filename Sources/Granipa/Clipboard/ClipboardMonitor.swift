@@ -101,6 +101,7 @@ final class ClipboardMonitor {
         let id = UUID().uuidString
         let url = dir.appendingPathComponent("\(id).png")
         guard (try? png.write(to: url)) != nil else { return }
+        ImageCache.writeThumbnail(forImageAt: url.path)
         let item = ClipboardItem(
             id: id,
             type: .image,
@@ -117,6 +118,7 @@ final class ClipboardMonitor {
     private func removeFiles(_ paths: [String]) {
         for path in paths {
             try? FileManager.default.removeItem(atPath: path)
+            try? FileManager.default.removeItem(atPath: ImageCache.thumbnailPath(for: path))
         }
     }
 }

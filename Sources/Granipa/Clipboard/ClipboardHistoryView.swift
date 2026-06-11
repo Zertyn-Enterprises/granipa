@@ -6,9 +6,12 @@ struct ClipboardHistoryView: View {
     let onClose: () -> Void
 
     @State private var items: [ClipboardItem] = []
+    @State private var groups: [(day: Date, items: [ClipboardItem])] = []
     @State private var search = ""
     @State private var filter: ClipboardItemType?
     @State private var selectedID: String?
+    @State private var targetApp: String?
+    @State private var searchDebounce: Task<Void, Never>?
     @FocusState private var searchFocused: Bool
 
     private var selected: ClipboardItem? {
@@ -38,6 +41,11 @@ struct ClipboardHistoryView: View {
             reload()
             selectedID = items.first?.id
             searchFocused = true
+            // The panel is non-activating, so the frontmost app is the paste target.
+            let frontmost = NSWorkspace.shared.frontmostApplication
+            targetApp =
+                frontmost?.bundleIdentifier == Bundle.main.bundleIdentifier
+                ? nil : frontmost?.localizedName
         }
         .onExitCommand { onClose() }
     }
@@ -52,7 +60,14 @@ struct ClipboardHistoryView: View {
                 .font(.system(size: 15))
                 .foregroundStyle(Theme.textPrimary)
                 .focused($searchFocused)
-                .onChange(of: search) { reloadKeepingSelection() }
+                .onChange(of: search) {
+                    searchDebounce?.cancel()
+                    searchDebounce = Task {
+                        try? await Task.sleep(for: .milliseconds(120))
+                        guard !Task.isCancelled else { return }
+                        reloadKeepingSelection()
+                    }
+                }
                 .onKeyPress(.downArrow) {
                     moveSelection(1)
                     return .handled
@@ -80,20 +95,11 @@ struct ClipboardHistoryView: View {
         .padding(.vertical, 11)
     }
 
-    private var dayGroups: [(day: Date, items: [ClipboardItem])] {
-        let grouped = Dictionary(grouping: items) {
-            Calendar.current.startOfDay(for: $0.createdAt)
-        }
-        return grouped
-            .sorted { $0.key > $1.key }
-            .map { (day: $0.key, items: $0.value.sorted { $0.createdAt > $1.createdAt }) }
-    }
-
     private var list: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 1) {
-                    ForEach(dayGroups, id: \.day) { group in
+                    ForEach(groups, id: \.day) { group in
                         Text(Theme.dayHeader(group.day))
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(Theme.textTertiary)
@@ -103,8 +109,12 @@ struct ClipboardHistoryView: View {
                         ForEach(group.items) { item in
                             ClipboardRow(item: item, isSelected: item.id == (selected?.id))
                                 .id(item.id)
-                                .onTapGesture(count: 2) { copy(item) }
-                                .onTapGesture { selectedID = item.id }
+                                .onTapGesture {
+                                    selectedID = item.id
+                                    if NSApp.currentEvent?.clickCount == 2 {
+                                        copy(item)
+                                    }
+                                }
                                 .contextMenu {
                                     Button("Copy") { copy(item) }
                                     Button("Delete", role: .destructive) { delete(item) }
@@ -133,8 +143,8 @@ struct ClipboardHistoryView: View {
         VStack(alignment: .leading, spacing: 0) {
             Group {
                 if let item = selected {
-                    if item.type == .image, let path = item.imagePath,
-                        let image = NSImage(contentsOfFile: path)
+                    if item.type == .image,
+                        let image = ImageCache.shared.preview(for: item)
                     {
                         Image(nsImage: image)
                             .resizable()
@@ -210,7 +220,7 @@ struct ClipboardHistoryView: View {
                 .font(.system(size: 12.5, weight: .medium))
                 .foregroundStyle(Theme.textSecondary)
             Spacer()
-            Text("Copy")
+            Text(autoPasteEnabled ? (targetApp.map { "Paste to \($0)" } ?? "Paste") : "Copy")
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.textSecondary)
             Text("⏎")
@@ -235,9 +245,19 @@ struct ClipboardHistoryView: View {
 
     // MARK: - Actions
 
+    private var autoPasteEnabled: Bool {
+        UserDefaults.standard.object(forKey: "autoPasteEnabled") as? Bool ?? true
+    }
+
     private func reload() {
         guard let db = app.database else { return }
         items = (try? db.fetchClipboardItems(search: search, type: filter)) ?? []
+        let grouped = Dictionary(grouping: items) {
+            Calendar.current.startOfDay(for: $0.createdAt)
+        }
+        groups = grouped
+            .sorted { $0.key > $1.key }
+            .map { (day: $0.key, items: $0.value.sorted { $0.createdAt > $1.createdAt }) }
     }
 
     private func reloadKeepingSelection() {
@@ -270,8 +290,22 @@ struct ClipboardHistoryView: View {
         case .text, .link:
             pasteboard.setString(item.textContent ?? "", forType: .string)
         }
-        ToastController.shared.show("Copied to clipboard")
         onClose()
+
+        if autoPasteEnabled {
+            let appName = targetApp
+            Task { @MainActor in
+                // Give the panel a beat to order out so key events land in the target app.
+                try? await Task.sleep(for: .milliseconds(140))
+                if PasteService.pasteToFrontmostApp() {
+                    ToastController.shared.show(appName.map { "Pasted to \($0)" } ?? "Pasted")
+                } else {
+                    ToastController.shared.show("Copied — grant Accessibility to auto-paste")
+                }
+            }
+        } else {
+            ToastController.shared.show("Copied to clipboard")
+        }
     }
 
     private func delete(_ item: ClipboardItem) {
@@ -305,6 +339,10 @@ private struct ClipboardRow: View {
         }
     }
 
+    private var thumbnail: NSImage? {
+        item.type == .image ? ImageCache.shared.thumbnail(for: item) : nil
+    }
+
     private var title: String {
         switch item.type {
         case .image:
@@ -324,9 +362,7 @@ private struct ClipboardRow: View {
 
     var body: some View {
         HStack(spacing: 9) {
-            if item.type == .image, let path = item.imagePath,
-                let image = NSImage(contentsOfFile: path)
-            {
+            if let image = thumbnail {
                 Image(nsImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
