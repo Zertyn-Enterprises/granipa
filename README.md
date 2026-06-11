@@ -144,6 +144,7 @@ Architecture notes for contributors (and AI agents) live in [CLAUDE.md](CLAUDE.m
 - **Ask your notes** — chat with one meeting or your whole archive, answered by your local AI CLI.
 - **⌥Space command palette** — meetings, clipboard, snippets and actions in one launcher.
 - Configurable shortcuts · light mode · audio language ID for any-language detection.
+- **Windows support** — [vote and discuss here](../../issues/11).
 
 ## FAQ
 
