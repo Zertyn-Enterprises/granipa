@@ -52,18 +52,17 @@ struct EnhancedNotesView: View {
 
     private func content(for meeting: Meeting) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 24) {
                 if let summary = meeting.summary, !summary.isEmpty {
-                    HStack(alignment: .top, spacing: 12) {
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(Theme.accent)
-                            .frame(width: 3)
+                    VStack(alignment: .leading, spacing: 16) {
                         MarkdownText(markdown: summary)
-                            .font(.system(size: 14.5))
-                            .lineSpacing(3)
+                            .font(.system(size: 14))
+                            .lineSpacing(5)
                             .foregroundStyle(Theme.textSecondary)
+                        Rectangle()
+                            .fill(Theme.border)
+                            .frame(height: 1)
                     }
-                    .fixedSize(horizontal: false, vertical: true)
                 }
 
                 if let notes = meeting.enhancedNotesMarkdown {
@@ -117,8 +116,8 @@ struct EnhancedNotesView: View {
                 .padding(.top, 10)
             }
             .frame(maxWidth: 720, alignment: .leading)
-            .padding(.horizontal, 28)
-            .padding(.vertical, 22)
+            .padding(.horizontal, 32)
+            .padding(.vertical, 26)
         }
     }
 
