@@ -150,6 +150,8 @@ Everything lives in `~/Library/Application Support/Granipa/`. Delete that folder
 - [AudioCap](https://github.com/insidegui/AudioCap) and Apple's Core Audio taps sample — reference for system-audio capture.
 - [Granola](https://granola.ai), [Raycast](https://raycast.com), and [Rectangle](https://rectangleapp.com) — the inspiration. Go pay them if you want a polished, supported product; build this if you want it local and yours.
 
+Granola, Raycast, Rectangle, TextSniper and all other product names mentioned are trademarks of their respective owners. Grañipa is an independent project, not affiliated with or endorsed by any of them.
+
 ## License
 
 [MIT](LICENSE)
