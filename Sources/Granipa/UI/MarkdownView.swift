@@ -61,7 +61,7 @@ struct MarkdownBlocksView: View {
     let markdown: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 11) {
             ForEach(Array(MarkdownParser.parse(markdown).enumerated()), id: \.offset) { _, block in
                 blockView(block)
             }
@@ -76,30 +76,33 @@ struct MarkdownBlocksView: View {
             inline(text)
                 .font(headingFont(level))
                 .foregroundStyle(Theme.textPrimary)
-                .padding(.top, level <= 2 ? 8 : 4)
+                .padding(.top, level <= 2 ? 16 : 8)
         case .bullet(let indent, let text):
-            HStack(alignment: .firstTextBaseline, spacing: 7) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(indent == 0 ? "•" : "◦")
-                    .font(.system(size: 14))
+                    .font(.system(size: 15))
                     .foregroundStyle(Theme.textTertiary)
                 inline(text)
-                    .font(.system(size: 14))
+                    .font(.system(size: 14.5))
+                    .lineSpacing(4.5)
                     .foregroundStyle(Theme.textPrimary)
             }
-            .padding(.leading, CGFloat(indent) * 16)
+            .padding(.leading, CGFloat(indent) * 18)
         case .numbered(let indent, let marker, let text):
-            HStack(alignment: .firstTextBaseline, spacing: 7) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(marker)
-                    .font(.system(size: 13, weight: .medium).monospacedDigit())
+                    .font(.system(size: 13.5, weight: .medium).monospacedDigit())
                     .foregroundStyle(Theme.textTertiary)
                 inline(text)
-                    .font(.system(size: 14))
+                    .font(.system(size: 14.5))
+                    .lineSpacing(4.5)
                     .foregroundStyle(Theme.textPrimary)
             }
-            .padding(.leading, CGFloat(indent) * 16)
+            .padding(.leading, CGFloat(indent) * 18)
         case .paragraph(let text):
             inline(text)
-                .font(.system(size: 14))
+                .font(.system(size: 14.5))
+                .lineSpacing(4.5)
                 .foregroundStyle(Theme.textPrimary)
         }
     }
@@ -116,9 +119,9 @@ struct MarkdownBlocksView: View {
 
     private func headingFont(_ level: Int) -> Font {
         switch level {
-        case 1: return .system(size: 20, weight: .semibold, design: .serif)
-        case 2: return .system(size: 17, weight: .semibold, design: .serif)
-        default: return .system(size: 15, weight: .semibold)
+        case 1: return .system(size: 21, weight: .semibold, design: .serif)
+        case 2: return .system(size: 18, weight: .semibold, design: .serif)
+        default: return .system(size: 15.5, weight: .semibold)
         }
     }
 }
