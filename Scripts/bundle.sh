@@ -18,10 +18,15 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Granipa"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
-if ! codesign --force --sign "$SIGN_ID" "$APP" 2>/dev/null; then
+# Hardened runtime + entitlements: required for notarization, harmless in dev.
+# Secure timestamps need a real certificate, so ad-hoc skips them.
+sign_args=(--force --options runtime --entitlements Resources/Granipa.entitlements)
+if [ "$SIGN_ID" = "-" ]; then
+  codesign "${sign_args[@]}" --sign - "$APP"
+elif ! codesign "${sign_args[@]}" --timestamp --sign "$SIGN_ID" "$APP" 2>/dev/null; then
   echo "WARN: signing with '$SIGN_ID' failed (locked keychain?); using ad-hoc signature."
   echo "      Ad-hoc builds re-prompt for audio permissions after every rebuild."
-  codesign --force --sign - "$APP"
+  codesign "${sign_args[@]}" --sign - "$APP"
 fi
 
 echo "Built $APP"

@@ -44,6 +44,12 @@ No accounts. No cloud. No subscriptions. Your data never leaves your Mac unless 
 
 ## Install
 
+### Download (recommended)
+
+Grab the latest notarized build from [Releases](../../releases), unzip, and drag **Grañipa.app** to `/Applications`. Signed and notarized — no Gatekeeper warnings.
+
+### Build from source
+
 ```sh
 git clone https://github.com/YOUR_USER/granipa.git
 cd granipa
