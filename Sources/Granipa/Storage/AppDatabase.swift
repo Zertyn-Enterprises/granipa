@@ -96,7 +96,86 @@ struct AppDatabase: Sendable {
                 t.add(column: "folderID", .text).references("folder", onDelete: .setNull)
             }
         }
+        migrator.registerMigration("v5-clipboard") { db in
+            try db.create(table: "clipboardItem") { t in
+                t.primaryKey("id", .text)
+                t.column("type", .text).notNull()
+                t.column("textContent", .text)
+                t.column("imagePath", .text)
+                t.column("sourceApp", .text)
+                t.column("createdAt", .datetime).notNull().indexed()
+                t.column("sizeBytes", .integer)
+                t.column("width", .integer)
+                t.column("height", .integer)
+            }
+        }
         return migrator
+    }
+}
+
+extension AppDatabase {
+    func insertClipboardItem(_ item: ClipboardItem) throws {
+        try writer.write { db in try item.insert(db) }
+    }
+
+    func latestClipboardItem() throws -> ClipboardItem? {
+        try writer.read { db in
+            try ClipboardItem.order(Column("createdAt").desc).fetchOne(db)
+        }
+    }
+
+    func fetchClipboardItems(
+        search: String? = nil, type: ClipboardItemType? = nil, limit: Int = 300
+    ) throws -> [ClipboardItem] {
+        try writer.read { db in
+            var request = ClipboardItem.order(Column("createdAt").desc).limit(limit)
+            if let type {
+                request = request.filter(Column("type") == type.rawValue)
+            }
+            if let search, !search.isEmpty {
+                let escaped = search
+                    .replacingOccurrences(of: "\\", with: "\\\\")
+                    .replacingOccurrences(of: "%", with: "\\%")
+                    .replacingOccurrences(of: "_", with: "\\_")
+                request = request.filter(
+                    sql: "textContent LIKE ? ESCAPE '\\' COLLATE NOCASE",
+                    arguments: ["%\(escaped)%"])
+            }
+            return try request.fetchAll(db)
+        }
+    }
+
+    @discardableResult
+    func deleteClipboardItem(id: String) throws -> String? {
+        try writer.write { db in
+            let path = try ClipboardItem.fetchOne(db, key: id)?.imagePath
+            try ClipboardItem.deleteOne(db, key: id)
+            return path
+        }
+    }
+
+    func clearClipboardItems() throws -> [String] {
+        try writer.write { db in
+            let paths = try ClipboardItem
+                .filter(Column("imagePath") != nil)
+                .fetchAll(db)
+                .compactMap(\.imagePath)
+            try ClipboardItem.deleteAll(db)
+            return paths
+        }
+    }
+
+    func pruneClipboardItems(keep: Int = 500) throws -> [String] {
+        try writer.write { db in
+            let victims = try ClipboardItem
+                .order(Column("createdAt").desc)
+                .limit(10_000, offset: keep)
+                .fetchAll(db)
+            for victim in victims {
+                try victim.delete(db)
+            }
+            return victims.compactMap(\.imagePath)
+        }
     }
 }
 

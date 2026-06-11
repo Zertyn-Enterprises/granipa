@@ -13,6 +13,12 @@ enum AppPaths {
         return dir
     }
 
+    static func clipboardDirectory() throws -> URL {
+        let dir = try supportDirectory().appendingPathComponent("clipboard", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
     static func audioDirectory(meetingID: String) throws -> URL {
         let dir = try supportDirectory()
             .appendingPathComponent("audio", isDirectory: true)

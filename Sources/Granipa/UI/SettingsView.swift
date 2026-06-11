@@ -9,6 +9,8 @@ struct SettingsView: View {
                 .tabItem { Label("AI", systemImage: "wand.and.stars") }
             TemplateSettings()
                 .tabItem { Label("Templates", systemImage: "doc.text") }
+            ProductivitySettings()
+                .tabItem { Label("Productivity", systemImage: "doc.on.clipboard") }
             APISettings()
                 .tabItem { Label("API", systemImage: "network") }
             WebhookSettings()
@@ -86,6 +88,38 @@ private struct AISettings: View {
                         }
                     }
                 }
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+private struct ProductivitySettings: View {
+    @Environment(AppState.self) private var app
+    @AppStorage("clipboardHistoryEnabled") private var clipboardEnabled = true
+
+    var body: some View {
+        Form {
+            Section("Clipboard history") {
+                Toggle("Capture clipboard history", isOn: $clipboardEnabled)
+                LabeledContent("Open panel", value: "⌥⇧V")
+                Text("Keeps the last 500 items locally. Entries marked confidential by password managers are never captured.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Clear history", role: .destructive) {
+                    if let db = app.database {
+                        let paths = (try? db.clearClipboardItems()) ?? []
+                        for path in paths {
+                            try? FileManager.default.removeItem(atPath: path)
+                        }
+                    }
+                }
+            }
+            Section("Text capture (OCR)") {
+                LabeledContent("Capture screen text", value: "⌥⇧T")
+                Text("Select a screen region; recognized text (Spanish/English) is copied to the clipboard. Needs Screen Recording permission on first use.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

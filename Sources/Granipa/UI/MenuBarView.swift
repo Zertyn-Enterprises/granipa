@@ -24,6 +24,15 @@ struct MenuBarView: View {
             NSApp.activate(ignoringOtherApps: true)
         }
         Divider()
+        Button("Clipboard History") {
+            ClipboardPanelController.shared.toggle()
+        }
+        .keyboardShortcut("v", modifiers: [.option, .shift])
+        Button("Capture Text (OCR)") {
+            Task { await OCRService.captureAndCopy() }
+        }
+        .keyboardShortcut("t", modifiers: [.option, .shift])
+        Divider()
         Button("Quit Grañipa") {
             NSApp.terminate(nil)
         }

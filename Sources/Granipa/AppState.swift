@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import Foundation
 import Observation
 
@@ -11,6 +12,7 @@ final class AppState {
     let detector = MeetingDetector()
     private let apiServer = APIServer()
     private var webhookLoop: Task<Void, Never>?
+    private var clipboardMonitor: ClipboardMonitor?
     private(set) var transcription: TranscriptionCoordinator?
     private(set) var enhancingMeetingIDs: Set<String> = []
     var meetings: [Meeting] = []
@@ -46,6 +48,30 @@ final class AppState {
         }
         calendar.start()
         setupDetection()
+        setupProductivity()
+    }
+
+    private func setupProductivity() {
+        if let db = database {
+            let monitor = ClipboardMonitor(database: db)
+            monitor.start()
+            clipboardMonitor = monitor
+        }
+        ClipboardPanelController.shared.configure(appState: self)
+        HotkeyManager.shared.register(
+            id: 1,
+            keyCode: UInt32(kVK_ANSI_V),
+            modifiers: UInt32(optionKey | shiftKey)
+        ) {
+            ClipboardPanelController.shared.toggle()
+        }
+        HotkeyManager.shared.register(
+            id: 2,
+            keyCode: UInt32(kVK_ANSI_T),
+            modifiers: UInt32(optionKey | shiftKey)
+        ) {
+            Task { await OCRService.captureAndCopy() }
+        }
     }
 
     private func setupDetection() {
