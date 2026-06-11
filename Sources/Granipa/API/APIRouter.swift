@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 struct FolderInfoDTO: Encodable {
@@ -100,7 +101,13 @@ enum APIRouter {
             return .json(200, ["status": "ok"])
         }
 
-        let authorized = request.headers["authorization"] == "Bearer \(token)"
+        // Hash-then-compare makes the check constant-time in the token value.
+        let authorized = request.headers["authorization"].map { header in
+            guard header.hasPrefix("Bearer ") else { return false }
+            let provided = String(header.dropFirst("Bearer ".count))
+            return SHA256.hash(data: Data(provided.utf8))
+                == SHA256.hash(data: Data(token.utf8))
+        } ?? false
         guard authorized else {
             return .error(401, "Missing or invalid bearer token.")
         }
