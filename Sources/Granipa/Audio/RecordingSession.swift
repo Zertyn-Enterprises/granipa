@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreAudio
 import Synchronization
 
 // Mutable state is queue-confined: mic* fields are touched only from the mic tap
@@ -25,6 +26,7 @@ final class RecordingSession: @unchecked Sendable {
     private var systemFramesWritten: AVAudioFramePosition = 0
     private var sessionStartHostSeconds: Double = 0
     private(set) var systemAudioError: Error?
+    private var deviceChangeListener: AudioObjectPropertyListenerBlock?
 
     var micBufferCount: Int { micBuffers.withLock { $0 } }
     var systemBufferCount: Int { systemBuffers.withLock { $0 } }
@@ -57,6 +59,33 @@ final class RecordingSession: @unchecked Sendable {
         } catch {
             systemAudioError = error
         }
+        installDeviceChangeListener()
+    }
+
+    // Switching outputs mid-meeting (AirPods connecting, HDMI plugged in)
+    // invalidates the tap's aggregate; rebuild it on the new device.
+    private func installDeviceChangeListener() {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            self?.restartSystemTap()
+        }
+        deviceChangeListener = block
+        AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject), &address, DispatchQueue.main, block)
+    }
+
+    private func removeDeviceChangeListener() {
+        guard let block = deviceChangeListener else { return }
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        AudioObjectRemovePropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject), &address, DispatchQueue.main, block)
+        deviceChangeListener = nil
     }
 
     // A tap created before the system-audio TCC grant never delivers buffers;
@@ -85,6 +114,7 @@ final class RecordingSession: @unchecked Sendable {
     }
 
     func stop() {
+        removeDeviceChangeListener()
         mic.stop()
         tap.stop()
         micContinuation.finish()
