@@ -1,11 +1,13 @@
 import AVFoundation
 import CoreAudio
 import Synchronization
+import os
 
 // Mutable state is queue-confined: mic* fields are touched only from the mic tap
 // callback thread, system* fields only from the tap IO queue. start/stop run on
 // the main actor after callbacks have ceased.
 final class RecordingSession: @unchecked Sendable {
+    private static let log = Logger(subsystem: "com.zertyn.granipa", category: "session")
     let meetingID: String
     let micURL: URL
     let systemURL: URL
@@ -92,6 +94,7 @@ final class RecordingSession: @unchecked Sendable {
     // tearing it down and recreating it picks the grant up without touching the
     // mic. Timing stays correct: gaps are padded with silence on the next buffer.
     func restartSystemTap() {
+        Self.log.info("restarting system tap (buffers so far: \(self.systemBufferCount))")
         tap.stop()
         do {
             try tap.start { [weak self] buffer, timestamp in
@@ -124,7 +127,13 @@ final class RecordingSession: @unchecked Sendable {
     }
 
     private func handleMic(_ buffer: AVAudioPCMBuffer) {
-        micBuffers.withLock { $0 += 1 }
+        let count = micBuffers.withLock { count in
+            count += 1
+            return count
+        }
+        if count == 1 {
+            Self.log.info("first mic buffer: \(buffer.format.sampleRate)Hz")
+        }
         if micFile == nil {
             micFile = try? AVAudioFile(
                 forWriting: micURL,
@@ -140,7 +149,13 @@ final class RecordingSession: @unchecked Sendable {
     }
 
     private func handleSystem(_ buffer: AVAudioPCMBuffer, timestamp: AudioTimeStamp) {
-        systemBuffers.withLock { $0 += 1 }
+        let count = systemBuffers.withLock { count in
+            count += 1
+            return count
+        }
+        if count == 1 {
+            Self.log.info("first system buffer: \(buffer.format.sampleRate)Hz")
+        }
         let sampleRate = buffer.format.sampleRate
         if systemFile == nil {
             systemFile = try? AVAudioFile(

@@ -149,7 +149,7 @@ Architecture notes for contributors (and AI agents) live in [CLAUDE.md](CLAUDE.m
 ## FAQ
 
 **The transcript stays empty, or only my voice is transcribed.**
-Grant *System Audio Recording* (System Settings → Privacy & Security → Screen & System Audio Recording), then stop and start a **new** recording. System audio only flows while the meeting app is actually playing sound. If you build from source with ad-hoc signing, macOS forgets permissions on every rebuild — use a real certificate.
+Grant *System Audio Recording* (System Settings → Privacy & Security → Screen & System Audio Recording), then stop and start a **new** recording. If you granted it long ago and it silently stopped working (e.g. after switching from ad-hoc to certificate signing), reset it: `tccutil reset AudioCapture com.zertyn.granipa` and record again. System audio only flows while the meeting app is actually playing sound. If you build from source with ad-hoc signing, macOS forgets permissions on every rebuild — use a real certificate.
 
 **"Enhancement failed" after a meeting.**
 The selected AI CLI isn't installed or isn't logged in. Run it once in a terminal (e.g. `claude`) and complete its login, then check Settings → AI shows it as detected.
