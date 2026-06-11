@@ -11,7 +11,7 @@ import Testing
 
     @Test func folderAssignmentAndCounts() throws {
         let db = try makeDatabase()
-        let folder = Folder.new(name: "Phone Farm", team: "Zertyn HQ")
+        let folder = Folder.new(name: "Engineering", team: "Acme HQ")
         try db.save(folder)
 
         var meeting = Meeting.new(title: "Sync", language: "auto")
@@ -38,7 +38,7 @@ import Testing
 
     @Test func apiExposesFoldersAndFilters() throws {
         let db = try makeDatabase()
-        let folder = Folder.new(name: "Carbon", team: "Zertyn HQ")
+        let folder = Folder.new(name: "Carbon", team: "Acme HQ")
         try db.save(folder)
         var inFolder = Meeting.new(title: "Carbon sync", language: "auto")
         inFolder.folderID = folder.id
@@ -57,7 +57,7 @@ import Testing
         #expect(folders.status == 200)
         let foldersBody = String(decoding: folders.body, as: UTF8.self)
         #expect(foldersBody.contains("\"name\":\"Carbon\""))
-        #expect(foldersBody.contains("\"team\":\"Zertyn HQ\""))
+        #expect(foldersBody.contains("\"team\":\"Acme HQ\""))
         #expect(foldersBody.contains("\"meetingCount\":1"))
 
         let filtered = get("/v1/meetings", query: ["folder": folder.id])
@@ -68,6 +68,6 @@ import Testing
         let detail = get("/v1/meetings/\(inFolder.id)")
         let detailBody = String(decoding: detail.body, as: UTF8.self)
         #expect(detailBody.contains("\"folder\":{"))
-        #expect(detailBody.contains("\"team\":\"Zertyn HQ\""))
+        #expect(detailBody.contains("\"team\":\"Acme HQ\""))
     }
 }

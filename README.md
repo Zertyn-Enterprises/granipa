@@ -1,74 +1,81 @@
 # Grañipa
 
-A native macOS meeting notes app — a personal, self-hosted replacement for Granola.
-Records your meetings (mic + system audio, no bot joins the call), transcribes them
-live on-device, identifies who said what, enhances your rough notes with AI, and
-pushes everything to your own services.
+**A free, open-source, fully local meeting notes app for macOS — plus the productivity tools you keep paying subscriptions for.**
 
-Everything runs locally and free:
+Grañipa records your meetings (no bot joins the call), transcribes them live on-device, figures out who said what, turns your rough notes into polished ones with AI, and pushes everything to your own services — while also replacing your clipboard manager, OCR tool, and window manager.
 
-- **Transcription**: Apple SpeechAnalyzer (macOS 26, on-device, English & Spanish).
-- **Speaker diarization**: FluidAudio CoreML models, local (optional, see below).
-- **AI notes**: your existing CLI subscriptions (`claude`, `codex`, `gemini`, `grok`) —
-  no API keys, no per-token billing.
+No accounts. No cloud. No subscriptions. Your data never leaves your Mac unless *you* send it somewhere.
+
+> Built as a personal replacement for Granola ($14/month), Raycast clipboard history, TextSniper, and Rectangle — in one native app.
+
+## Features
+
+### 🎙 Meetings
+- **Bot-free recording** — captures your mic and the system audio (other participants) as two clean channels via a Core Audio process tap. Works with Zoom, Meet, Teams, Webex, anything that plays audio.
+- **Live on-device transcription** — Apple SpeechAnalyzer (macOS 26), streaming word-by-word. Free and offline.
+- **Automatic language detection** — runs English and Spanish models in parallel for the first seconds and keeps the winner.
+- **Speaker diarization** — splits remote participants into Speaker 1/2/3 locally (CoreML), then infers their real names from conversation context.
+- **AI-enhanced notes** — your rough notes + the transcript become structured notes, a summary, action items, and a ready-to-send follow-up email. Auto-titles the meeting.
+- **Bring your own AI subscription** — shells out to the `claude`, `codex`, `gemini`, or `grok` CLI you already pay for. **No API keys, no per-token billing.**
+- **Templates** — per-meeting-type prompts (1:1, standup, sales call…), fully editable.
+- **Folders & teams** — organize meetings Granola-style; structure is exposed through the API.
+- **Calendar integration** — upcoming meetings in the app (via macOS Calendar), one-click record, auto-titling from the event.
+- **Auto-detection** — notices when a meeting app starts using the mic and offers to record; can auto-stop when the call ends.
+- **Search** — full-text across titles, notes, and transcripts.
+
+### 🧰 Productivity
+- **Clipboard history** (`⌥⇧V`) — Raycast-style floating panel: search, type filters, image previews, source app, auto-paste into the active app. Respects password-manager confidentiality markers. 100% local.
+- **Screen text capture / OCR** (`⌥⇧T`) — select any screen region, the text lands in your clipboard (Vision framework, Spanish + English).
+- **Window management** (`⌃⌥` + arrows/letters) — Rectangle-compatible shortcuts: halves, quarters, thirds, maximize, center, restore.
+
+### 🔌 Integrations
+- **Local REST API** — `127.0.0.1:7799`, bearer-token auth: meetings, transcripts, notes, folders, trigger enhancement.
+- **Webhooks** — HMAC-SHA256-signed POSTs on `meeting.started`, `meeting.completed` (full transcript included), `notes.enhanced`, with retry + backoff.
 
 ## Requirements
 
-- macOS 26+ (Apple Silicon), Xcode 26 toolchain to build.
-- At least one of the LLM CLIs installed and logged in: `claude`, `codex`, `gemini`, `grok`.
+- **macOS 26+** on Apple Silicon.
+- Xcode 26 toolchain (to build).
+- At least one AI CLI installed and logged in: [Claude Code](https://docs.anthropic.com/claude-code), OpenAI Codex, Gemini CLI, or Grok — only needed for note enhancement; recording and transcription work without any.
 
-## Build & run
+## Install
 
 ```sh
-./Scripts/bundle.sh            # debug build -> build/Grañipa.app
-./Scripts/bundle.sh release    # optimized build
+git clone https://github.com/YOUR_USER/granipa.git
+cd granipa
+./Scripts/bundle.sh release
 open "build/Grañipa.app"
 ```
 
-Signing: the script picks your first Apple Development certificate automatically
-(set `CODESIGN_ID` to override). If the keychain blocks signing it falls back to
-ad-hoc — that works, but macOS forgets the audio permissions on every rebuild,
-so approving codesign keychain access once is worth it.
+The bundle script signs with your first Apple Development certificate if you have one (set `CODESIGN_ID` to override), falling back to ad-hoc signing. A real certificate is strongly recommended — with ad-hoc signing, macOS forgets the app's permissions on every rebuild.
 
 ### First-run permissions
 
-macOS will prompt for, in roughly this order:
+| Prompt | Why | When |
+|---|---|---|
+| Microphone | Your side of the conversation | First recording |
+| System Audio Recording | The other participants | First recording |
+| Calendars | Upcoming meetings in the sidebar | Launch |
+| Notifications | "Meeting detected — record?" | Launch |
+| Screen Recording | OCR capture (`⌥⇧T`) | First OCR |
+| Accessibility | Auto-paste + window snapping | First use |
 
-1. **Microphone** — your channel ("Me").
-2. **System Audio Recording** — the other participants ("Them"). Appears the
-   first time you start a recording; check *System Settings → Privacy & Security →
-   Screen & System Audio Recording* if you miss it. If denied, recordings are
-   silently mic-only.
-3. **Calendars** — upcoming meetings in the sidebar (works with Google accounts
-   already added to macOS Calendar).
-4. **Notifications** — "meeting detected, record?" prompts.
-5. On the first recording per language, the speech model downloads once.
-
-## Enabling speaker diarization
-
-Diarization (Speaker 1/2/3 + AI name inference) needs the FluidAudio package.
-Uncomment the two lines referenced in `Package.swift` (dependency + product),
-then `swift build` — first run downloads ~130 MB of CoreML models from
-HuggingFace, after which it is fully offline. Without it the app still works,
-labeling remote speech as "Them".
+On the first recording per language, macOS downloads the speech model once. On the first multi-speaker meeting, the diarization models (~130 MB) download once from HuggingFace; everything runs offline afterwards.
 
 ## REST API
 
-Local-only server on `127.0.0.1:7799` (configurable in Settings → API, where the
-bearer token lives):
+Settings → API holds the bearer token.
 
 ```sh
-TOKEN=...   # Settings -> API -> Copy
+TOKEN=...
 curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:7799/v1/meetings
 curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:7799/v1/meetings/<id>/transcript
+curl -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:7799/v1/meetings?folder=<folderId>"
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:7799/v1/folders
 curl -X POST -H "Authorization: Bearer $TOKEN" http://127.0.0.1:7799/v1/meetings/<id>/enhance
 ```
 
-## Webhooks
-
-Settings → Webhooks. Events: `meeting.started`, `meeting.completed` (includes the
-full transcript), `notes.enhanced`. Deliveries retry with backoff (5 attempts).
-Each POST is signed; verify like GitHub-style HMAC:
+Webhook payloads are signed; verify like GitHub webhooks:
 
 ```python
 import hmac, hashlib
@@ -76,11 +83,29 @@ expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest
 valid = hmac.compare_digest(expected, request.headers["X-Granipa-Signature"])
 ```
 
+## Privacy
+
+- Audio, transcripts, notes, and clipboard history live in `~/Library/Application Support/Granipa/` (SQLite + files). Delete the folder, everything is gone.
+- The **only** data that leaves your Mac: transcripts sent to the AI CLI *you* configured when enhancement runs, and webhook payloads to URLs *you* added.
+- No telemetry, no analytics, no accounts, no auto-updates.
+
 ## Development
 
 ```sh
-swift build    # compile
-swift test     # unit + integration tests
+swift build        # compile
+swift test         # 57 tests: storage, API, webhooks, language detection, window math…
+./Scripts/bundle.sh  # debug .app bundle
 ```
 
-Data lives in `~/Library/Application Support/Granipa/` (SQLite + per-meeting audio).
+Architecture notes for contributors (and AI agents) live in [CLAUDE.md](CLAUDE.md). PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Acknowledgments
+
+- [GRDB.swift](https://github.com/groue/GRDB.swift) (MIT) — storage.
+- [FluidAudio](https://github.com/FluidInference/FluidAudio) (Apache-2.0) — speaker diarization. Its CoreML models are derived from [pyannote](https://github.com/pyannote/pyannote-audio) and licensed CC-BY-4.0.
+- [AudioCap](https://github.com/insidegui/AudioCap) and Apple's Core Audio taps sample — reference for system-audio capture.
+- [Granola](https://granola.ai), [Raycast](https://raycast.com), and [Rectangle](https://rectangleapp.com) — the inspiration. Go pay them if you want a polished, supported product; build this if you want it local and yours.
+
+## License
+
+[MIT](LICENSE)
