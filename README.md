@@ -129,6 +129,20 @@ swift test         # 57 tests: storage, API, webhooks, language detection, windo
 
 Architecture notes for contributors (and AI agents) live in [CLAUDE.md](CLAUDE.md). PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## FAQ
+
+**The transcript stays empty, or only my voice is transcribed.**
+Grant *System Audio Recording* (System Settings → Privacy & Security → Screen & System Audio Recording), then stop and start a **new** recording. System audio only flows while the meeting app is actually playing sound. If you build from source with ad-hoc signing, macOS forgets permissions on every rebuild — use a real certificate.
+
+**"Enhancement failed" after a meeting.**
+The selected AI CLI isn't installed or isn't logged in. Run it once in a terminal (e.g. `claude`) and complete its login, then check Settings → AI shows it as detected.
+
+**The window-snapping or clipboard shortcuts don't work.**
+Another app owns those hotkeys — quit Rectangle (same ⌃⌥ scheme) or check Raycast's custom hotkeys, then relaunch Grañipa. Auto-paste and window snapping also need the Accessibility permission.
+
+**Where is my data? How do I delete it?**
+Everything lives in `~/Library/Application Support/Granipa/`. Delete that folder and it is all gone.
+
 ## Acknowledgments
 
 - [GRDB.swift](https://github.com/groue/GRDB.swift) (MIT) — storage.

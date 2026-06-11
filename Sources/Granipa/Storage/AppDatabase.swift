@@ -336,6 +336,14 @@ extension AppDatabase {
         try writer.write { db in try segment.save(db) }
     }
 
+    func renameSpeaker(meetingID: String, from oldName: String, to newName: String) throws {
+        try writer.write { db in
+            try db.execute(
+                sql: "UPDATE transcriptSegment SET speaker = ? WHERE meetingID = ? AND speaker = ?",
+                arguments: [newName, meetingID, oldName])
+        }
+    }
+
     func replaceSegments(meetingID: String, channel: AudioChannel, with segments: [TranscriptSegment]) throws {
         try writer.write { db in
             try TranscriptSegment

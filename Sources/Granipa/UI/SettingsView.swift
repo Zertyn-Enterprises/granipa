@@ -258,6 +258,7 @@ private struct ProductivitySettings: View {
 
 private struct WindowSettings: View {
     @AppStorage("windowSnappingEnabled") private var snapping = true
+    @State private var conflictingApp: String?
 
     var body: some View {
         Form {
@@ -265,6 +266,13 @@ private struct WindowSettings: View {
             Text("Uses the same Accessibility permission as auto-paste. All shortcuts are Control + Option.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if let conflictingApp {
+                Label(
+                    "\(conflictingApp) is running and owns these same shortcuts. Quit it (and remove it from Login Items), then relaunch Grañipa.",
+                    systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
             Section("Halves & maximize") {
                 LabeledContent("Left / Right half", value: "⌃⌥←  ⌃⌥→")
                 LabeledContent("Top / Bottom half", value: "⌃⌥↑  ⌃⌥↓")
@@ -281,6 +289,16 @@ private struct WindowSettings: View {
             }
         }
         .formStyle(.grouped)
+        .onAppear {
+            let knownConflicts = [
+                "com.knollsoft.Rectangle": "Rectangle",
+                "com.knollsoft.Hookshot": "Rectangle Pro",
+                "com.divisiblebyzero.Spectacle": "Spectacle",
+            ]
+            conflictingApp = NSWorkspace.shared.runningApplications
+                .compactMap { $0.bundleIdentifier.flatMap { knownConflicts[$0] } }
+                .first
+        }
     }
 }
 

@@ -242,6 +242,17 @@ private struct HomeMeetingRow: View {
                     }
                 }
             }
+            Button("Export as Markdown…") {
+                if let db = app.database {
+                    MeetingExporter.exportViaSavePanel(
+                        meeting: meeting, database: db, folder: folder)
+                }
+            }
+            Button("Copy transcript") {
+                if let db = app.database {
+                    MeetingExporter.copyTranscript(meeting: meeting, database: db)
+                }
+            }
             Button("Delete", role: .destructive) {
                 app.deleteMeeting(id: meeting.id)
             }

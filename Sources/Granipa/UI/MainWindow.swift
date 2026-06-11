@@ -4,6 +4,8 @@ struct MainWindow: View {
     @Environment(AppState.self) private var app
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
+    @AppStorage("onboardingCompleted") private var onboardingCompleted = false
+    @State private var showOnboarding = false
 
     var body: some View {
         @Bindable var app = app
@@ -48,6 +50,16 @@ struct MainWindow: View {
             Button("OK") { app.loadError = nil }
         } message: {
             Text(app.loadError ?? "")
+        }
+        .onAppear {
+            if !onboardingCompleted {
+                showOnboarding = true
+            }
+        }
+        .sheet(isPresented: $showOnboarding, onDismiss: { onboardingCompleted = true }) {
+            OnboardingView {
+                showOnboarding = false
+            }
         }
     }
 

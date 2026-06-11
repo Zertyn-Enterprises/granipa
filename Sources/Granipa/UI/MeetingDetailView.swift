@@ -6,6 +6,8 @@ struct MeetingDetailView: View {
     @State private var tab: Tab = .notes
     @State private var segments: [TranscriptSegment] = []
     @State private var saveTask: Task<Void, Never>?
+    @State private var renamingSpeaker: String?
+    @State private var renameSpeakerTo = ""
 
     enum Tab: String, CaseIterable {
         case notes = "Notes"
@@ -31,6 +33,22 @@ struct MeetingDetailView: View {
             }
         }
         .task { loadSegments() }
+        .alert("Rename speaker", isPresented: .constant(renamingSpeaker != nil)) {
+            TextField("Name", text: $renameSpeakerTo)
+            Button("Rename") {
+                if let from = renamingSpeaker, let db = app.database {
+                    let to = renameSpeakerTo.trimmingCharacters(in: .whitespaces)
+                    if !to.isEmpty, to != from {
+                        try? db.renameSpeaker(meetingID: meeting.id, from: from, to: to)
+                        loadSegments()
+                    }
+                }
+                renamingSpeaker = nil
+            }
+            Button("Cancel", role: .cancel) { renamingSpeaker = nil }
+        } message: {
+            Text("Applies to every line by this speaker in the meeting.")
+        }
     }
 
     // MARK: - Header
@@ -67,6 +85,7 @@ struct MeetingDetailView: View {
 
                 folderMenu
                 templateMenu
+                actionsMenu
             }
 
             TextField("Title", text: $meeting.title)
@@ -124,6 +143,28 @@ struct MeetingDetailView: View {
                 app.templates.first { $0.id == meeting.templateID }?.name ?? "Template",
                 systemImage: "doc.text")
                 .font(.system(size: 12))
+                .foregroundStyle(Theme.textSecondary)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+    }
+
+    private var actionsMenu: some View {
+        Menu {
+            Button("Export as Markdown…") {
+                if let db = app.database {
+                    MeetingExporter.exportViaSavePanel(
+                        meeting: meeting, database: db,
+                        folder: app.folders.first { $0.id == meeting.folderID })
+                }
+            }
+            Button("Copy transcript") {
+                if let db = app.database {
+                    MeetingExporter.copyTranscript(meeting: meeting, database: db)
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
                 .foregroundStyle(Theme.textSecondary)
         }
         .menuStyle(.borderlessButton)
@@ -209,6 +250,14 @@ struct MeetingDetailView: View {
                             ForEach(shown) { segment in
                                 SegmentRow(segment: segment)
                                     .id(segment.id)
+                                    .contextMenu {
+                                        if live == nil {
+                                            Button("Rename \"\(segment.speaker)\"…") {
+                                                renameSpeakerTo = segment.speaker
+                                                renamingSpeaker = segment.speaker
+                                            }
+                                        }
+                                    }
                             }
                             if let live {
                                 if !live.volatileMic.isEmpty {
