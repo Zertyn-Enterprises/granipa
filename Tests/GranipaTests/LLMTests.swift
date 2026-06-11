@@ -107,7 +107,8 @@ import Testing
             notes: "- my note",
             transcript: "[0:01] Me: hola")
         #expect(prompt.contains("- my note"))
-        #expect(prompt.contains("Key points"))
+        #expect(prompt.contains("Open questions"))
+        #expect(prompt.contains("Zero duplication"))
         #expect(prompt.contains("[0:01] Me: hola"))
         #expect(prompt.contains("email_draft"))
     }
