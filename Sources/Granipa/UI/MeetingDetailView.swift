@@ -50,13 +50,24 @@ struct MeetingDetailView: View {
                 .labelsHidden()
                 .frame(maxWidth: 320)
                 Spacer()
+                Picker(selection: $meeting.folderID) {
+                    Text("No folder").tag(String?.none)
+                    ForEach(app.folders) { folder in
+                        Text(folder.team.map { "\($0) / \(folder.name)" } ?? folder.name)
+                            .tag(Optional(folder.id))
+                    }
+                } label: {
+                    Image(systemName: "folder")
+                }
+                .frame(maxWidth: 180)
+                .onChange(of: meeting.folderID) { scheduleSave() }
                 Picker("Template", selection: $meeting.templateID) {
                     Text("Default").tag(String?.none)
                     ForEach(app.templates) { template in
                         Text(template.name).tag(Optional(template.id))
                     }
                 }
-                .frame(maxWidth: 200)
+                .frame(maxWidth: 180)
                 .onChange(of: meeting.templateID) { scheduleSave() }
             }
         }
@@ -109,6 +120,13 @@ struct MeetingDetailView: View {
                     .onChange(of: shown.count) {
                         if let last = shown.last {
                             proxy.scrollTo(last.id, anchor: .bottom)
+                        }
+                    }
+                    .onChange(of: (live?.volatileMic ?? "") + "|" + (live?.volatileSystem ?? "")) {
+                        if live?.volatileSystem.isEmpty == false {
+                            proxy.scrollTo("volatile-system", anchor: .bottom)
+                        } else if live?.volatileMic.isEmpty == false {
+                            proxy.scrollTo("volatile-mic", anchor: .bottom)
                         }
                     }
                 }

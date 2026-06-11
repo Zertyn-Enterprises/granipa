@@ -23,7 +23,7 @@ func transcribeChannel(
     let transcriber = SpeechTranscriber(
         locale: locale,
         transcriptionOptions: [],
-        reportingOptions: [.volatileResults],
+        reportingOptions: [.volatileResults, .fastResults],
         attributeOptions: [.audioTimeRange, .transcriptionConfidence])
     let analyzer = SpeechAnalyzer(modules: [transcriber])
 

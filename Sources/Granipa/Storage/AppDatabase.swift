@@ -85,7 +85,47 @@ struct AppDatabase: Sendable {
                 t.column("status", .text).notNull()
             }
         }
+        migrator.registerMigration("v4-folders") { db in
+            try db.create(table: "folder") { t in
+                t.primaryKey("id", .text)
+                t.column("name", .text).notNull()
+                t.column("team", .text)
+                t.column("position", .integer).notNull().defaults(to: 0)
+            }
+            try db.alter(table: "meeting") { t in
+                t.add(column: "folderID", .text).references("folder", onDelete: .setNull)
+            }
+        }
         return migrator
+    }
+}
+
+extension AppDatabase {
+    func fetchFolders() throws -> [Folder] {
+        try writer.read { db in
+            try Folder.order(Column("team"), Column("position"), Column("name")).fetchAll(db)
+        }
+    }
+
+    func save(_ folder: Folder) throws {
+        try writer.write { db in try folder.save(db) }
+    }
+
+    func deleteFolder(id: String) throws {
+        _ = try writer.write { db in try Folder.deleteOne(db, key: id) }
+    }
+
+    func folderMeetingCounts() throws -> [String: Int] {
+        try writer.read { db in
+            let rows = try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT folderID, COUNT(*) AS count FROM meeting
+                    WHERE folderID IS NOT NULL GROUP BY folderID
+                    """)
+            return Dictionary(
+                uniqueKeysWithValues: rows.map { ($0["folderID"] as String, $0["count"] as Int) })
+        }
     }
 }
 

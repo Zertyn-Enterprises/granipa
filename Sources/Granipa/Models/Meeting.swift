@@ -24,6 +24,7 @@ struct Meeting: Codable, Identifiable, Hashable, Sendable, FetchableRecord, Pers
     var calendarEventID: String?
     var audioMicPath: String?
     var audioSystemPath: String?
+    var folderID: String?
 
     static func new(title: String, language: String) -> Meeting {
         Meeting(
@@ -42,7 +43,8 @@ struct Meeting: Codable, Identifiable, Hashable, Sendable, FetchableRecord, Pers
             templateID: nil,
             calendarEventID: nil,
             audioMicPath: nil,
-            audioSystemPath: nil
+            audioSystemPath: nil,
+            folderID: nil
         )
     }
 }

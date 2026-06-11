@@ -16,6 +16,8 @@ final class AppState {
     var meetings: [Meeting] = []
     var templates: [MeetingTemplate] = []
     var webhooks: [Webhook] = []
+    var folders: [Folder] = []
+    var selectedFolderID: String?
     var selectedMeetingID: String?
     var loadError: String?
 
@@ -36,6 +38,7 @@ final class AppState {
             }
             templates = try db.fetchTemplates()
             webhooks = try db.fetchWebhooks()
+            folders = try db.fetchFolders()
             startServices(database: db)
         } catch {
             loadError = error.localizedDescription
@@ -133,6 +136,7 @@ final class AppState {
         let language = UserDefaults.standard.string(forKey: "defaultLocale") ?? "auto"
         var meeting = Meeting.new(title: title, language: language)
         meeting.calendarEventID = calendarEventID
+        meeting.folderID = selectedFolderID
         do {
             try db.save(meeting)
             meetings.insert(meeting, at: 0)
@@ -192,7 +196,9 @@ final class AppState {
             if let db = database {
                 WebhookService.enqueue(
                     event: .meetingStarted,
-                    payload: MeetingStartedPayload(timestamp: .now, meeting: MeetingSummaryDTO(meeting)),
+                    payload: MeetingStartedPayload(
+                        timestamp: .now,
+                        meeting: MeetingSummaryDTO(meeting, folder: folder(for: meeting))),
                     database: db)
             }
         } catch {
@@ -249,7 +255,7 @@ final class AppState {
                 event: .meetingCompleted,
                 payload: MeetingCompletedPayload(
                     timestamp: .now,
-                    meeting: MeetingDetailDTO(meeting),
+                    meeting: MeetingDetailDTO(meeting, folder: folder(for: meeting)),
                     transcript: segments.map(SegmentDTO.init)),
                 database: db)
             Task { await WebhookService.deliverDue(database: db) }
@@ -289,12 +295,59 @@ final class AppState {
             update(updated)
             WebhookService.enqueue(
                 event: .notesEnhanced,
-                payload: NotesEnhancedPayload(timestamp: .now, meeting: MeetingDetailDTO(updated)),
+                payload: NotesEnhancedPayload(
+                    timestamp: .now,
+                    meeting: MeetingDetailDTO(updated, folder: folder(for: updated))),
                 database: db)
             Task { await WebhookService.deliverDue(database: db) }
         } catch {
             loadError = "Enhancement failed: \(error.localizedDescription)"
         }
+    }
+
+    func folder(for meeting: Meeting) -> Folder? {
+        meeting.folderID.flatMap { id in folders.first { $0.id == id } }
+    }
+
+    func createFolder(name: String, team: String?) {
+        guard let db = database, !name.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        do {
+            try db.save(Folder.new(name: name, team: team))
+            folders = try db.fetchFolders()
+        } catch {
+            loadError = error.localizedDescription
+        }
+    }
+
+    func renameFolder(id: String, name: String) {
+        guard let db = database, var folder = folders.first(where: { $0.id == id }) else { return }
+        folder.name = name
+        do {
+            try db.save(folder)
+            folders = try db.fetchFolders()
+        } catch {
+            loadError = error.localizedDescription
+        }
+    }
+
+    func deleteFolder(id: String) {
+        guard let db = database else { return }
+        do {
+            try db.deleteFolder(id: id)
+            folders = try db.fetchFolders()
+            if selectedFolderID == id {
+                selectedFolderID = nil
+            }
+            refreshMeetings()
+        } catch {
+            loadError = error.localizedDescription
+        }
+    }
+
+    func moveMeeting(meetingID: String, toFolder folderID: String?) {
+        guard var meeting = meetings.first(where: { $0.id == meetingID }) else { return }
+        meeting.folderID = folderID
+        update(meeting)
     }
 
     func saveWebhook(_ webhook: Webhook) {
