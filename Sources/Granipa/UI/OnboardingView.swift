@@ -100,6 +100,32 @@ struct OnboardingView: View {
             .padding(12)
             .card()
 
+            if LLMProviders.all.allSatisfy({
+                LLMProviders.resolveExecutable(named: $0.executableName) == nil
+            }) {
+                HStack(spacing: 6) {
+                    Text("None yet? Paste in Terminal:")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.textSecondary)
+                    Text("npm install -g @anthropic-ai/claude-code")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(Theme.textPrimary)
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(
+                            "npm install -g @anthropic-ai/claude-code", forType: .string)
+                        ToastController.shared.show("Copied")
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                            .font(.system(size: 11))
+                    }
+                    .buttonStyle(.plain)
+                }
+                Text("Then run \"claude\" once — the browser opens to sign in with your subscription. That's the whole setup.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textTertiary)
+            }
+
             Text("Shortcuts that work everywhere:")
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.textSecondary)

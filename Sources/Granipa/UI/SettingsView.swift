@@ -194,23 +194,113 @@ private struct AISettings: View {
                     .disabled(!diarizationEnabled)
             }
 
-            Section("Detected CLIs") {
+            Section("Providers") {
                 ForEach(LLMProviders.all) { spec in
-                    LabeledContent(spec.displayName) {
-                        if let url = LLMProviders.resolveExecutable(named: spec.executableName) {
-                            Text(url.path)
-                                .font(.caption)
-                                .foregroundStyle(.green)
-                        } else {
-                            Text("Not found")
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                        }
-                    }
+                    ProviderRow(spec: spec)
                 }
+                Text("Sign-in happens in each provider's own CLI (one-time browser login). Grañipa never sees your credentials — it only runs the CLI you already authenticated.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+private struct ProviderRow: View {
+    let spec: LLMProviderSpec
+    @State private var testState: TestState = .idle
+
+    enum TestState: Equatable {
+        case idle, running, ok
+        case failed(String)
+    }
+
+    private var installedPath: String? {
+        LLMProviders.resolveExecutable(named: spec.executableName)?.path
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Image(systemName: installedPath != nil ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(installedPath != nil ? .green : .secondary)
+                Text(spec.displayName)
+                Spacer()
+                if installedPath != nil {
+                    switch testState {
+                    case .idle:
+                        Button("Test") { runTest() }
+                            .controlSize(.small)
+                    case .running:
+                        ProgressView()
+                            .controlSize(.small)
+                    case .ok:
+                        Label("Working", systemImage: "checkmark.seal.fill")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                    case .failed:
+                        Button("Retry") { runTest() }
+                            .controlSize(.small)
+                    }
+                }
+            }
+            if installedPath == nil {
+                if let install = spec.installCommand {
+                    HStack(spacing: 6) {
+                        Text(install)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                        Button {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(install, forType: .string)
+                            ToastController.shared.show("Install command copied")
+                        } label: {
+                            Image(systemName: "doc.on.doc")
+                        }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                    }
+                }
+                Text(spec.loginHint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if case .failed(let message) = testState {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                Button("Open Terminal to sign in") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(spec.executableName, forType: .string)
+                    NSWorkspace.shared.open(
+                        URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app"))
+                    ToastController.shared.show("Command copied — paste it in Terminal")
+                }
+                .controlSize(.small)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func runTest() {
+        testState = .running
+        Task {
+            do {
+                _ = try await LLMService.generate(
+                    providerID: spec.id, prompt: "Reply with exactly: OK", timeout: 120)
+                testState = .ok
+            } catch {
+                let raw = error.localizedDescription
+                let lower = raw.lowercased()
+                let authHint =
+                    lower.contains("login") || lower.contains("auth")
+                    || lower.contains("credential") || lower.contains("api key")
+                let prefix = authHint ? "Not signed in. \(spec.loginHint) " : ""
+                testState = .failed(prefix + String(raw.prefix(160)))
+            }
+        }
     }
 }
 

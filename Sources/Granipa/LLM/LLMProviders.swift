@@ -6,6 +6,8 @@ struct LLMProviderSpec: Identifiable, Hashable, Sendable {
     let executableName: String
     let arguments: [String]
     let promptViaStdin: Bool
+    let installCommand: String?
+    let loginHint: String
 
     static let promptPlaceholder = "{PROMPT}"
     static let outputPlaceholder = "{OUTPUT}"
@@ -18,7 +20,9 @@ enum LLMProviders {
             displayName: "Claude (Claude Code)",
             executableName: "claude",
             arguments: ["-p", "--output-format", "text"],
-            promptViaStdin: true),
+            promptViaStdin: true,
+            installCommand: "npm install -g @anthropic-ai/claude-code",
+            loginHint: "Run \"claude\" once in Terminal — it opens the browser to sign in with your Claude subscription."),
         LLMProviderSpec(
             id: "codex",
             displayName: "Codex (ChatGPT)",
@@ -27,19 +31,25 @@ enum LLMProviders {
                 "exec", "--skip-git-repo-check", "-s", "read-only",
                 "-o", LLMProviderSpec.outputPlaceholder, "-",
             ],
-            promptViaStdin: true),
+            promptViaStdin: true,
+            installCommand: "npm install -g @openai/codex",
+            loginHint: "Run \"codex\" once in Terminal — it signs in with your ChatGPT account in the browser."),
         LLMProviderSpec(
             id: "gemini",
             displayName: "Gemini",
             executableName: "gemini",
             arguments: ["-p", LLMProviderSpec.promptPlaceholder],
-            promptViaStdin: false),
+            promptViaStdin: false,
+            installCommand: "npm install -g @google/gemini-cli",
+            loginHint: "Run \"gemini\" once in Terminal — it signs in with your Google account in the browser."),
         LLMProviderSpec(
             id: "grok",
             displayName: "Grok",
             executableName: "grok",
             arguments: ["-p", LLMProviderSpec.promptPlaceholder],
-            promptViaStdin: false),
+            promptViaStdin: false,
+            installCommand: nil,
+            loginHint: "Install the Grok CLI from xAI's documentation, then run \"grok\" once to sign in."),
     ]
 
     static func spec(id: String) -> LLMProviderSpec? {

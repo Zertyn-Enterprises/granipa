@@ -154,6 +154,9 @@ Grant *System Audio Recording* (System Settings → Privacy & Security → Scree
 **"Enhancement failed" after a meeting.**
 The selected AI CLI isn't installed or isn't logged in. Run it once in a terminal (e.g. `claude`) and complete its login, then check Settings → AI shows it as detected.
 
+**How do I connect my Claude / ChatGPT / Gemini / Grok account? Do I need an API key?**
+No API keys, ever. Grañipa drives each provider's official CLI, which authenticates with the subscription you already pay for: install it (e.g. `npm install -g @anthropic-ai/claude-code`), run it once in Terminal, and a browser window opens to sign in. After that one-time login everything is automatic — credentials are stored by the CLI itself and Grañipa never sees them. Settings → AI shows install commands and a **Test** button per provider.
+
 **The window-snapping or clipboard shortcuts don't work.**
 Another app owns those hotkeys — quit Rectangle (same ⌃⌥ scheme) or check Raycast's custom hotkeys, then relaunch Grañipa. Auto-paste and window snapping also need the Accessibility permission.
 

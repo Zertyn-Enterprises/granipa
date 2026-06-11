@@ -399,7 +399,14 @@ final class AppState {
                 database: db)
             Task { await WebhookService.deliverDue(database: db) }
         } catch {
-            loadError = "Enhancement failed: \(error.localizedDescription)"
+            let message = error.localizedDescription
+            let lower = message.lowercased()
+            let hint =
+                lower.contains("login") || lower.contains("auth")
+                    || lower.contains("credential") || lower.contains("api key")
+                ? " The CLI isn't signed in — open Terminal, run it once, and complete the browser login (Settings → AI has a Test button)."
+                : ""
+            loadError = "Enhancement failed: \(message)\(hint)"
         }
     }
 
