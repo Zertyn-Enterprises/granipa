@@ -79,6 +79,8 @@ struct RecordingHUD: View {
             }
         }
         .frame(width: 380)
+        .background(Theme.card)
+        .preferredColorScheme(.dark)
     }
 
     private func elapsed(from start: Date, to now: Date) -> String {

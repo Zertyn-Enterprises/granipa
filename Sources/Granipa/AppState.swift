@@ -18,6 +18,7 @@ final class AppState {
     var webhooks: [Webhook] = []
     var folders: [Folder] = []
     var selectedFolderID: String?
+    var searchQuery = ""
     var selectedMeetingID: String?
     var loadError: String?
 

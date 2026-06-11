@@ -79,20 +79,30 @@ struct EnhancedNotesView: View {
     }
 
     private func section(_ title: String, @ViewBuilder body: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             Text(title)
-                .font(.headline)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.textSecondary)
+                .textCase(.uppercase)
+                .tracking(0.5)
             body()
+                .font(.system(size: 14))
+                .foregroundStyle(Theme.textPrimary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+        .padding(16)
+        .card()
     }
 
     private func enhanceButton(title: String) -> some View {
-        Button(title, systemImage: "wand.and.stars") {
+        Button {
             Task { await app.enhance(meetingID: meetingID) }
+        } label: {
+            Label(title, systemImage: "wand.and.stars")
+                .font(.system(size: 13, weight: .medium))
         }
+        .buttonStyle(.borderedProminent)
+        .tint(Theme.accent)
         .disabled(isEnhancing || app.recorder.meetingID == meetingID)
     }
 

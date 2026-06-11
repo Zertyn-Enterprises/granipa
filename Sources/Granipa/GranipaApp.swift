@@ -9,6 +9,8 @@ struct GranipaApp: App {
             MainWindow()
                 .environment(appState)
         }
+        .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 1120, height: 720)
 
         MenuBarExtra(
             "Grañipa",

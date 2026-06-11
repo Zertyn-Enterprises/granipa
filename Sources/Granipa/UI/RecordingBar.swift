@@ -30,9 +30,14 @@ struct RecordingBar: View {
                     }
                     .tint(.red)
                 } else {
-                    Button("Record", systemImage: "record.circle") {
+                    Button {
                         app.startRecording(meetingID: meeting.id)
+                    } label: {
+                        Label("Record", systemImage: "record.circle")
+                            .font(.system(size: 13, weight: .semibold))
                     }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.accent)
                     .disabled(app.recorder.isRecording)
                     Spacer()
                 }
@@ -78,9 +83,9 @@ struct LevelMeter: View {
         HStack(spacing: 4) {
             Text(label)
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.textTertiary)
             ZStack(alignment: .leading) {
-                Capsule().fill(.quaternary)
+                Capsule().fill(Color.white.opacity(0.1))
                 Capsule()
                     .fill(.green)
                     .frame(width: CGFloat(min(level * 300, 60)))

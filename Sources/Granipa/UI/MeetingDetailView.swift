@@ -7,10 +7,10 @@ struct MeetingDetailView: View {
     @State private var segments: [TranscriptSegment] = []
     @State private var saveTask: Task<Void, Never>?
 
-    enum Tab: Hashable {
-        case notes
-        case enhanced
-        case transcript
+    enum Tab: String, CaseIterable {
+        case notes = "Notes"
+        case enhanced = "Enhanced"
+        case transcript = "Transcript"
     }
 
     init(meeting: Meeting) {
@@ -20,7 +20,7 @@ struct MeetingDetailView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider()
+            Rectangle().fill(Theme.border).frame(height: 1)
             switch tab {
             case .notes:
                 notesEditor
@@ -33,54 +33,150 @@ struct MeetingDetailView: View {
         .task { loadSegments() }
     }
 
+    // MARK: - Header
+
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Button {
+                    app.selectedMeetingID = nil
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.textSecondary)
+                        .frame(width: 26, height: 26)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .hoverHighlight(cornerRadius: 6)
+
+                Text(meeting.createdAt, format: .dateTime.weekday(.wide).month().day().hour().minute())
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textTertiary)
+
+                if meeting.language != "auto" {
+                    Text(meeting.language.hasPrefix("es") ? "ES" : "EN")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Theme.textSecondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.white.opacity(0.07), in: Capsule())
+                }
+
+                Spacer()
+
+                folderMenu
+                templateMenu
+            }
+
             TextField("Title", text: $meeting.title)
-                .font(.title2.bold())
+                .font(Theme.meetingTitleFont)
+                .foregroundStyle(Theme.textPrimary)
                 .textFieldStyle(.plain)
                 .onChange(of: meeting.title) { scheduleSave() }
+
             RecordingBar(meeting: meeting)
-            HStack {
-                Picker("", selection: $tab) {
-                    Text("Notes").tag(Tab.notes)
-                    Text("Enhanced").tag(Tab.enhanced)
-                    Text("Transcript").tag(Tab.transcript)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(maxWidth: 320)
-                Spacer()
-                Picker(selection: $meeting.folderID) {
-                    Text("No folder").tag(String?.none)
-                    ForEach(app.folders) { folder in
-                        Text(folder.team.map { "\($0) / \(folder.name)" } ?? folder.name)
-                            .tag(Optional(folder.id))
-                    }
-                } label: {
-                    Image(systemName: "folder")
-                }
-                .frame(maxWidth: 180)
-                .onChange(of: meeting.folderID) { scheduleSave() }
-                Picker("Template", selection: $meeting.templateID) {
-                    Text("Default").tag(String?.none)
-                    ForEach(app.templates) { template in
-                        Text(template.name).tag(Optional(template.id))
-                    }
-                }
-                .frame(maxWidth: 180)
-                .onChange(of: meeting.templateID) { scheduleSave() }
-            }
+
+            tabBar
         }
-        .padding()
+        .padding(.horizontal, 28)
+        .padding(.top, 18)
+        .padding(.bottom, 0)
     }
+
+    private var folderMenu: some View {
+        Menu {
+            Button("No folder") {
+                meeting.folderID = nil
+                scheduleSave()
+            }
+            ForEach(app.folders) { folder in
+                Button(folder.team.map { "\($0) / \(folder.name)" } ?? folder.name) {
+                    meeting.folderID = folder.id
+                    scheduleSave()
+                }
+            }
+        } label: {
+            Label(
+                app.folders.first { $0.id == meeting.folderID }?.name ?? "No folder",
+                systemImage: "folder")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.textSecondary)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+    }
+
+    private var templateMenu: some View {
+        Menu {
+            Button("Default template") {
+                meeting.templateID = nil
+                scheduleSave()
+            }
+            ForEach(app.templates) { template in
+                Button(template.name) {
+                    meeting.templateID = template.id
+                    scheduleSave()
+                }
+            }
+        } label: {
+            Label(
+                app.templates.first { $0.id == meeting.templateID }?.name ?? "Template",
+                systemImage: "doc.text")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.textSecondary)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+    }
+
+    private var tabBar: some View {
+        HStack(spacing: 22) {
+            ForEach(Tab.allCases, id: \.self) { item in
+                Button {
+                    tab = item
+                } label: {
+                    VStack(spacing: 7) {
+                        Text(item.rawValue)
+                            .font(.system(size: 13, weight: tab == item ? .semibold : .regular))
+                            .foregroundStyle(tab == item ? Theme.textPrimary : Theme.textSecondary)
+                        Rectangle()
+                            .fill(tab == item ? Theme.accent : .clear)
+                            .frame(height: 2)
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer()
+        }
+    }
+
+    // MARK: - Notes
 
     private var notesEditor: some View {
         TextEditor(text: $meeting.notesMarkdown)
-            .font(.body)
+            .font(.system(size: 14))
+            .lineSpacing(3)
+            .foregroundStyle(Theme.textPrimary)
             .scrollContentBackground(.hidden)
-            .padding(8)
+            .padding(.horizontal, 22)
+            .padding(.vertical, 14)
             .onChange(of: meeting.notesMarkdown) { scheduleSave() }
+            .overlay(alignment: .topLeading) {
+                if meeting.notesMarkdown.isEmpty {
+                    Text("Type your rough notes here — the AI will expand them after the meeting.")
+                        .font(.system(size: 14))
+                        .foregroundStyle(Theme.textTertiary)
+                        .padding(.horizontal, 28)
+                        .padding(.vertical, 14)
+                        .allowsHitTesting(false)
+                }
+            }
     }
+
+    // MARK: - Transcript
 
     private var liveTranscription: TranscriptionCoordinator? {
         guard let coordinator = app.transcription, coordinator.meetingID == meeting.id else {
@@ -94,28 +190,40 @@ struct MeetingDetailView: View {
         let shown = live.map(\.liveSegments) ?? segments
         return Group {
             if shown.isEmpty && live == nil {
-                ContentUnavailableView(
-                    "No transcript",
-                    systemImage: "text.quote",
-                    description: Text("The transcript will appear here once a recording exists.")
-                )
+                VStack(spacing: 10) {
+                    Image(systemName: "text.quote")
+                        .font(.system(size: 28))
+                        .foregroundStyle(Theme.textTertiary)
+                    Text("No transcript")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(Theme.textSecondary)
+                    Text("The transcript will appear here once a recording exists.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.textTertiary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollViewReader { proxy in
-                    List {
-                        ForEach(shown) { segment in
-                            SegmentRow(segment: segment)
-                                .id(segment.id)
-                        }
-                        if let live {
-                            if !live.volatileMic.isEmpty {
-                                VolatileRow(speaker: "Me", text: live.volatileMic)
-                                    .id("volatile-mic")
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 14) {
+                            ForEach(shown) { segment in
+                                SegmentRow(segment: segment)
+                                    .id(segment.id)
                             }
-                            if !live.volatileSystem.isEmpty {
-                                VolatileRow(speaker: "Them", text: live.volatileSystem)
-                                    .id("volatile-system")
+                            if let live {
+                                if !live.volatileMic.isEmpty {
+                                    VolatileRow(speaker: "Me", text: live.volatileMic)
+                                        .id("volatile-mic")
+                                }
+                                if !live.volatileSystem.isEmpty {
+                                    VolatileRow(speaker: "Them", text: live.volatileSystem)
+                                        .id("volatile-system")
+                                }
                             }
                         }
+                        .padding(.horizontal, 28)
+                        .padding(.vertical, 18)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .onChange(of: shown.count) {
                         if let last = shown.last {
@@ -136,7 +244,6 @@ struct MeetingDetailView: View {
             loadSegments()
         }
     }
-
 
     private func loadSegments() {
         guard let db = app.database else { return }
@@ -160,25 +267,31 @@ struct SegmentRow: View {
     private static let palette: [Color] = [.orange, .purple, .teal, .pink, .indigo, .mint]
 
     private var speakerColor: Color {
-        if segment.channel == .mic { return .blue }
-        if segment.speaker == "Them" { return .orange }
-        let index = abs(segment.speaker.hashValue) % Self.palette.count
-        return Self.palette[index]
+        if segment.channel == .mic { return Color(hex: 0x6FA8DC) }
+        if segment.speaker == "Them" { return Theme.accent }
+        let hash = segment.speaker.unicodeScalars.reduce(0) {
+            ($0 &* 31 &+ Int($1.value)) & 0x7FFF_FFFF
+        }
+        return Self.palette[hash % Self.palette.count]
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 8) {
                 Text(segment.speaker)
-                    .font(.caption.bold())
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(speakerColor)
                 Text(Self.timestamp(segment.startSeconds))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textTertiary)
+                    .monospacedDigit()
             }
             Text(segment.text)
+                .font(.system(size: 14))
+                .lineSpacing(3)
+                .foregroundStyle(Theme.textPrimary)
+                .textSelection(.enabled)
         }
-        .padding(.vertical, 2)
     }
 
     static func timestamp(_ seconds: Double) -> String {
@@ -192,14 +305,15 @@ struct VolatileRow: View {
     let text: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 3) {
             Text(speaker)
-                .font(.caption.bold())
-                .foregroundStyle(.secondary)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Theme.textTertiary)
             Text(text)
-                .foregroundStyle(.secondary)
+                .font(.system(size: 14))
+                .lineSpacing(3)
                 .italic()
+                .foregroundStyle(Theme.textSecondary)
         }
-        .padding(.vertical, 2)
     }
 }
