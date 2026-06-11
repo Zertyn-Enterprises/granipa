@@ -51,6 +51,7 @@ final class AppState {
         setupDetection()
         setupProductivity()
         purgeOldAudio()
+        _ = UpdaterManager.shared
     }
 
     private func setupProductivity() {

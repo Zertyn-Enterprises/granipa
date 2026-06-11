@@ -47,6 +47,21 @@ ditto -c -k --keepParent "$APP" "$ZIP"
 echo
 echo "Release artifact: $ZIP"
 shasum -a 256 "$ZIP"
+
+if [ "$(plutil -extract SUPublicEDKey raw "$APP/Contents/Info.plist" 2>/dev/null)" = "SPARKLE_ED_PUBLIC_KEY_PLACEHOLDER" ]; then
+  echo
+  echo "WARN: Sparkle public key not set — auto-updates will not verify."
+  echo "      One-time setup: see docs/RELEASING.md"
+fi
+
 echo
-echo "Publish with:"
-echo "  gh release create v$VERSION '$ZIP' --title 'Grañipa v$VERSION' --generate-notes"
+if command -v generate_appcast >/dev/null 2>&1; then
+  generate_appcast build/
+  echo "Publish with:"
+  echo "  gh release create v$VERSION '$ZIP' build/appcast.xml --title 'Grañipa v$VERSION' --generate-notes"
+else
+  echo "NOTE: generate_appcast not found — auto-update feed not generated."
+  echo "      Get Sparkle's tools (one time): https://github.com/sparkle-project/Sparkle/releases"
+  echo "Publish with:"
+  echo "  gh release create v$VERSION '$ZIP' --title 'Grañipa v$VERSION' --generate-notes"
+fi

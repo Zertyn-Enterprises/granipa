@@ -127,7 +127,7 @@ valid = hmac.compare_digest(expected, request.headers["X-Granipa-Signature"])
 
 - Audio, transcripts, notes, and clipboard history live in `~/Library/Application Support/Granipa/` (SQLite + files). Delete the folder, everything is gone.
 - The **only** data that leaves your Mac: transcripts sent to the AI CLI *you* configured when enhancement runs, and webhook payloads to URLs *you* added.
-- No telemetry, no analytics, no accounts, no auto-updates.
+- No telemetry, no analytics, no accounts. The only background network call is the update check against GitHub Releases (Sparkle), and you can disable it.
 
 ## Development
 
@@ -142,7 +142,6 @@ Architecture notes for contributors (and AI agents) live in [CLAUDE.md](CLAUDE.m
 ## Roadmap
 
 - **Ask your notes** — chat with one meeting or your whole archive, answered by your local AI CLI.
-- **Auto-updates** (Sparkle) for the notarized binary.
 - **⌥Space command palette** — meetings, clipboard, snippets and actions in one launcher.
 - Configurable shortcuts · light mode · audio language ID for any-language detection.
 
@@ -159,6 +158,9 @@ No API keys, ever. Grañipa drives each provider's official CLI, which authentic
 
 **The window-snapping or clipboard shortcuts don't work.**
 Another app owns those hotkeys — quit Rectangle (same ⌃⌥ scheme) or check Raycast's custom hotkeys, then relaunch Grañipa. Auto-paste and window snapping also need the Accessibility permission.
+
+**How do I update the app?**
+Installed from a release: the app checks GitHub Releases and offers "Install and Relaunch" (menu bar → Check for Updates…). Built from source: `git pull && ./Scripts/bundle.sh release`. Your meetings live outside the app bundle, so updates never touch them.
 
 **Where is my data? How do I delete it?**
 Everything lives in `~/Library/Application Support/Granipa/`. Delete that folder and it is all gone.

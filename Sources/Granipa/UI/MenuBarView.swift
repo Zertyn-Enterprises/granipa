@@ -33,6 +33,12 @@ struct MenuBarView: View {
         }
         .keyboardShortcut("t", modifiers: [.option, .shift])
         Divider()
+        if UpdaterManager.shared.isAvailable {
+            Button("Check for Updates…") {
+                UpdaterManager.shared.checkForUpdates()
+            }
+            Divider()
+        }
         Button("Quit Grañipa") {
             NSApp.terminate(nil)
         }
