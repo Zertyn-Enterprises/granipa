@@ -29,10 +29,6 @@ Grañipa records your meetings (no bot joins the call), transcribes them live on
 
 ### 🎙 Meetings
 
-<p align="center">
-  <img src="docs/transcript.png" width="760" alt="Live transcript during a recording">
-</p>
-
 - **Bot-free recording** — captures your mic and the system audio (other participants) as two clean channels via a Core Audio process tap. Works with Zoom, Meet, Teams, Webex, anything that plays audio.
 - **Live on-device transcription** — Apple SpeechAnalyzer (macOS 26), streaming word-by-word. Free and offline.
 - **Automatic language detection** — pick up to 3 languages (15+ supported by Apple's engine); each recording probes them in parallel for the first seconds and keeps the winner.
