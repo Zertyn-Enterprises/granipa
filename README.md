@@ -23,6 +23,10 @@ Grañipa records your meetings (no bot joins the call), transcribes them live on
 
 > 🚧 **Beta** — currently in internal testing. The v1.0 public release (with a notarized download, demo video and screenshots) is around the corner. Found a bug? [Open an issue](../../issues).
 
+<p align="center">
+  <img src="docs/home.png" width="760" alt="Grañipa home — meetings organized by day">
+</p>
+
 ## Features
 
 ### 🎙 Meetings
