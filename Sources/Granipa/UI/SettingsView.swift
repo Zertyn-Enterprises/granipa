@@ -107,9 +107,34 @@ private struct GeneralSettings: View {
         .formStyle(.grouped)
         .task {
             let locales = await SpeechTranscriber.supportedLocales
-            supportedLocales = locales.sorted {
+            supportedLocales = dedupeByLanguage(locales).sorted {
                 languageName($0.identifier(.bcp47)) < languageName($1.identifier(.bcp47))
             }
+        }
+    }
+
+    // One entry per language; regional variants are an implementation detail.
+    private func dedupeByLanguage(_ locales: [Locale]) -> [Locale] {
+        let preferredRegion: [String: String] = [
+            "en": "US", "es": "ES", "zh": "CN", "yue": "CN", "pt": "BR",
+            "fr": "FR", "de": "DE", "it": "IT", "ja": "JP", "ko": "KR", "ar": "SA",
+        ]
+        var byLanguage: [String: [Locale]] = [:]
+        for locale in locales {
+            let code = locale.language.languageCode?.identifier ?? locale.identifier
+            byLanguage[code, default: []].append(locale)
+        }
+        let currentRegion = Locale.current.region?.identifier
+        return byLanguage.map { code, variants in
+            if let match = variants.first(where: { $0.region?.identifier == currentRegion }) {
+                return match
+            }
+            if let preferred = preferredRegion[code],
+                let match = variants.first(where: { $0.region?.identifier == preferred })
+            {
+                return match
+            }
+            return variants.sorted { $0.identifier < $1.identifier }[0]
         }
     }
 
@@ -134,7 +159,13 @@ private struct GeneralSettings: View {
     }
 
     private func languageName(_ id: String) -> String {
-        Locale.current.localizedString(forIdentifier: id)?.capitalized ?? id
+        let locale = Locale(identifier: id)
+        if let code = locale.language.languageCode?.identifier,
+            let name = Locale.current.localizedString(forLanguageCode: code)
+        {
+            return name.capitalized
+        }
+        return Locale.current.localizedString(forIdentifier: id)?.capitalized ?? id
     }
 }
 
