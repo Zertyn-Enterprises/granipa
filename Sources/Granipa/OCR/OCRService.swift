@@ -43,7 +43,16 @@ enum OCRService {
                 let request = VNRecognizeTextRequest()
                 request.recognitionLevel = .accurate
                 request.usesLanguageCorrection = true
-                request.recognitionLanguages = ["es-ES", "en-US"]
+                var preferred = LanguageDetection.parseProbeLocales(
+                    UserDefaults.standard.string(forKey: "probeLocales"))
+                if !preferred.contains(where: { $0.hasPrefix("en") }) {
+                    preferred.append("en-US")
+                }
+                let supported = (try? request.supportedRecognitionLanguages()) ?? []
+                let chosen = preferred.filter { id in
+                    supported.contains { $0.prefix(2) == id.prefix(2) }
+                }
+                request.recognitionLanguages = chosen.isEmpty ? ["en-US"] : chosen
 
                 let handler = VNImageRequestHandler(url: url)
                 guard (try? handler.perform([request])) != nil,

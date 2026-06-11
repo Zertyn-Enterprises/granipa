@@ -28,6 +28,8 @@ final class TranscriptionCoordinator {
     private var probes: [String: LocaleProbe] = [:]
     private var probeVolatiles: [String: String] = [:]
     private var pendingFinals: [String: [TranscriptSegment]] = [:]
+    private var probeLocales: [String] = []
+    private var failedProbes: Set<String> = []
 
     private var isAuto: Bool { requestedLanguage == "auto" }
     private var effectiveLocale: String? { isAuto ? detectedLocale : requestedLanguage }
@@ -41,7 +43,12 @@ final class TranscriptionCoordinator {
     }
 
     func start() {
-        let locales = isAuto ? LanguageDetection.autoLocales : [requestedLanguage]
+        let locales =
+            isAuto
+            ? LanguageDetection.parseProbeLocales(
+                UserDefaults.standard.string(forKey: "probeLocales"))
+            : [requestedLanguage]
+        probeLocales = locales
         let task = Task {
             do {
                 for localeID in locales {
@@ -52,6 +59,9 @@ final class TranscriptionCoordinator {
                 return
             }
             phase = .live
+            if isAuto, locales.count == 1 {
+                adopt(locale: locales[0])
+            }
             startChannel(.mic, source: micChunks, locales: locales)
             startChannel(.system, source: systemChunks, locales: locales)
         }
@@ -119,10 +129,14 @@ final class TranscriptionCoordinator {
                     }
                 }
             } catch {
-                if isAuto, detectedLocale == nil,
-                    let other = LanguageDetection.autoLocales.first(where: { $0 != localeID })
-                {
-                    adopt(locale: other)
+                if isAuto, detectedLocale == nil {
+                    failedProbes.insert(localeID)
+                    let remaining = probeLocales.filter { !failedProbes.contains($0) }
+                    if remaining.count == 1 {
+                        adopt(locale: remaining[0])
+                    } else if remaining.isEmpty {
+                        phase = .failed(error.localizedDescription)
+                    }
                 } else if effectiveLocale == nil || effectiveLocale == localeID {
                     phase = .failed(error.localizedDescription)
                 }
@@ -195,23 +209,26 @@ final class TranscriptionCoordinator {
     }
 
     private func showProbeVolatiles() {
+        let active = probeLocales.filter { !failedProbes.contains($0) }
         let leader =
-            (probes["es-ES"]?.averageConfidence ?? 0) > (probes["en-US"]?.averageConfidence ?? 0)
-            ? "es-ES" : "en-US"
+            active.max {
+                (probes[$0]?.averageConfidence ?? 0) < (probes[$1]?.averageConfidence ?? 0)
+            } ?? probeLocales.first ?? "en-US"
         volatileMic = probeVolatiles["\(leader)|mic"] ?? ""
         volatileSystem = probeVolatiles["\(leader)|system"] ?? ""
     }
 
     private func decideIfNeeded(force: Bool) {
         guard isAuto, detectedLocale == nil else { return }
-        guard
-            let winner = LanguageDetection.decide(
-                enText: probeText("en-US"),
-                enConfidence: probes["en-US"]?.averageConfidence ?? 0,
-                esText: probeText("es-ES"),
-                esConfidence: probes["es-ES"]?.averageConfidence ?? 0,
-                force: force)
-        else { return }
+        let candidates = probeLocales
+            .filter { !failedProbes.contains($0) }
+            .map {
+                LanguageProbeResult(
+                    localeID: $0,
+                    text: probeText($0),
+                    confidence: probes[$0]?.averageConfidence ?? 0)
+            }
+        guard let winner = LanguageDetection.decide(candidates, force: force) else { return }
         adopt(locale: winner)
     }
 

@@ -35,7 +35,7 @@ Grañipa records your meetings (no bot joins the call), transcribes them live on
 
 - **Bot-free recording** — captures your mic and the system audio (other participants) as two clean channels via a Core Audio process tap. Works with Zoom, Meet, Teams, Webex, anything that plays audio.
 - **Live on-device transcription** — Apple SpeechAnalyzer (macOS 26), streaming word-by-word. Free and offline.
-- **Automatic language detection** — runs English and Spanish models in parallel for the first seconds and keeps the winner.
+- **Automatic language detection** — pick up to 3 languages (15+ supported by Apple's engine); each recording probes them in parallel for the first seconds and keeps the winner.
 - **Speaker diarization** — splits remote participants into Speaker 1/2/3 locally (CoreML), then infers their real names from conversation context.
 - **AI-enhanced notes** — your rough notes + the transcript become structured notes, a summary, action items, and a ready-to-send follow-up email. Auto-titles the meeting.
 - **Bring your own AI subscription** — shells out to the `claude`, `codex`, `gemini`, or `grok` CLI you already pay for. **No API keys, no per-token billing.**
@@ -48,7 +48,7 @@ Grañipa records your meetings (no bot joins the call), transcribes them live on
 ### 🧰 Productivity
 
 - **Clipboard history** (`⌥⇧V`) — Raycast-style floating panel: search, type filters, image previews, source app, auto-paste into the active app. Respects password-manager confidentiality markers. 100% local.
-- **Screen text capture / OCR** (`⌥⇧T`) — select any screen region, the text lands in your clipboard (Vision framework, Spanish + English).
+- **Screen text capture / OCR** (`⌥⇧T`) — select any screen region, the text lands in your clipboard (Vision framework, follows your selected languages).
 - **Window management** (`⌃⌥` + arrows/letters) — Rectangle-compatible shortcuts: halves, quarters, thirds, maximize, center, restore.
 
 ### 🔌 Integrations

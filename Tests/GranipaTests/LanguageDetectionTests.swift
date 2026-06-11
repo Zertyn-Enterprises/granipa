@@ -53,6 +53,54 @@ import Testing
         #expect(winner == nil)
     }
 
+    @Test func threeWayCrossVotePicksFrench() {
+        let winner = LanguageDetection.decide(
+            [
+                LanguageProbeResult(
+                    localeID: "en-US",
+                    text: "je voudrais discuter du budget avec vous aujourd'hui",
+                    confidence: 0.4),
+                LanguageProbeResult(
+                    localeID: "es-ES",
+                    text: "quiero hablar del presupuesto del año que viene",
+                    confidence: 0.5),
+                LanguageProbeResult(
+                    localeID: "fr-FR",
+                    text: "je voudrais discuter du budget de l'année prochaine avec vous",
+                    confidence: 0.8),
+            ],
+            force: false)
+        #expect(winner == "fr-FR")
+    }
+
+    @Test func confidenceGapDecidesAmongThree() {
+        let winner = LanguageDetection.decide(
+            [
+                LanguageProbeResult(
+                    localeID: "en-US",
+                    text: "we should review the quarterly roadmap before the launch next week",
+                    confidence: 0.9),
+                LanguageProbeResult(
+                    localeID: "es-ES",
+                    text: "hablemos del presupuesto y del calendario del próximo trimestre",
+                    confidence: 0.4),
+                LanguageProbeResult(
+                    localeID: "fr-FR",
+                    text: "je pense que nous devrions revoir le calendrier ensemble",
+                    confidence: 0.3),
+            ],
+            force: false)
+        #expect(winner == "en-US")
+    }
+
+    @Test func parseProbeLocalesDedupesAndCaps() {
+        #expect(LanguageDetection.parseProbeLocales(nil) == ["en-US", "es-ES"])
+        #expect(LanguageDetection.parseProbeLocales("") == ["en-US", "es-ES"])
+        #expect(
+            LanguageDetection.parseProbeLocales(" fr-FR ,de-DE, fr-FR, ja-JP, ko-KR")
+                == ["fr-FR", "de-DE", "ja-JP"])
+    }
+
     @Test func probeAccumulatesWeightedConfidence() {
         var probe = LocaleProbe()
         probe.register(text: "1234567890", confidence: 0.8, isFinal: true)

@@ -1,4 +1,5 @@
 import ServiceManagement
+import Speech
 import SwiftUI
 
 struct SettingsView: View {
@@ -31,7 +32,15 @@ private struct GeneralSettings: View {
     @AppStorage("meetingDetectionEnabled") private var meetingDetection = true
     @AppStorage("autoStopMode") private var autoStopMode = "ask"
     @AppStorage("audioRetentionDays") private var audioRetentionDays = 0
+    @AppStorage("probeLocales") private var probeLocalesRaw = "en-US,es-ES"
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
+    @State private var supportedLocales: [Locale] = []
+
+    private var probeSelection: [String] {
+        probeLocalesRaw.split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
 
     var body: some View {
         Form {
@@ -48,13 +57,30 @@ private struct GeneralSettings: View {
                     }
                 }
             Picker("Meeting language", selection: $defaultLocale) {
-                Text("Automatic (English / Español)").tag("auto")
-                Text("English").tag("en-US")
-                Text("Español").tag("es-ES")
+                Text("Automatic detection").tag("auto")
+                ForEach(supportedLocales, id: \.identifier) { locale in
+                    let id = locale.identifier(.bcp47)
+                    Text(languageName(id)).tag(id)
+                }
             }
-            Text("Automatic runs both models for the first seconds of a recording and keeps the one that matches what it hears.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if defaultLocale == "auto" {
+                Section("Languages to detect (up to \(LanguageDetection.maxProbeLocales))") {
+                    if supportedLocales.isEmpty {
+                        Text("Loading available languages…")
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(supportedLocales, id: \.identifier) { locale in
+                        let id = locale.identifier(.bcp47)
+                        Toggle(languageName(id), isOn: probeBinding(id))
+                            .disabled(
+                                !probeSelection.contains(id)
+                                    && probeSelection.count >= LanguageDetection.maxProbeLocales)
+                    }
+                    Text("Each recording probes your selected languages in parallel for the first seconds and keeps the one that matches what it hears. Each language downloads its on-device model once.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
             Toggle("Detect meetings automatically", isOn: $meetingDetection)
                 .onChange(of: meetingDetection) {
                     meetingDetection ? app.detector.start() : app.detector.stop()
@@ -79,6 +105,36 @@ private struct GeneralSettings: View {
                 .foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
+        .task {
+            let locales = await SpeechTranscriber.supportedLocales
+            supportedLocales = locales.sorted {
+                languageName($0.identifier(.bcp47)) < languageName($1.identifier(.bcp47))
+            }
+        }
+    }
+
+    private func probeBinding(_ id: String) -> Binding<Bool> {
+        Binding(
+            get: { probeSelection.contains(id) },
+            set: { enabled in
+                var selection = probeSelection
+                if enabled {
+                    if !selection.contains(id),
+                        selection.count < LanguageDetection.maxProbeLocales
+                    {
+                        selection.append(id)
+                    }
+                } else {
+                    selection.removeAll { $0 == id }
+                }
+                if !selection.isEmpty {
+                    probeLocalesRaw = selection.joined(separator: ",")
+                }
+            })
+    }
+
+    private func languageName(_ id: String) -> String {
+        Locale.current.localizedString(forIdentifier: id)?.capitalized ?? id
     }
 }
 

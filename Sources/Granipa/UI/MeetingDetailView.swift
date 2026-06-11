@@ -55,7 +55,7 @@ struct MeetingDetailView: View {
                     .foregroundStyle(Theme.textTertiary)
 
                 if meeting.language != "auto" {
-                    Text(meeting.language.hasPrefix("es") ? "ES" : "EN")
+                    Text(String(meeting.language.prefix(2)).uppercased())
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(Theme.textSecondary)
                         .padding(.horizontal, 6)
