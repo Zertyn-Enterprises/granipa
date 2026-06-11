@@ -17,6 +17,7 @@ final class RecordingSession: @unchecked Sendable {
     private let tap = SystemAudioTap()
     private let micBuffers = Mutex(0)
     private let systemBuffers = Mutex(0)
+    private let systemNonSilent = Mutex(0)
     private let onLevel: @Sendable (AudioChannel, Float) -> Void
 
     private var micFile: AVAudioFile?
@@ -27,6 +28,7 @@ final class RecordingSession: @unchecked Sendable {
 
     var micBufferCount: Int { micBuffers.withLock { $0 } }
     var systemBufferCount: Int { systemBuffers.withLock { $0 } }
+    var systemNonSilentCount: Int { systemNonSilent.withLock { $0 } }
 
     init(
         meetingID: String,
@@ -52,6 +54,21 @@ final class RecordingSession: @unchecked Sendable {
             try tap.start { [weak self] buffer, timestamp in
                 self?.handleSystem(buffer, timestamp: timestamp)
             }
+        } catch {
+            systemAudioError = error
+        }
+    }
+
+    // A tap created before the system-audio TCC grant never delivers buffers;
+    // tearing it down and recreating it picks the grant up without touching the
+    // mic. Timing stays correct: gaps are padded with silence on the next buffer.
+    func restartSystemTap() {
+        tap.stop()
+        do {
+            try tap.start { [weak self] buffer, timestamp in
+                self?.handleSystem(buffer, timestamp: timestamp)
+            }
+            systemAudioError = nil
         } catch {
             systemAudioError = error
         }
@@ -132,7 +149,11 @@ final class RecordingSession: @unchecked Sendable {
 
         try? systemFile?.write(from: buffer)
         systemFramesWritten += AVAudioFramePosition(buffer.frameLength)
-        onLevel(.system, buffer.rmsLevel)
+        let level = buffer.rmsLevel
+        if level > 0.0005 {
+            systemNonSilent.withLock { $0 += 1 }
+        }
+        onLevel(.system, level)
         if let copy = buffer.deepCopy() {
             systemContinuation.yield(AudioChunk(buffer: copy, startSeconds: startSeconds))
         }

@@ -57,19 +57,38 @@ final class RecordingEngine {
                 micWarning = "Echo cancellation isn't working on this setup — continuing without it."
             }
 
-            try? await Task.sleep(for: .seconds(5))
-            guard self.session === session, self.isRecording else { return }
-            if session.micBufferCount == 0 {
-                micWarning =
-                    "No microphone audio is arriving. Check System Settings > Privacy & Security "
-                    + "> Microphone, then stop and start a new recording."
-            } else if session.micBufferCount > 0, micWarning?.hasPrefix("No microphone") == true {
-                micWarning = nil
-            }
-            if session.systemBufferCount == 0, session.systemAudioError == nil {
-                systemAudioWarning =
-                    "No system audio captured yet — it only flows while sound is playing. "
-                    + "If you just granted the permission, stop and start a new recording."
+            var tapRestarts = 0
+            while !Task.isCancelled, self.session === session, self.isRecording {
+                try? await Task.sleep(for: .seconds(5))
+                guard self.session === session, self.isRecording else { return }
+
+                if session.micBufferCount == 0 {
+                    micWarning =
+                        "No microphone audio is arriving. Check System Settings > Privacy & "
+                        + "Security > Microphone, then stop and start a new recording."
+                } else if micWarning?.hasPrefix("No microphone") == true {
+                    micWarning = nil
+                }
+
+                if session.systemBufferCount == 0 {
+                    // A tap created before the permission grant stays dead forever;
+                    // recreating it picks the grant up mid-recording.
+                    if tapRestarts < 8 {
+                        session.restartSystemTap()
+                        tapRestarts += 1
+                    }
+                    systemAudioWarning =
+                        "No system audio captured yet — it only flows while sound is playing. "
+                        + "If macOS just asked for the permission, grant it and keep recording: "
+                        + "capture starts by itself."
+                } else if session.systemNonSilentCount == 0, session.systemBufferCount > 200 {
+                    systemAudioWarning =
+                        "System audio is arriving but completely silent — macOS may have denied "
+                        + "the permission. Check System Settings > Privacy & Security > Screen & "
+                        + "System Audio Recording, then stop and start a new recording."
+                } else if session.systemNonSilentCount > 0 {
+                    systemAudioWarning = nil
+                }
             }
         }
     }
