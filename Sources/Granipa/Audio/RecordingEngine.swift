@@ -58,9 +58,23 @@ final class RecordingEngine {
             }
 
             var tapRestarts = 0
+            var lastSystemCount = 0
+            var stallTicks = 0
             while !Task.isCancelled, self.session === session, self.isRecording {
                 try? await Task.sleep(for: .seconds(5))
                 guard self.session === session, self.isRecording else { return }
+
+                // Buffers flowed and then stopped: route died without a device-change
+                // notification (e.g. sample-rate renegotiation). Rebuild as backstop.
+                let systemCount = session.systemBufferCount
+                if systemCount > 0 {
+                    stallTicks = systemCount == lastSystemCount ? stallTicks + 1 : 0
+                    if stallTicks >= 3 {
+                        session.restartSystemTap()
+                        stallTicks = 0
+                    }
+                }
+                lastSystemCount = systemCount
 
                 if session.micBufferCount == 0 {
                     micWarning =

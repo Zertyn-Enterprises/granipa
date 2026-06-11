@@ -38,8 +38,11 @@ final class SystemAudioTap {
             throw CoreAudioError(status: -1, stage: "tap format init")
         }
 
+        // Default OUTPUT device (what the user hears through, e.g. AirPods) — not
+        // the "system output" (alert sounds), which often stays on the built-in
+        // speakers and leaves the aggregate clocked by a device that never runs.
         var outputAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultSystemOutputDevice,
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain)
         var outputID = AudioDeviceID(kAudioObjectUnknown)
