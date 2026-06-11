@@ -102,7 +102,8 @@ import Testing
     @Test func templateSeedsExist() throws {
         let db = try AppDatabase(writer: DatabaseQueue())
         let templates = try db.fetchTemplates()
-        #expect(templates.count == 4)
+        #expect(templates.count == MeetingTemplate.builtins.count)
         #expect(templates.allSatisfy { $0.isBuiltin })
+        #expect(templates.contains { $0.name == "Interview" })
     }
 }

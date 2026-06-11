@@ -37,26 +37,48 @@ enum EnhancementService {
     }
 
     static func buildPrompt(template: MeetingTemplate?, notes: String, transcript: String) -> String {
-        let templateSection = template.map { "\nMeeting type guidance: \($0.prompt)\n" } ?? ""
+        let templateSection = template.map {
+            "\n## Report structure for this meeting type (follow it exactly)\n\($0.prompt)\n"
+        } ?? ""
         let notesSection = notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? "(none)" : notes
         return """
-            You are an expert meeting-notes assistant. Below is a meeting transcript with \
-            speaker labels and timestamps, plus the user's own rough notes taken during the \
-            meeting.
+            You are an elite chief-of-staff who writes meeting reports that people forward \
+            to their boss unedited. Below is a meeting transcript with speaker labels and \
+            timestamps, plus the rough notes the user typed live during the meeting.
             \(templateSection)
+            Non-negotiable quality rules:
+            - Be specific. Keep every number, amount, date, deadline, name and metric exactly \
+            as said. Never replace specifics with vague summaries.
+            - Zero filler or meta-language. Never write "the team discussed", "various topics \
+            were covered", "an interesting point was raised" or anything of that family. \
+            Every sentence must carry information.
+            - State only what the transcript or notes support. Never invent details, \
+            attendees or agreements. If something important is half-heard or ambiguous, \
+            keep it and mark it [unclear].
+            - The transcript comes from speech recognition: silently fix obvious \
+            mis-transcriptions using context; render proper nouns as faithfully as you can.
+            - The user's rough notes are the strongest signal of what mattered to them: \
+            give their points priority and depth, expand each with details from the \
+            transcript, and keep their structure and emphasis where it exists. If there are \
+            no notes, build the report entirely from the transcript.
+            - Quote verbatim when exact wording matters (commitments, pushback, strong \
+            reactions, pricing).
+
             Respond with ONLY a single JSON object - no markdown fences, no commentary - \
             with exactly these keys:
-            - "title": a short descriptive meeting title (max 8 words).
-            - "summary": 2-4 sentence summary of the meeting.
-            - "enhanced_notes": well-structured markdown notes. The user's rough notes are \
-            the backbone: keep their structure, wording and emphasis, expand abbreviations, \
-            and fill in gaps and details from the transcript. If the user took no notes, \
-            build the notes entirely from the transcript.
-            - "action_items": array of {"text": string, "owner": string or null} with every \
-            concrete commitment, task or follow-up mentioned.
-            - "email_draft": a short, ready-to-send follow-up email summarizing decisions \
-            and next steps.
+            - "title": specific and content-bearing, max 8 words. Never generic like \
+            "Team meeting" or "Weekly sync".
+            - "summary": 2-4 sentences a busy executive could read instead of attending. \
+            Lead with the most consequential outcome, not with context.
+            - "enhanced_notes": the full report in markdown, following the report structure \
+            above when one is given.
+            - "action_items": array of {"text": string, "owner": string or null}. Every \
+            commitment, task or follow-up - phrased as a verifiable task ("Send the revised \
+            quote to Acme", never "follow up"), with the due date in the text when one was \
+            mentioned.
+            - "email_draft": ready-to-send follow-up email: 2-3 sentence recap leading with \
+            decisions, then a bullet list of next steps with owners. No pleasantry padding.
 
             Write all output in the dominant language of the meeting (e.g. English or Spanish).
 

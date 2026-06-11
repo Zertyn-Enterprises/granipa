@@ -109,6 +109,13 @@ struct AppDatabase: Sendable {
                 t.column("height", .integer)
             }
         }
+        // Refreshes builtin template prompts and adds new builtins; upsert keeps
+        // user-created templates untouched.
+        migrator.registerMigration("v6-template-refresh") { db in
+            for template in MeetingTemplate.builtins {
+                try template.save(db)
+            }
+        }
         return migrator
     }
 }
