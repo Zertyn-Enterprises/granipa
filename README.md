@@ -71,7 +71,7 @@ Grab the latest notarized build from [Releases](../../releases), unzip, and drag
 ### Build from source
 
 ```sh
-git clone https://github.com/YOUR_USER/granipa.git
+git clone https://github.com/Zertyn-Enterprises/granipa.git
 cd granipa
 ./Scripts/bundle.sh release
 open "build/Grañipa.app"
@@ -123,7 +123,7 @@ valid = hmac.compare_digest(expected, request.headers["X-Granipa-Signature"])
 
 ```sh
 swift build        # compile
-swift test         # 57 tests: storage, API, webhooks, language detection, window math…
+swift test         # 64 tests: storage, API, webhooks, language detection, window math…
 ./Scripts/bundle.sh  # debug .app bundle
 ```
 
