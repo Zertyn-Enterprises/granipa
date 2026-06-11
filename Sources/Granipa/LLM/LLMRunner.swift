@@ -76,6 +76,14 @@ enum LLMRunner {
         process.executableURL = executable
         process.arguments = arguments
 
+        // Pin the CLI to an empty scratch dir: agent CLIs scan their working
+        // directory for project context, which from an app bundle means user
+        // folders - triggering iCloud/Desktop TCC prompts attributed to us.
+        let scratch = FileManager.default.temporaryDirectory
+            .appendingPathComponent("granipa-llm-cwd", isDirectory: true)
+        try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        process.currentDirectoryURL = scratch
+
         var environment = ProcessInfo.processInfo.environment
         let home = NSHomeDirectory()
         let extraPaths = ["\(home)/.local/bin", "/opt/homebrew/bin", "/usr/local/bin"]

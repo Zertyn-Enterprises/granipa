@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreAudio
+import os
 
 struct CoreAudioError: Error {
     let status: OSStatus
@@ -7,6 +8,7 @@ struct CoreAudioError: Error {
 }
 
 final class SystemAudioTap {
+    private static let log = Logger(subsystem: "com.zertyn.granipa", category: "tap")
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private var procID: AudioDeviceIOProcID?
@@ -109,6 +111,8 @@ final class SystemAudioTap {
             stop()
             throw CoreAudioError(status: err, stage: "start aggregate device")
         }
+        Self.log.info(
+            "tap running: clock device '\(outputUID, privacy: .public)' format=\(format.sampleRate)Hz ch=\(format.channelCount)")
     }
 
     // Teardown order is load-bearing: stop -> destroy IOProc -> destroy aggregate -> destroy tap.
