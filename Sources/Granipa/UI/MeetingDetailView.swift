@@ -33,6 +33,16 @@ struct MeetingDetailView: View {
             }
         }
         .task { loadSegments() }
+        .onAppear {
+            if app.enhancingMeetingIDs.contains(meeting.id) {
+                tab = .enhanced
+            }
+        }
+        .onChange(of: app.enhancingMeetingIDs.contains(meeting.id)) { _, isEnhancing in
+            if isEnhancing {
+                tab = .enhanced
+            }
+        }
         .alert("Rename speaker", isPresented: .constant(renamingSpeaker != nil)) {
             TextField("Name", text: $renameSpeakerTo)
             Button("Rename") {

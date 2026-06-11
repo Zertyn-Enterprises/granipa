@@ -17,8 +17,12 @@ struct EnhancedNotesView: View {
             if isEnhancing {
                 VStack(spacing: 12) {
                     ProgressView()
-                    Text("Enhancing notes with \(providerName())…")
-                        .foregroundStyle(.secondary)
+                    Text("Writing notes with \(providerName())…")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(Theme.textPrimary)
+                    Text("Your rough notes and the transcript are being turned into the final report.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.textTertiary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let meeting, meeting.enhancedNotesMarkdown != nil {
@@ -45,7 +49,7 @@ struct EnhancedNotesView: View {
                 }
                 if let notes = meeting.enhancedNotesMarkdown {
                     section("Notes") {
-                        MarkdownText(markdown: notes)
+                        MarkdownBlocksView(markdown: notes)
                     }
                 }
                 let items = ActionItem.decodeList(from: meeting.actionItemsJSON)
