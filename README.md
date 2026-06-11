@@ -21,9 +21,7 @@ Grañipa records your meetings (no bot joins the call), transcribes them live on
 
 > Built as a personal replacement for Granola ($14/month), Raycast clipboard history, TextSniper, and Rectangle — in one native app.
 
-<p align="center">
-  <img src="docs/home.png" width="760" alt="Grañipa home — meetings organized by day">
-</p>
+> 🚧 **Beta** — currently in internal testing. The v1.0 public release (with a notarized download, demo video and screenshots) is around the corner. Found a bug? [Open an issue](../../issues).
 
 ## Features
 
@@ -51,6 +49,18 @@ Grañipa records your meetings (no bot joins the call), transcribes them live on
 
 - **Local REST API** — `127.0.0.1:7799`, bearer-token auth: meetings, transcripts, notes, folders, trigger enhancement.
 - **Webhooks** — HMAC-SHA256-signed POSTs on `meeting.started`, `meeting.completed` (full transcript included), `notes.enhanced`, with retry + backoff.
+
+## Shortcuts
+
+| Shortcut | Action |
+|---|---|
+| `⌥⇧V` | Clipboard history panel |
+| `⌥⇧T` | Capture screen text (OCR) |
+| `⌃⌥ ←` `→` `↑` `↓` | Snap window to half |
+| `⌃⌥ ⏎` / `⌃⌥ C` | Maximize / center window |
+| `⌃⌥ U` `I` `J` `K` | Window quarters |
+| `⌃⌥ D` `F` `G` | Window thirds |
+| `⌃⌥ ⌫` | Restore previous window size |
 
 ## Requirements
 
@@ -124,6 +134,13 @@ swift test         # 64 tests: storage, API, webhooks, language detection, windo
 ```
 
 Architecture notes for contributors (and AI agents) live in [CLAUDE.md](CLAUDE.md). PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Roadmap
+
+- **Ask your notes** — chat with one meeting or your whole archive, answered by your local AI CLI.
+- **Auto-updates** (Sparkle) for the notarized binary.
+- **⌥Space command palette** — meetings, clipboard, snippets and actions in one launcher.
+- Configurable shortcuts · light mode · audio language ID for any-language detection.
 
 ## FAQ
 
