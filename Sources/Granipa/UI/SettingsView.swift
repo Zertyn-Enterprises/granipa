@@ -1,3 +1,4 @@
+import ServiceManagement
 import SwiftUI
 
 struct SettingsView: View {
@@ -11,6 +12,8 @@ struct SettingsView: View {
                 .tabItem { Label("Templates", systemImage: "doc.text") }
             ProductivitySettings()
                 .tabItem { Label("Productivity", systemImage: "doc.on.clipboard") }
+            WindowSettings()
+                .tabItem { Label("Windows", systemImage: "macwindow.on.rectangle") }
             APISettings()
                 .tabItem { Label("API", systemImage: "network") }
             WebhookSettings()
@@ -25,9 +28,24 @@ private struct GeneralSettings: View {
     @AppStorage("defaultLocale") private var defaultLocale = "auto"
     @AppStorage("echoCancellation") private var echoCancellation = true
     @AppStorage("meetingDetectionEnabled") private var meetingDetection = true
+    @AppStorage("autoStopMode") private var autoStopMode = "ask"
+    @AppStorage("audioRetentionDays") private var audioRetentionDays = 0
+    @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
 
     var body: some View {
         Form {
+            Toggle("Launch at login", isOn: $launchAtLogin)
+                .onChange(of: launchAtLogin) {
+                    do {
+                        if launchAtLogin {
+                            try SMAppService.mainApp.register()
+                        } else {
+                            try SMAppService.mainApp.unregister()
+                        }
+                    } catch {
+                        launchAtLogin = SMAppService.mainApp.status == .enabled
+                    }
+                }
             Picker("Meeting language", selection: $defaultLocale) {
                 Text("Automatic (English / Español)").tag("auto")
                 Text("English").tag("en-US")
@@ -40,6 +58,20 @@ private struct GeneralSettings: View {
                 .onChange(of: meetingDetection) {
                     meetingDetection ? app.detector.start() : app.detector.stop()
                 }
+            Picker("When the meeting app hangs up", selection: $autoStopMode) {
+                Text("Do nothing").tag("off")
+                Text("Ask to stop recording").tag("ask")
+                Text("Stop recording automatically").tag("auto")
+            }
+            Picker("Keep meeting audio files", selection: $audioRetentionDays) {
+                Text("Forever").tag(0)
+                Text("7 days").tag(7)
+                Text("30 days").tag(30)
+                Text("90 days").tag(90)
+            }
+            Text("Transcripts and notes are always kept; this only removes the m4a recordings (~30 MB per hour).")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             Toggle("Echo cancellation (mic)", isOn: $echoCancellation)
             Text("Keep this on if you use speakers; it stops other participants' voices from bleeding into your mic channel.")
                 .font(.caption)
@@ -130,6 +162,34 @@ private struct ProductivitySettings: View {
                 Text("Select a screen region; recognized text (Spanish/English) is copied to the clipboard. Needs Screen Recording permission on first use.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+private struct WindowSettings: View {
+    @AppStorage("windowSnappingEnabled") private var snapping = true
+
+    var body: some View {
+        Form {
+            Toggle("Window snapping shortcuts", isOn: $snapping)
+            Text("Uses the same Accessibility permission as auto-paste. All shortcuts are Control + Option.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Section("Halves & maximize") {
+                LabeledContent("Left / Right half", value: "⌃⌥←  ⌃⌥→")
+                LabeledContent("Top / Bottom half", value: "⌃⌥↑  ⌃⌥↓")
+                LabeledContent("Maximize", value: "⌃⌥⏎")
+                LabeledContent("Center", value: "⌃⌥C")
+                LabeledContent("Restore previous size", value: "⌃⌥⌫")
+            }
+            Section("Quarters") {
+                LabeledContent("Top left / Top right", value: "⌃⌥U  ⌃⌥I")
+                LabeledContent("Bottom left / Bottom right", value: "⌃⌥J  ⌃⌥K")
+            }
+            Section("Thirds") {
+                LabeledContent("First / Center / Last third", value: "⌃⌥D  ⌃⌥F  ⌃⌥G")
             }
         }
         .formStyle(.grouped)

@@ -13,6 +13,7 @@ final class AppState {
     private let apiServer = APIServer()
     private var webhookLoop: Task<Void, Never>?
     private var clipboardMonitor: ClipboardMonitor?
+    private var autoStopTask: Task<Void, Never>?
     private(set) var transcription: TranscriptionCoordinator?
     private(set) var enhancingMeetingIDs: Set<String> = []
     var meetings: [Meeting] = []
@@ -49,6 +50,7 @@ final class AppState {
         calendar.start()
         setupDetection()
         setupProductivity()
+        purgeOldAudio()
     }
 
     private func setupProductivity() {
@@ -72,12 +74,78 @@ final class AppState {
         ) {
             Task { await OCRService.captureAndCopy() }
         }
+        WindowManager.shared.registerHotkeys()
+    }
+
+    private func purgeOldAudio() {
+        let days = UserDefaults.standard.integer(forKey: "audioRetentionDays")
+        guard days > 0, let db = database else { return }
+        let cutoff = Date.now.addingTimeInterval(-Double(days) * 86_400)
+        for index in meetings.indices {
+            var meeting = meetings[index]
+            guard meeting.status == .ready,
+                (meeting.endedAt ?? meeting.createdAt) < cutoff,
+                meeting.audioMicPath != nil || meeting.audioSystemPath != nil,
+                recorder.meetingID != meeting.id
+            else { continue }
+            if let dir = try? AppPaths.audioDirectory(meetingID: meeting.id) {
+                try? FileManager.default.removeItem(at: dir)
+            }
+            meeting.audioMicPath = nil
+            meeting.audioSystemPath = nil
+            meetings[index] = meeting
+            try? db.save(meeting)
+        }
+    }
+
+    // Watches for the meeting app hanging up while we are still recording.
+    private func startMeetingEndWatch() {
+        autoStopTask?.cancel()
+        autoStopTask = Task { [weak self] in
+            var sawMeetingApp = false
+            var inactiveSince: Date?
+            while !Task.isCancelled {
+                guard let self, self.recorder.isRecording else { return }
+                if self.detector.meetingAppActive {
+                    sawMeetingApp = true
+                    inactiveSince = nil
+                } else if sawMeetingApp {
+                    if let since = inactiveSince {
+                        if Date.now.timeIntervalSince(since) > 45 {
+                            await self.handleMeetingEnded()
+                            return
+                        }
+                    } else {
+                        inactiveSince = .now
+                    }
+                }
+                try? await Task.sleep(for: .seconds(5))
+            }
+        }
+    }
+
+    private func handleMeetingEnded() async {
+        guard recorder.isRecording else { return }
+        switch UserDefaults.standard.string(forKey: "autoStopMode") ?? "ask" {
+        case "auto":
+            await stopRecording()
+            NotificationManager.shared.notify(
+                title: "Recording stopped",
+                body: "The meeting app hung up, so Grañipa stopped and is processing your notes.")
+        case "ask":
+            NotificationManager.shared.notifyMeetingEnded()
+        default:
+            break
+        }
     }
 
     private func setupDetection() {
         NotificationManager.shared.setup()
         NotificationManager.recordHandler = { [weak self] in
             self?.startRecordingFromDetection()
+        }
+        NotificationManager.stopHandler = { [weak self] in
+            Task { await self?.stopRecording() }
         }
         detector.onMeetingDetected = { [weak self] appName in
             guard let self, !self.recorder.isRecording else { return }
@@ -220,6 +288,7 @@ final class AppState {
             meeting.startedAt = .now
             update(meeting)
             selectedMeetingID = targetID
+            startMeetingEndWatch()
             if let db = database {
                 WebhookService.enqueue(
                     event: .meetingStarted,
@@ -234,6 +303,8 @@ final class AppState {
     }
 
     func stopRecording() async {
+        autoStopTask?.cancel()
+        autoStopTask = nil
         guard let id = recorder.meetingID, let urls = recorder.stop() else { return }
         // Re-fetch: the transcription coordinator may have written the detected
         // language while the array copy was stale.

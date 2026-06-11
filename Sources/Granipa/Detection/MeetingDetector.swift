@@ -25,6 +25,7 @@ enum MeetingApps {
 @Observable
 final class MeetingDetector {
     private(set) var detectedApp: String?
+    private(set) var meetingAppActive = false
     var onMeetingDetected: ((String) -> Void)?
     private var pollTask: Task<Void, Never>?
     private var lastActive = false
@@ -53,6 +54,7 @@ final class MeetingDetector {
     private func poll() {
         let active = Self.activeMeetingApp()
         let isActive = active != nil
+        meetingAppActive = isActive
         if isActive, !lastActive, let name = active {
             detectedApp = name
             onMeetingDetected?(name)
