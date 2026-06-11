@@ -4,6 +4,8 @@ struct EnhancedNotesView: View {
     @Environment(AppState.self) private var app
     let meetingID: String
 
+    @State private var emailExpanded = false
+
     private var meeting: Meeting? {
         app.meetings.first { $0.id == meetingID }
     }
@@ -28,74 +30,103 @@ struct EnhancedNotesView: View {
             } else if let meeting, meeting.enhancedNotesMarkdown != nil {
                 content(for: meeting)
             } else {
-                ContentUnavailableView {
-                    Label("No enhanced notes yet", systemImage: "wand.and.stars")
-                } description: {
-                    Text("Enhancement runs automatically when a recording ends, or run it now.")
-                } actions: {
+                VStack(spacing: 10) {
+                    Image(systemName: "wand.and.stars")
+                        .font(.system(size: 28))
+                        .foregroundStyle(Theme.textTertiary)
+                    Text("No enhanced notes yet")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(Theme.textSecondary)
+                    Text("Enhancement runs automatically when a recording ends.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.textTertiary)
                     enhanceButton(title: "Enhance now")
+                        .padding(.top, 6)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
     }
 
+    // MARK: - Document
+
     private func content(for meeting: Meeting) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                if let summary = meeting.summary {
-                    section("Summary") {
+            VStack(alignment: .leading, spacing: 20) {
+                if let summary = meeting.summary, !summary.isEmpty {
+                    HStack(alignment: .top, spacing: 12) {
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(Theme.accent)
+                            .frame(width: 3)
                         MarkdownText(markdown: summary)
+                            .font(.system(size: 14.5))
+                            .lineSpacing(3)
+                            .foregroundStyle(Theme.textSecondary)
                     }
+                    .fixedSize(horizontal: false, vertical: true)
                 }
+
                 if let notes = meeting.enhancedNotesMarkdown {
-                    section("Notes") {
-                        MarkdownBlocksView(markdown: notes)
-                    }
+                    MarkdownBlocksView(markdown: notes)
                 }
+
                 let items = ActionItem.decodeList(from: meeting.actionItemsJSON)
                 if !items.isEmpty {
-                    section("Action items") {
-                        ForEach(items, id: \.self) { item in
-                            HStack(alignment: .top, spacing: 6) {
-                                Image(systemName: "checkmark.square")
-                                    .foregroundStyle(.secondary)
-                                Text(item.owner.map { "\(item.text) — \($0)" } ?? item.text)
+                    sectionHeader("Action items")
+                    VStack(alignment: .leading, spacing: 7) {
+                        ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                            ActionItemRow(item: item) {
+                                app.toggleActionItem(meetingID: meeting.id, index: index)
                             }
                         }
                     }
                 }
-                if let draft = meeting.emailDraft {
-                    section("Follow-up email") {
-                        MarkdownText(markdown: draft)
-                        Button("Copy email", systemImage: "doc.on.doc") {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(draft, forType: .string)
+
+                if let draft = meeting.emailDraft, !draft.isEmpty {
+                    sectionHeader("Follow-up email")
+                    DisclosureGroup(isExpanded: $emailExpanded) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            MarkdownText(markdown: draft)
+                                .font(.system(size: 13.5))
+                                .lineSpacing(3)
+                                .foregroundStyle(Theme.textPrimary)
+                            Button {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(draft, forType: .string)
+                                ToastController.shared.show("Email copied")
+                            } label: {
+                                Label("Copy email", systemImage: "doc.on.doc")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.white)
                         }
-                        .font(.caption)
+                        .padding(.top, 10)
+                    } label: {
+                        Text(emailExpanded ? "Hide draft" : "Show draft")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Theme.textSecondary)
                     }
+                    .tint(Theme.textTertiary)
                 }
-                enhanceButton(title: "Re-enhance")
-                    .padding(.top, 4)
+
+                HStack {
+                    enhanceButton(title: "Re-enhance")
+                    Spacer()
+                }
+                .padding(.top, 10)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding()
+            .frame(maxWidth: 720, alignment: .leading)
+            .padding(.horizontal, 28)
+            .padding(.vertical, 22)
         }
     }
 
-    private func section(_ title: String, @ViewBuilder body: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.textSecondary)
-                .textCase(.uppercase)
-                .tracking(0.5)
-            body()
-                .font(.system(size: 14))
-                .foregroundStyle(Theme.textPrimary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .card()
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 17, weight: .semibold, design: .serif))
+            .foregroundStyle(Theme.textPrimary)
+            .padding(.top, 6)
     }
 
     private func enhanceButton(title: String) -> some View {
@@ -113,6 +144,31 @@ struct EnhancedNotesView: View {
     private func providerName() -> String {
         let id = UserDefaults.standard.string(forKey: "llmProvider") ?? "claude"
         return LLMProviders.spec(id: id)?.displayName ?? id
+    }
+}
+
+private struct ActionItemRow: View {
+    let item: ActionItem
+    let toggle: () -> Void
+
+    private var isDone: Bool { item.done == true }
+
+    var body: some View {
+        Button(action: toggle) {
+            HStack(alignment: .firstTextBaseline, spacing: 9) {
+                Image(systemName: isDone ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 14))
+                    .foregroundStyle(isDone ? Theme.accent : Theme.textTertiary)
+                Text(item.text + (item.owner.map { " — \($0)" } ?? ""))
+                    .font(.system(size: 14))
+                    .strikethrough(isDone)
+                    .foregroundStyle(isDone ? Theme.textTertiary : Theme.textPrimary)
+                    .multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 

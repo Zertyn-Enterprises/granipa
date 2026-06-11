@@ -25,7 +25,9 @@ enum MeetingExporter {
         let items = ActionItem.decodeList(from: meeting.actionItemsJSON)
         if !items.isEmpty {
             let list = items
-                .map { "- [ ] \($0.text)\($0.owner.map { " — \($0)" } ?? "")" }
+                .map {
+                    "- [\($0.done == true ? "x" : " ")] \($0.text)\($0.owner.map { " — \($0)" } ?? "")"
+                }
                 .joined(separator: "\n")
             parts.append("## Action items\n\n\(list)")
         }

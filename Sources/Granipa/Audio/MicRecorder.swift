@@ -12,6 +12,11 @@ final class MicRecorder {
         let input = engine.inputNode
         if echoCancellation {
             try? input.setVoiceProcessingEnabled(true)
+            // Voice processing ducks ALL other system audio by default — users
+            // hear their meeting go quiet while we record. Minimize it.
+            input.voiceProcessingOtherAudioDuckingConfiguration =
+                AVAudioVoiceProcessingOtherAudioDuckingConfiguration(
+                    enableAdvancedDucking: false, duckingLevel: .min)
         }
         let format = input.outputFormat(forBus: 0)
         Self.log.info(
