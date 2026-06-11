@@ -130,7 +130,7 @@ final class AppState {
 
     func createMeeting(title: String = "Untitled meeting", calendarEventID: String? = nil) {
         guard let db = database else { return }
-        let language = UserDefaults.standard.string(forKey: "defaultLocale") ?? "en-US"
+        let language = UserDefaults.standard.string(forKey: "defaultLocale") ?? "auto"
         var meeting = Meeting.new(title: title, language: language)
         meeting.calendarEventID = calendarEventID
         do {
@@ -202,7 +202,9 @@ final class AppState {
 
     func stopRecording() async {
         guard let id = recorder.meetingID, let urls = recorder.stop() else { return }
-        guard var meeting = meetings.first(where: { $0.id == id }) else { return }
+        // Re-fetch: the transcription coordinator may have written the detected
+        // language while the array copy was stale.
+        guard let db = database, var meeting = try? db.fetchMeeting(id: id) else { return }
         meeting.status = .processing
         meeting.endedAt = .now
         meeting.audioMicPath = urls.micURL.path
@@ -236,7 +238,7 @@ final class AppState {
 
         await enhance(meetingID: meetingID)
 
-        if var finished = meetings.first(where: { $0.id == meetingID }) {
+        if var finished = try? db.fetchMeeting(id: meetingID) {
             finished.status = .ready
             update(finished)
         }

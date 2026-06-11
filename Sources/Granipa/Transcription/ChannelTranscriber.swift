@@ -5,10 +5,12 @@ import Speech
 
 struct LiveTranscriptionUpdate: Sendable {
     let channel: AudioChannel
+    let localeID: String
     let text: String
     let startSeconds: Double?
     let endSeconds: Double?
     let isFinal: Bool
+    let confidence: Double?
 }
 
 func transcribeChannel(
@@ -17,11 +19,12 @@ func transcribeChannel(
     chunks: AsyncStream<AudioChunk>,
     onUpdate: @escaping @Sendable (LiveTranscriptionUpdate) -> Void
 ) async throws {
+    let localeID = locale.identifier(.bcp47)
     let transcriber = SpeechTranscriber(
         locale: locale,
         transcriptionOptions: [],
         reportingOptions: [.volatileResults],
-        attributeOptions: [.audioTimeRange])
+        attributeOptions: [.audioTimeRange, .transcriptionConfidence])
     let analyzer = SpeechAnalyzer(modules: [transcriber])
 
     guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
@@ -36,13 +39,26 @@ func transcribeChannel(
             guard !text.isEmpty else { continue }
             let start = result.range.start.seconds
             let end = result.range.end.seconds
+
+            var confidenceSum = 0.0
+            var confidenceWeight = 0.0
+            for run in result.text.runs {
+                if let confidence = run.transcriptionConfidence {
+                    let length = Double(result.text[run.range].characters.count)
+                    confidenceSum += confidence * length
+                    confidenceWeight += length
+                }
+            }
+
             onUpdate(
                 LiveTranscriptionUpdate(
                     channel: channel,
+                    localeID: localeID,
                     text: text,
                     startSeconds: start.isFinite ? start : nil,
                     endSeconds: end.isFinite ? end : nil,
-                    isFinal: result.isFinal))
+                    isFinal: result.isFinal,
+                    confidence: confidenceWeight > 0 ? confidenceSum / confidenceWeight : nil))
         }
     }
 

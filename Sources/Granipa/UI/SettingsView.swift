@@ -20,16 +20,20 @@ struct SettingsView: View {
 
 private struct GeneralSettings: View {
     @Environment(AppState.self) private var app
-    @AppStorage("defaultLocale") private var defaultLocale = "en-US"
+    @AppStorage("defaultLocale") private var defaultLocale = "auto"
     @AppStorage("echoCancellation") private var echoCancellation = true
     @AppStorage("meetingDetectionEnabled") private var meetingDetection = true
 
     var body: some View {
         Form {
-            Picker("Default meeting language", selection: $defaultLocale) {
+            Picker("Meeting language", selection: $defaultLocale) {
+                Text("Automatic (English / Español)").tag("auto")
                 Text("English").tag("en-US")
                 Text("Español").tag("es-ES")
             }
+            Text("Automatic runs both models for the first seconds of a recording and keeps the one that matches what it hears.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             Toggle("Detect meetings automatically", isOn: $meetingDetection)
                 .onChange(of: meetingDetection) {
                     meetingDetection ? app.detector.start() : app.detector.stop()
