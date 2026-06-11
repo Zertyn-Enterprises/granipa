@@ -3,6 +3,7 @@ import Foundation
 struct ActionItem: Codable, Hashable, Sendable {
     var text: String
     var owner: String?
+    var done: Bool? = nil
 
     static func decodeList(from json: String?) -> [ActionItem] {
         guard let json, let data = json.data(using: .utf8) else { return [] }

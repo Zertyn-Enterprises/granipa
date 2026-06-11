@@ -46,6 +46,19 @@ import Testing
 }
 
 @Suite struct EnhancementServiceTests {
+    @Test func actionItemDoneRoundTripsAndLegacyDecodes() throws {
+        let legacy = #"[{"text": "Send deck", "owner": "Ana"}]"#
+        let decoded = ActionItem.decodeList(from: legacy)
+        #expect(decoded.count == 1)
+        #expect(decoded[0].done == nil)
+
+        var item = decoded[0]
+        item.done = true
+        let encoded = ActionItem.encodeList([item])
+        let roundTrip = ActionItem.decodeList(from: encoded)
+        #expect(roundTrip[0].done == true)
+    }
+
     @Test func parsesPlainJSON() throws {
         let raw = """
             {"title": "Roadmap sync", "summary": "We synced.", "enhanced_notes": "## Notes",

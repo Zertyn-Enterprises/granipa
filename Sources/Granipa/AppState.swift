@@ -2,6 +2,7 @@ import AppKit
 import Carbon.HIToolbox
 import Foundation
 import Observation
+import os
 
 @MainActor
 @Observable
@@ -337,7 +338,9 @@ final class AppState {
                     database: db,
                     nameInferenceProviderID: inferNames ? providerID : nil)
             } catch {
-                // Diarization is best-effort; segments keep their "Them" label.
+                // Best-effort: segments keep their "Them" label, but leave evidence.
+                Logger(subsystem: "com.zertyn.granipa", category: "diarization")
+                    .error("diarization failed: \(error.localizedDescription, privacy: .public)")
             }
         }
 
@@ -453,6 +456,15 @@ final class AppState {
     func moveMeeting(meetingID: String, toFolder folderID: String?) {
         guard var meeting = meetings.first(where: { $0.id == meetingID }) else { return }
         meeting.folderID = folderID
+        update(meeting)
+    }
+
+    func toggleActionItem(meetingID: String, index: Int) {
+        guard var meeting = meetings.first(where: { $0.id == meetingID }) else { return }
+        var items = ActionItem.decodeList(from: meeting.actionItemsJSON)
+        guard items.indices.contains(index) else { return }
+        items[index].done = !(items[index].done ?? false)
+        meeting.actionItemsJSON = ActionItem.encodeList(items)
         update(meeting)
     }
 

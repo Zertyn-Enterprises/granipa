@@ -50,35 +50,39 @@ struct RecordingHUD: View {
                                 Text("\(last.speaker): \(last.text)")
                                     .font(.caption)
                                     .lineLimit(2)
+                                    .truncationMode(.head)
                                     .foregroundStyle(.secondary)
                             }
                             if !live.volatileSystem.isEmpty {
                                 Text("Them: \(live.volatileSystem)")
                                     .font(.caption)
                                     .lineLimit(2)
+                                    .truncationMode(.head)
                                     .italic()
                                     .foregroundStyle(.tertiary)
                             } else if !live.volatileMic.isEmpty {
                                 Text("Me: \(live.volatileMic)")
                                     .font(.caption)
                                     .lineLimit(2)
+                                    .truncationMode(.head)
                                     .italic()
                                     .foregroundStyle(.tertiary)
                             }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
-                .padding(12)
+                .padding(16)
             } else {
                 VStack(spacing: 8) {
                     Text("Not recording")
                         .foregroundStyle(.secondary)
                     Button("Close") { dismiss() }
                 }
-                .padding(12)
+                .padding(16)
             }
         }
-        .frame(width: 380)
+        .frame(width: 400)
         .background(Theme.card)
         .preferredColorScheme(.dark)
     }
