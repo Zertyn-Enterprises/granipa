@@ -64,6 +64,12 @@ enum EnhancementService {
             no notes, build the report entirely from the transcript.
             - Quote verbatim when exact wording matters (commitments, pushback, strong \
             reactions, pricing).
+            - Notes house style: "## Heading" per topic, then short nested bullets \
+            (two-space indent for sub-points). One fact per bullet, fragments over full \
+            sentences. Never prose paragraphs inside "enhanced_notes".
+            - Zero duplication: "summary" and "enhanced_notes" must not repeat each other. \
+            The notes start directly at the first topic section - no intro, no TL;DR, no \
+            recap - and no fact appears twice anywhere in the report.
 
             Respond with ONLY a single JSON object - no markdown fences, no commentary - \
             with exactly these keys:

@@ -116,6 +116,11 @@ struct AppDatabase: Sendable {
                 try template.save(db)
             }
         }
+        migrator.registerMigration("v7-template-house-style") { db in
+            for template in MeetingTemplate.builtins {
+                try template.save(db)
+            }
+        }
         return migrator
     }
 }
