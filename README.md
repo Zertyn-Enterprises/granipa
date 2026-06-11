@@ -1,20 +1,38 @@
-<p align="center">
-  <img src="Resources/icon-512.png" width="160" alt="Grañipa icon">
-</p>
+<div align="center">
+  <img src="Resources/icon-512.png" width="140" alt="Grañipa icon">
 
-# Grañipa
+  # Grañipa
 
-**A free, open-source, fully local meeting notes app for macOS — plus the productivity tools you keep paying subscriptions for.**
+  **The fully local, open-source meeting notes app for macOS — plus the productivity tools you keep paying subscriptions for.**
+
+  ![macOS 26+](https://img.shields.io/badge/macOS-26%2B-blue)
+  ![Swift 6](https://img.shields.io/badge/Swift-6-F05423)
+  ![License: MIT](https://img.shields.io/badge/License-MIT-green)
+  ![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)
+
+  **English** | [简体中文](README.zh-CN.md)
+</div>
+
+---
 
 Grañipa records your meetings (no bot joins the call), transcribes them live on-device, figures out who said what, turns your rough notes into polished ones with AI, and pushes everything to your own services — while also replacing your clipboard manager, OCR tool, and window manager.
 
-No accounts. No cloud. No subscriptions. Your data never leaves your Mac unless *you* send it somewhere.
+**No accounts. No cloud. No subscriptions.** Your data never leaves your Mac unless *you* send it somewhere.
 
 > Built as a personal replacement for Granola ($14/month), Raycast clipboard history, TextSniper, and Rectangle — in one native app.
+
+<p align="center">
+  <img src="docs/home.png" width="760" alt="Grañipa home — meetings organized by day">
+</p>
 
 ## Features
 
 ### 🎙 Meetings
+
+<p align="center">
+  <img src="docs/transcript.png" width="760" alt="Live transcript during a recording">
+</p>
+
 - **Bot-free recording** — captures your mic and the system audio (other participants) as two clean channels via a Core Audio process tap. Works with Zoom, Meet, Teams, Webex, anything that plays audio.
 - **Live on-device transcription** — Apple SpeechAnalyzer (macOS 26), streaming word-by-word. Free and offline.
 - **Automatic language detection** — runs English and Spanish models in parallel for the first seconds and keeps the winner.
@@ -23,23 +41,25 @@ No accounts. No cloud. No subscriptions. Your data never leaves your Mac unless 
 - **Bring your own AI subscription** — shells out to the `claude`, `codex`, `gemini`, or `grok` CLI you already pay for. **No API keys, no per-token billing.**
 - **Templates** — per-meeting-type prompts (1:1, standup, sales call…), fully editable.
 - **Folders & teams** — organize meetings Granola-style; structure is exposed through the API.
-- **Calendar integration** — upcoming meetings in the app (via macOS Calendar), one-click record, auto-titling from the event.
+- **Calendar integration** — upcoming meetings in the app, one-click record, auto-titling from the event.
 - **Auto-detection** — notices when a meeting app starts using the mic and offers to record; can auto-stop when the call ends.
 - **Search** — full-text across titles, notes, and transcripts.
 
 ### 🧰 Productivity
+
 - **Clipboard history** (`⌥⇧V`) — Raycast-style floating panel: search, type filters, image previews, source app, auto-paste into the active app. Respects password-manager confidentiality markers. 100% local.
 - **Screen text capture / OCR** (`⌥⇧T`) — select any screen region, the text lands in your clipboard (Vision framework, Spanish + English).
 - **Window management** (`⌃⌥` + arrows/letters) — Rectangle-compatible shortcuts: halves, quarters, thirds, maximize, center, restore.
 
 ### 🔌 Integrations
+
 - **Local REST API** — `127.0.0.1:7799`, bearer-token auth: meetings, transcripts, notes, folders, trigger enhancement.
 - **Webhooks** — HMAC-SHA256-signed POSTs on `meeting.started`, `meeting.completed` (full transcript included), `notes.enhanced`, with retry + backoff.
 
 ## Requirements
 
 - **macOS 26+** on Apple Silicon.
-- Xcode 26 toolchain (to build).
+- Xcode 26 toolchain (to build from source).
 - At least one AI CLI installed and logged in: [Claude Code](https://docs.anthropic.com/claude-code), OpenAI Codex, Gemini CLI, or Grok — only needed for note enhancement; recording and transcription work without any.
 
 ## Install

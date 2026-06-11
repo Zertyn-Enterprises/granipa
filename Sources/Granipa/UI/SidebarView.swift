@@ -15,7 +15,19 @@ struct SidebarView: View {
     var body: some View {
         @Bindable var app = app
         VStack(alignment: .leading, spacing: 2) {
-            Color.clear.frame(height: 34)
+            Color.clear.frame(height: 28)
+
+            HStack(spacing: 8) {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .frame(width: 26, height: 26)
+                Text("Grañipa")
+                    .font(.system(size: 15, weight: .semibold, design: .serif))
+                    .foregroundStyle(Theme.textPrimary)
+                Spacer()
+            }
+            .padding(.horizontal, 6)
+            .padding(.bottom, 12)
 
             searchField
                 .padding(.bottom, 10)

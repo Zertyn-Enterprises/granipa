@@ -20,6 +20,7 @@ struct SettingsView: View {
                 .tabItem { Label("Webhooks", systemImage: "arrow.up.right.square") }
         }
         .frame(width: 560, height: 460)
+        .preferredColorScheme(.dark)
     }
 }
 
@@ -253,6 +254,7 @@ private struct WebhookSettings: View {
                     systemImage: "arrow.up.right.square",
                     description: Text("Push transcripts and notes to your services when meetings end.")
                 )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     VStack(spacing: 8) {
@@ -273,7 +275,7 @@ private struct WebhookSettings: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
-            .padding(8)
+            .padding(12)
         }
     }
 }
@@ -354,6 +356,7 @@ private struct TemplateSettings: View {
                     app.deleteTemplate(id: template.id)
                     editing = nil
                 }
+                .id(template.id)
             } else {
                 Text("Select a template to edit, or add a new one.")
                     .foregroundStyle(.secondary)

@@ -51,6 +51,18 @@ struct HomeView: View {
                     }
                     .buttonStyle(.bordered)
                     .tint(.white)
+                    Button {
+                        app.startRecording()
+                    } label: {
+                        Label(
+                            app.recorder.isRecording ? "Recording…" : "Record",
+                            systemImage: "record.circle"
+                        )
+                        .font(.system(size: 13, weight: .semibold))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.accent)
+                    .disabled(app.recorder.isRecording)
                 }
 
                 if !isSearching, activeFolder == nil, let event = nextEvent {

@@ -20,12 +20,17 @@ struct MainWindow: View {
                 if let appName = app.detector.detectedApp, !app.recorder.isRecording {
                     detectionBanner(appName: appName)
                 }
-                if let meeting = app.selectedMeeting {
-                    MeetingDetailView(meeting: meeting)
-                        .id(meeting.id)
-                } else {
-                    HomeView()
+                Group {
+                    if let meeting = app.selectedMeeting {
+                        MeetingDetailView(meeting: meeting)
+                            .id(meeting.id)
+                            .transition(.opacity)
+                    } else {
+                        HomeView()
+                            .transition(.opacity)
+                    }
                 }
+                .animation(.easeInOut(duration: 0.15), value: app.selectedMeetingID)
             }
             .frame(maxWidth: .infinity)
             .background(Theme.bg)

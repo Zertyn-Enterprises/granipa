@@ -67,6 +67,7 @@ struct HoverHighlight: ViewModifier {
             .background(
                 hovering ? Color.white.opacity(0.05) : .clear,
                 in: RoundedRectangle(cornerRadius: cornerRadius))
+            .animation(.easeOut(duration: 0.12), value: hovering)
             .onHover { hovering = $0 }
     }
 }
