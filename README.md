@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="Resources/icon-512.png" width="160" alt="Grañipa icon">
+</p>
+
 # Grañipa
 
 **A free, open-source, fully local meeting notes app for macOS — plus the productivity tools you keep paying subscriptions for.**

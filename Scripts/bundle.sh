@@ -17,6 +17,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Granipa"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 if ! codesign --force --sign "$SIGN_ID" "$APP" 2>/dev/null; then
   echo "WARN: signing with '$SIGN_ID' failed (locked keychain?); using ad-hoc signature."
   echo "      Ad-hoc builds re-prompt for audio permissions after every rebuild."
