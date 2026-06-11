@@ -40,49 +40,19 @@ final class SystemAudioTap {
             throw CoreAudioError(status: -1, stage: "tap format init")
         }
 
-        // Default OUTPUT device (what the user hears through, e.g. AirPods) — not
-        // the "system output" (alert sounds), which often stays on the built-in
-        // speakers and leaves the aggregate clocked by a device that never runs.
-        var outputAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain)
-        var outputID = AudioDeviceID(kAudioObjectUnknown)
-        var idSize = UInt32(MemoryLayout<AudioDeviceID>.size)
-        err = AudioObjectGetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject), &outputAddress, 0, nil, &idSize, &outputID)
-        guard err == noErr else {
-            stop()
-            throw CoreAudioError(status: err, stage: "default output device")
-        }
-
-        var uidAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyDeviceUID,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain)
-        var outputUIDRef: Unmanaged<CFString>?
-        var uidSize = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
-        err = withUnsafeMutablePointer(to: &outputUIDRef) { pointer in
-            AudioObjectGetPropertyData(outputID, &uidAddress, 0, nil, &uidSize, pointer)
-        }
-        guard err == noErr, let outputUID = outputUIDRef?.takeRetainedValue() as String? else {
-            stop()
-            throw CoreAudioError(status: err, stage: "output device UID")
-        }
-
+        // Tap-only aggregate: no physical sub-device, so no dependency on any
+        // output device's clock or state. A Bluetooth device in call mode (AirPods
+        // while their mic records) never ticks for our IOProc when used as the
+        // aggregate clock — the tap times itself instead, and process taps capture
+        // pre-routing, so output-device and route changes can't starve it.
         let aggregateDescription: [String: Any] = [
             kAudioAggregateDeviceNameKey: "Granipa-Tap",
             kAudioAggregateDeviceUIDKey: UUID().uuidString,
-            kAudioAggregateDeviceMainSubDeviceKey: outputUID,
             kAudioAggregateDeviceIsPrivateKey: true,
-            kAudioAggregateDeviceIsStackedKey: false,
             kAudioAggregateDeviceTapAutoStartKey: true,
-            kAudioAggregateDeviceSubDeviceListKey: [
-                [kAudioSubDeviceUIDKey: outputUID]
-            ],
             kAudioAggregateDeviceTapListKey: [
                 [
-                    kAudioSubTapDriftCompensationKey: true,
+                    kAudioSubTapDriftCompensationKey: false,
                     kAudioSubTapUIDKey: description.uuid.uuidString,
                 ]
             ],
@@ -112,7 +82,7 @@ final class SystemAudioTap {
             throw CoreAudioError(status: err, stage: "start aggregate device")
         }
         Self.log.info(
-            "tap running: clock device '\(outputUID, privacy: .public)' format=\(format.sampleRate)Hz ch=\(format.channelCount)")
+            "tap running: tap-only aggregate, format=\(format.sampleRate)Hz ch=\(format.channelCount)")
     }
 
     // Teardown order is load-bearing: stop -> destroy IOProc -> destroy aggregate -> destroy tap.
