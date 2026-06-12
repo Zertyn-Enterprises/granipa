@@ -36,13 +36,23 @@ codesign --verify --strict --verbose=2 "$APP"
 
 echo "==> Notarizing (profile: $PROFILE)"
 rm -f "$ZIP"
-ditto -c -k --keepParent "$APP" "$ZIP"
+# --sequesterRsrc keeps AppleDouble metadata out of the bundle: without it,
+# Archive Utility extracts xattrs as literal ._ files inside Sparkle.framework,
+# breaking the seal ("unsealed contents") and triggering Gatekeeper's malware dialog.
+ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
 xcrun notarytool submit "$ZIP" --keychain-profile "$PROFILE" --wait
 
 echo "==> Stapling ticket and producing final artifact"
 xcrun stapler staple "$APP"
 rm -f "$ZIP"
-ditto -c -k --keepParent "$APP" "$ZIP"
+ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
+
+echo "==> Verifying the artifact survives Archive Utility (Finder double-click)"
+RT="$(mktemp -d)"
+cp "$ZIP" "$RT/" && open -W -a "Archive Utility" "$RT/$(basename "$ZIP")"
+codesign --verify --deep --strict "$RT/$(basename "$APP")"
+spctl --assess --type execute "$RT/$(basename "$APP")"
+rm -rf "$RT"
 
 echo
 echo "Release artifact: $ZIP"
