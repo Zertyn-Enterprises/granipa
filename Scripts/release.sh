@@ -49,7 +49,8 @@ ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
 
 echo "==> Verifying the artifact survives Archive Utility (Finder double-click)"
 RT="$(mktemp -d)"
-cp "$ZIP" "$RT/" && open -W -a "Archive Utility" "$RT/$(basename "$ZIP")"
+# -g -j: expand in the background without revealing the temp folder in Finder.
+cp "$ZIP" "$RT/" && open -W -g -j -a "Archive Utility" "$RT/$(basename "$ZIP")"
 codesign --verify --deep --strict "$RT/$(basename "$APP")"
 spctl --assess --type execute "$RT/$(basename "$APP")"
 rm -rf "$RT"
