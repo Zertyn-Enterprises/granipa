@@ -15,13 +15,13 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.9.0</string>
+	<string>1.0.0</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>© 2026 Zertyn. MIT License.</string>
 	<key>SUFeedURL</key>
 	<string>https://github.com/Zertyn-Enterprises/granipa/releases/latest/download/appcast.xml</string>
 	<key>SUPublicEDKey</key>
-	<string>SPARKLE_ED_PUBLIC_KEY_PLACEHOLDER</string>
+	<string>ks7af26bbc5++wGiBUk2JFCEFqk9ZHHzihZaJJCNOgo=</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>CFBundleVersion</key>
