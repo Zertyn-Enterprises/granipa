@@ -12,7 +12,7 @@ struct GranipaApp: App {
     @State private var appState = AppState()
 
     var body: some Scene {
-        WindowGroup("Grañipa") {
+        WindowGroup("Grañipa", id: "main") {
             MainWindow()
                 .environment(appState)
         }
@@ -26,6 +26,14 @@ struct GranipaApp: App {
             MenuBarView()
                 .environment(appState)
         }
+
+        Window("Welcome to Grañipa", id: "onboarding") {
+            OnboardingView()
+                .environment(appState)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
 
         Window("Recording", id: "recording-hud") {
             RecordingHUD()

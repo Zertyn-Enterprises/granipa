@@ -7,6 +7,8 @@ struct SettingsView: View {
         TabView {
             GeneralSettings()
                 .tabItem { Label("General", systemImage: "gearshape") }
+            PermissionsSettings()
+                .tabItem { Label("Permissions", systemImage: "lock.shield") }
             AISettings()
                 .tabItem { Label("AI", systemImage: "wand.and.stars") }
             TemplateSettings()

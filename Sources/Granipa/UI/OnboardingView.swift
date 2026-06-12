@@ -1,7 +1,8 @@
 import SwiftUI
 
 struct OnboardingView: View {
-    let onDone: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage("onboardingCompleted") private var onboardingCompleted = false
     @State private var step = 0
 
     private let totalSteps = 3
@@ -16,13 +17,16 @@ struct OnboardingView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(28)
+            .padding(.horizontal, 28)
+            .padding(.top, 36)
+            .padding(.bottom, 20)
 
             footer
         }
         .frame(width: 540, height: 600)
         .background(Theme.bg)
         .preferredColorScheme(.dark)
+        .onDisappear { onboardingCompleted = true }
     }
 
     // MARK: - Step 0
@@ -54,18 +58,11 @@ struct OnboardingView: View {
             Text("Permissions, explained")
                 .font(.system(size: 24, weight: .semibold, design: .serif))
                 .foregroundStyle(Theme.textPrimary)
-            Text("macOS will ask for these as you use each feature — nothing is requested up front. Approve the ones you need:")
+            Text("macOS will ask for these as you use each feature — nothing is requested up front. This list shows the live status (revisit it anytime in Settings → Permissions):")
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.textSecondary)
 
-            VStack(spacing: 8) {
-                permissionRow("mic.fill", "Microphone", "Your side of the conversation — first recording.")
-                permissionRow("speaker.wave.2.fill", "System Audio Recording", "The other participants — first recording. Without it, only your mic is captured.")
-                permissionRow("calendar", "Calendars", "Shows upcoming meetings and auto-titles recordings.")
-                permissionRow("bell.badge.fill", "Notifications", "\u{201C}Meeting detected — record?\u{201D} prompts.")
-                permissionRow("rectangle.dashed.badge.record", "Screen Recording", "Only for text capture (OCR) — first use of ⌥⇧T.")
-                permissionRow("accessibility", "Accessibility", "Auto-paste from clipboard history and window snapping.")
-            }
+            PermissionsListView()
             Spacer()
         }
     }
@@ -157,27 +154,6 @@ struct OnboardingView: View {
         .padding(.horizontal, 20)
     }
 
-    private func permissionRow(_ icon: String, _ name: String, _ why: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: icon)
-                .font(.system(size: 14))
-                .foregroundStyle(Theme.accent)
-                .frame(width: 22)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(name)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                Text(why)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textSecondary)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .card(cornerRadius: 8)
-    }
-
     private func shortcutRow(_ keys: String, _ what: String) -> some View {
         HStack {
             Text(keys)
@@ -211,7 +187,8 @@ struct OnboardingView: View {
             Spacer()
             Button(step == totalSteps - 1 ? "Get started" : "Continue") {
                 if step == totalSteps - 1 {
-                    onDone()
+                    onboardingCompleted = true
+                    dismiss()
                 } else {
                     step += 1
                 }

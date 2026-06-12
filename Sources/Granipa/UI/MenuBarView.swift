@@ -33,6 +33,10 @@ struct MenuBarView: View {
         }
         .keyboardShortcut("t", modifiers: [.option, .shift])
         Divider()
+        Button("Setup Guide…") {
+            openWindow(id: "onboarding")
+            NSApp.activate(ignoringOtherApps: true)
+        }
         if UpdaterManager.shared.isAvailable {
             Button("Check for Updates…") {
                 UpdaterManager.shared.checkForUpdates()
