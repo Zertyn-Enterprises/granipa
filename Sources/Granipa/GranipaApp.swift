@@ -24,8 +24,10 @@ struct GranipaApp: App {
             RecordingHUD()
                 .environment(appState)
         }
+        .windowStyle(.plain)
         .windowLevel(.floating)
         .windowResizability(.contentSize)
+        .windowBackgroundDragBehavior(.enabled)
         .defaultPosition(.topTrailing)
 
         Settings {
