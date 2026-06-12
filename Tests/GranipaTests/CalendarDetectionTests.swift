@@ -26,6 +26,7 @@ import Testing
         #expect(MeetingApps.displayName(forBundleID: "us.zoom.xos") == "Zoom")
         #expect(MeetingApps.displayName(forBundleID: "com.microsoft.teams2") == "Microsoft Teams")
         #expect(MeetingApps.displayName(forBundleID: "com.google.Chrome.helper") == "a browser meeting")
+        #expect(MeetingApps.displayName(forBundleID: "com.apple.WebKit.GPU") == "a browser meeting")
         #expect(MeetingApps.displayName(forBundleID: "com.apple.dt.Xcode") == nil)
     }
 }

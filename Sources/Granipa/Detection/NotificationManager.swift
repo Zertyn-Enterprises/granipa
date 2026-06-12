@@ -33,6 +33,12 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate, Sen
     @MainActor static var recordHandler: (() -> Void)?
     @MainActor static var stopHandler: (() -> Void)?
 
+    static func authorizationDenied() async -> Bool {
+        guard isAvailable else { return false }
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        return settings.authorizationStatus == .denied
+    }
+
     func setup() {
         guard Self.isAvailable else { return }
         let center = UNUserNotificationCenter.current()

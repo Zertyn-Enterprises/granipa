@@ -35,6 +35,7 @@ private struct GeneralSettings: View {
     @AppStorage("probeLocales") private var probeLocalesRaw = "en-US,es-ES"
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var supportedLocales: [Locale] = []
+    @State private var notificationsDenied = false
 
     private var probeSelection: [String] {
         probeLocalesRaw.split(separator: ",")
@@ -85,6 +86,13 @@ private struct GeneralSettings: View {
                 .onChange(of: meetingDetection) {
                     meetingDetection ? app.detector.start() : app.detector.stop()
                 }
+            if meetingDetection, notificationsDenied {
+                Label(
+                    "Notifications are off, so detection only shows a banner inside Grañipa. Enable them in System Settings → Notifications → Grañipa.",
+                    systemImage: "bell.slash")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
             Picker("When the meeting app hangs up", selection: $autoStopMode) {
                 Text("Do nothing").tag("off")
                 Text("Ask to stop recording").tag("ask")
@@ -106,6 +114,7 @@ private struct GeneralSettings: View {
         }
         .formStyle(.grouped)
         .task {
+            notificationsDenied = await NotificationManager.authorizationDenied()
             let locales = await SpeechTranscriber.supportedLocales
             supportedLocales = dedupeByLanguage(locales).sorted {
                 languageName($0.identifier(.bcp47)) < languageName($1.identifier(.bcp47))

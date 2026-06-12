@@ -10,6 +10,8 @@ enum MeetingApps {
         ("Cisco-Systems.Spark", "Webex"),
         ("com.google.Chrome", "a browser meeting"),
         ("com.apple.Safari", "a browser meeting"),
+        // Safari captures microphone in the WebKit GPU helper, not the Safari process.
+        ("com.apple.WebKit.GPU", "a browser meeting"),
         ("org.mozilla.firefox", "a browser meeting"),
         ("com.brave.Browser", "a browser meeting"),
         ("company.thebrowser.Browser", "a browser meeting"),
