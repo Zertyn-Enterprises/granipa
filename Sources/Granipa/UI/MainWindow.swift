@@ -5,7 +5,6 @@ struct MainWindow: View {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
     @AppStorage("onboardingCompleted") private var onboardingCompleted = false
-    @State private var showOnboarding = false
 
     var body: some View {
         @Bindable var app = app
@@ -53,12 +52,7 @@ struct MainWindow: View {
         }
         .onAppear {
             if !onboardingCompleted {
-                showOnboarding = true
-            }
-        }
-        .sheet(isPresented: $showOnboarding, onDismiss: { onboardingCompleted = true }) {
-            OnboardingView {
-                showOnboarding = false
+                openWindow(id: "onboarding")
             }
         }
     }

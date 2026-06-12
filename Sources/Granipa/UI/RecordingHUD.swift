@@ -34,25 +34,20 @@ struct RecordingHUD: View {
             }
         }
         .preferredColorScheme(.dark)
-        .shadow(color: .black.opacity(0.35), radius: 18, y: 6)
-        .padding(8)
+        .containerBackground(.clear, for: .window)
     }
 
     private var compactPill: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "record.circle.fill")
-                .font(.system(size: 13))
-                .foregroundStyle(transcriptionFailed ? .orange : .red)
-                .symbolEffect(.pulse)
+        VStack(spacing: 12) {
             if let started = app.recorder.startedAt {
                 TimelineView(.periodic(from: started, by: 1)) { context in
                     Text(elapsed(from: started, to: context.date))
                         .monospacedDigit()
-                        .font(.caption)
-                        .foregroundStyle(Theme.textPrimary)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(transcriptionFailed ? .orange : Theme.textPrimary)
                 }
             }
-            HStack(spacing: 5) {
+            HStack(spacing: 6) {
                 ActivityDot(level: app.recorder.micLevel)
                 ActivityDot(level: app.recorder.systemLevel)
             }
@@ -61,19 +56,29 @@ struct RecordingHUD: View {
                 dismiss()
             } label: {
                 Image(systemName: "stop.fill")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.red)
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 24, height: 24)
+                    .background(.red, in: Circle())
             }
             .buttonStyle(.plain)
             .help("Stop recording")
+            Button {
+                compact = false
+            } label: {
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .buttonStyle(.plain)
+            .help("Expand")
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.vertical, 13)
+        .padding(.horizontal, 13)
         .background(Theme.card, in: Capsule())
-        .overlay(Capsule().stroke(.white.opacity(0.12), lineWidth: 1))
+        .overlay(Capsule().stroke(.white.opacity(0.08), lineWidth: 1))
         .contentShape(Capsule())
-        .onTapGesture { compact = false }
-        .help("Click to expand")
+        .gesture(WindowDragGesture())
     }
 
     private var expandedCard: some View {
@@ -163,6 +168,7 @@ struct RecordingHUD: View {
         .frame(width: 400)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.12), lineWidth: 1))
+        .gesture(WindowDragGesture())
     }
 
     private func elapsed(from start: Date, to now: Date) -> String {
