@@ -33,4 +33,20 @@ import Testing
         buffer.floatChannelData![0][2] = 0.9
         #expect(copy.floatChannelData![0][2] == 0.3)
     }
+
+    @Test func converterAdaptsWhenInputFormatChanges() throws {
+        // Regression: a device switch changes the input format mid-stream. The
+        // converter must rebuild for the new input instead of failing every buffer
+        // and silently killing the channel's transcription.
+        let target = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1)!
+        let converter = BufferConverter()
+
+        let first = makeBuffer(samples: [Float](repeating: 0.2, count: 480), sampleRate: 48_000)
+        let firstOut = try converter.convert(first, to: target)
+        #expect(firstOut.format.sampleRate == 16_000)
+
+        let second = makeBuffer(samples: [Float](repeating: 0.2, count: 441), sampleRate: 44_100)
+        let secondOut = try converter.convert(second, to: target)
+        #expect(secondOut.format.sampleRate == 16_000)
+    }
 }

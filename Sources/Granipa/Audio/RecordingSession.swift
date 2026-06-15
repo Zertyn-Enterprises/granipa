@@ -19,18 +19,22 @@ final class RecordingSession: @unchecked Sendable {
     private var mic = MicRecorder()
     private let tap = SystemAudioTap()
     private let micBuffers = Mutex(0)
+    private let micNonSilent = Mutex(0)
     private let systemBuffers = Mutex(0)
     private let systemNonSilent = Mutex(0)
     private let onLevel: @Sendable (AudioChannel, Float) -> Void
 
     private var micFile: AVAudioFile?
+    private var micPadSeconds: Double = 0
     private var systemFile: AVAudioFile?
     private var systemFramesWritten: AVAudioFramePosition = 0
     private var sessionStartHostSeconds: Double = 0
     private(set) var systemAudioError: Error?
     private var deviceChangeListener: AudioObjectPropertyListenerBlock?
+    private var inputDeviceChangeListener: AudioObjectPropertyListenerBlock?
 
     var micBufferCount: Int { micBuffers.withLock { $0 } }
+    var micNonSilentCount: Int { micNonSilent.withLock { $0 } }
     var systemBufferCount: Int { systemBuffers.withLock { $0 } }
     var systemNonSilentCount: Int { systemNonSilent.withLock { $0 } }
 
@@ -77,17 +81,41 @@ final class RecordingSession: @unchecked Sendable {
         deviceChangeListener = block
         AudioObjectAddPropertyListenerBlock(
             AudioObjectID(kAudioObjectSystemObject), &address, DispatchQueue.main, block)
+
+        // The mic engine stays bound to the input device it started on; when the
+        // default input switches (AirPods in or out, a wired headset, a USB mic)
+        // the old device stops delivering. Restart the mic onto the new default.
+        var inputAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        let inputBlock: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            self?.restartMic(recreateFile: true)
+        }
+        inputDeviceChangeListener = inputBlock
+        AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject), &inputAddress, DispatchQueue.main, inputBlock)
     }
 
     private func removeDeviceChangeListener() {
-        guard let block = deviceChangeListener else { return }
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain)
-        AudioObjectRemovePropertyListenerBlock(
-            AudioObjectID(kAudioObjectSystemObject), &address, DispatchQueue.main, block)
-        deviceChangeListener = nil
+        if let block = deviceChangeListener {
+            var address = AudioObjectPropertyAddress(
+                mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain)
+            AudioObjectRemovePropertyListenerBlock(
+                AudioObjectID(kAudioObjectSystemObject), &address, DispatchQueue.main, block)
+            deviceChangeListener = nil
+        }
+        if let block = inputDeviceChangeListener {
+            var address = AudioObjectPropertyAddress(
+                mSelector: kAudioHardwarePropertyDefaultInputDevice,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain)
+            AudioObjectRemovePropertyListenerBlock(
+                AudioObjectID(kAudioObjectSystemObject), &address, DispatchQueue.main, block)
+            inputDeviceChangeListener = nil
+        }
     }
 
     // A tap created before the system-audio TCC grant never delivers buffers;
@@ -106,10 +134,19 @@ final class RecordingSession: @unchecked Sendable {
         }
     }
 
-    // Recovery for the two observed zero-buffer cases: voice processing producing
-    // no callbacks on some setups, and an engine started before the mic TCC grant.
-    func restartMicWithoutEchoCancellation() {
+    // Recovery for a dead or stalled mic: voice processing produces no callbacks on
+    // some setups, an engine can start before the mic TCC grant, and routes die
+    // mid-meeting. Restart without voice processing (the reliable path). When the
+    // mic stalled before capturing anything usable, recreate the file and pad it to
+    // the current meeting time so "file time == meeting time" stays true across the
+    // gap; otherwise keep appending to preserve already-recorded audio.
+    func restartMic(recreateFile: Bool) {
         mic.stop()
+        if recreateFile {
+            micFile = nil
+            micPadSeconds =
+                AVAudioTime.seconds(forHostTime: mach_absolute_time()) - sessionStartHostSeconds
+        }
         mic = MicRecorder()
         try? mic.start(echoCancellation: false) { [weak self] buffer in
             self?.handleMic(buffer)
@@ -140,11 +177,31 @@ final class RecordingSession: @unchecked Sendable {
                 settings: Self.aacSettings(for: buffer.format, bitRate: 96_000),
                 commonFormat: buffer.format.commonFormat,
                 interleaved: buffer.format.isInterleaved)
+            if let file = micFile, micPadSeconds > 0 {
+                appendSilence(to: file, seconds: micPadSeconds, format: buffer.format)
+            }
+            micPadSeconds = 0
         }
         try? micFile?.write(from: buffer)
-        onLevel(.mic, buffer.rmsLevel)
+        let level = buffer.rmsLevel
+        if level > 0.0005 {
+            micNonSilent.withLock { $0 += 1 }
+        }
+        onLevel(.mic, level)
         if let copy = buffer.deepCopy() {
             micContinuation.yield(AudioChunk(buffer: copy, startSeconds: nil))
+        }
+    }
+
+    private func appendSilence(to file: AVAudioFile, seconds: Double, format: AVAudioFormat) {
+        var remaining = AVAudioFramePosition((seconds * format.sampleRate).rounded())
+        while remaining > 0 {
+            let chunkFrames = AVAudioFrameCount(min(remaining, 16_384))
+            guard let silence = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunkFrames)
+            else { break }
+            silence.frameLength = chunkFrames
+            try? file.write(from: silence)
+            remaining -= AVAudioFramePosition(chunkFrames)
         }
     }
 

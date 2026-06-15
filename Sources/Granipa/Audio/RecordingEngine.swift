@@ -53,13 +53,16 @@ final class RecordingEngine {
             try? await Task.sleep(for: .seconds(3))
             guard let self, let session, self.session === session, self.isRecording else { return }
             if session.micBufferCount == 0, echoCancellationWasOn {
-                session.restartMicWithoutEchoCancellation()
+                session.restartMic(recreateFile: true)
                 micWarning = "Echo cancellation isn't working on this setup — continuing without it."
             }
 
             var tapRestarts = 0
             var lastSystemCount = 0
             var stallTicks = 0
+            var micRestarts = 0
+            var lastMicCount = 0
+            var micStallTicks = 0
             while !Task.isCancelled, self.session === session, self.isRecording {
                 try? await Task.sleep(for: .seconds(5))
                 guard self.session === session, self.isRecording else { return }
@@ -76,13 +79,40 @@ final class RecordingEngine {
                 }
                 lastSystemCount = systemCount
 
-                if session.micBufferCount == 0 {
+                // The mic tap delivers buffers continuously even during silence, so a
+                // flat count means the route genuinely died (unlike the system tap,
+                // which only flows while audio plays — hence the lower stall threshold).
+                let micCount = session.micBufferCount
+                if micCount == 0 {
                     micWarning =
                         "No microphone audio is arriving. Check System Settings > Privacy & "
                         + "Security > Microphone, then stop and start a new recording."
-                } else if micWarning?.hasPrefix("No microphone") == true {
-                    micWarning = nil
+                } else {
+                    micStallTicks = micCount == lastMicCount ? micStallTicks + 1 : 0
+                    if micStallTicks >= 2 {
+                        if micRestarts < 8 {
+                            // Recreate the file only when it stalled early enough that
+                            // nothing usable was captured; otherwise keep prior audio.
+                            session.restartMic(recreateFile: micCount < 100)
+                            micRestarts += 1
+                            micStallTicks = 0
+                            micWarning =
+                                "Microphone audio stalled — restarted capture without echo "
+                                + "cancellation."
+                        } else {
+                            micWarning =
+                                "Microphone audio stopped and couldn't be recovered. Stop and "
+                                + "start a new recording."
+                        }
+                    } else if session.micNonSilentCount == 0, micCount > 200 {
+                        micWarning =
+                            "Microphone is recording but completely silent — check the input "
+                            + "device and that the mic isn't muted, then start a new recording."
+                    } else if session.micNonSilentCount > 0 {
+                        micWarning = nil
+                    }
                 }
+                lastMicCount = micCount
 
                 if session.systemBufferCount == 0 {
                     // A tap created before the permission grant stays dead forever;
