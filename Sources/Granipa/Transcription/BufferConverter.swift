@@ -27,7 +27,15 @@ final class BufferConverter {
         let inputFormat = buffer.format
         guard inputFormat != format else { return buffer }
 
-        if converter == nil || converter?.outputFormat != format {
+        // Recreate when EITHER format changes. Input changes mid-stream when the
+        // capture device switches (AirPods in/out, a wired headset, a USB mic);
+        // missing that left a converter bound to the old input, failing every
+        // buffer and silently killing the channel's transcription after a switch.
+        let needsNewConverter =
+            converter == nil
+            || converter?.inputFormat != inputFormat
+            || converter?.outputFormat != format
+        if needsNewConverter {
             converter = AVAudioConverter(from: inputFormat, to: format)
             // .none avoids timestamp drift from converter priming.
             converter?.primeMethod = .none
