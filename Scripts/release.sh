@@ -66,12 +66,30 @@ if [ "$(plutil -extract SUPublicEDKey raw "$APP/Contents/Info.plist" 2>/dev/null
 fi
 
 echo
-if command -v generate_appcast >/dev/null 2>&1; then
-  generate_appcast build/
-  echo "Publish with:"
+# generate_appcast ships inside the Sparkle SPM artifact, not on PATH; without
+# this fallback the feed silently isn't generated and auto-updates break.
+APPCAST_TOOL="$(command -v generate_appcast 2>/dev/null || true)"
+if [ -z "$APPCAST_TOOL" ]; then
+  APPCAST_TOOL="$(find .build/artifacts -type f -name generate_appcast 2>/dev/null | head -1 || true)"
+fi
+
+if [ -n "$APPCAST_TOOL" ]; then
+  echo "==> Generating signed appcast"
+  # Enclosures must resolve against the published assets. The feed is served from
+  # releases/latest/download/appcast.xml, so reuse that prefix from SUFeedURL.
+  PREFIX="$(plutil -extract SUFeedURL raw "$APP/Contents/Info.plist" 2>/dev/null || true)"
+  PREFIX="${PREFIX%appcast.xml}"
+  # Deltas need prior .app bundles we don't retain; skip them (full updates only).
+  if [ -n "$PREFIX" ]; then
+    "$APPCAST_TOOL" --maximum-deltas 0 --download-url-prefix "$PREFIX" build/
+  else
+    "$APPCAST_TOOL" --maximum-deltas 0 build/
+  fi
+  echo
+  echo "Publish (attach the appcast in the SAME release so the feed serves it):"
   echo "  gh release create v$VERSION '$ZIP' build/appcast.xml --title 'Grañipa v$VERSION' --generate-notes"
 else
-  echo "NOTE: generate_appcast not found — auto-update feed not generated."
+  echo "NOTE: generate_appcast not found (PATH or .build/artifacts) — feed not generated."
   echo "      Get Sparkle's tools (one time): https://github.com/sparkle-project/Sparkle/releases"
   echo "Publish with:"
   echo "  gh release create v$VERSION '$ZIP' --title 'Grañipa v$VERSION' --generate-notes"
