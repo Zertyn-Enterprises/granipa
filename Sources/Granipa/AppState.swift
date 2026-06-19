@@ -383,25 +383,9 @@ final class AppState {
             transcript: EnhancementService.transcriptText(segments: segments))
         let providerID = UserDefaults.standard.string(forKey: "llmProvider") ?? "claude"
 
+        let raw: String
         do {
-            let raw = try await LLMService.generate(providerID: providerID, prompt: prompt)
-            let result = try EnhancementService.parse(raw)
-            guard var updated = try? db.fetchMeeting(id: meetingID) else { return }
-            updated.summary = result.summary
-            updated.enhancedNotesMarkdown = result.enhancedNotes
-            updated.actionItemsJSON = ActionItem.encodeList(result.actionItems ?? [])
-            updated.emailDraft = result.emailDraft
-            if updated.title == "Untitled meeting", let title = result.title, !title.isEmpty {
-                updated.title = title
-            }
-            update(updated)
-            WebhookService.enqueue(
-                event: .notesEnhanced,
-                payload: NotesEnhancedPayload(
-                    timestamp: .now,
-                    meeting: MeetingDetailDTO(updated, folder: folder(for: updated))),
-                database: db)
-            Task { await WebhookService.deliverDue(database: db) }
+            raw = try await LLMService.generate(providerID: providerID, prompt: prompt)
         } catch {
             let message = error.localizedDescription
             let lower = message.lowercased()
@@ -411,7 +395,36 @@ final class AppState {
                 ? " The CLI isn't signed in — open Terminal, run it once, and complete the browser login (Settings → AI has a Test button)."
                 : ""
             loadError = "Enhancement failed: \(message)\(hint)"
+            return
         }
+
+        guard let result = try? EnhancementService.parse(raw) else {
+            // The model replied but we couldn't structure it (e.g. unescaped verbatim
+            // quotes or a truncated reply). Keep its work as the report instead of
+            // discarding everything, and surface a non-blocking notice.
+            guard var updated = try? db.fetchMeeting(id: meetingID) else { return }
+            updated.enhancedNotesMarkdown = EnhancementService.salvagedReport(from: raw)
+            update(updated)
+            ToastController.shared.show("Notes saved, but couldn't format fully")
+            return
+        }
+
+        guard var updated = try? db.fetchMeeting(id: meetingID) else { return }
+        updated.summary = result.summary
+        updated.enhancedNotesMarkdown = result.enhancedNotes
+        updated.actionItemsJSON = ActionItem.encodeList(result.actionItems ?? [])
+        updated.emailDraft = result.emailDraft
+        if updated.title == "Untitled meeting", let title = result.title, !title.isEmpty {
+            updated.title = title
+        }
+        update(updated)
+        WebhookService.enqueue(
+            event: .notesEnhanced,
+            payload: NotesEnhancedPayload(
+                timestamp: .now,
+                meeting: MeetingDetailDTO(updated, folder: folder(for: updated))),
+            database: db)
+        Task { await WebhookService.deliverDue(database: db) }
     }
 
     func folder(for meeting: Meeting) -> Folder? {

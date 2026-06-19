@@ -71,8 +71,10 @@ enum EnhancementService {
             The notes start directly at the first topic section - no intro, no TL;DR, no \
             recap - and no fact appears twice anywhere in the report.
 
-            Respond with ONLY a single JSON object - no markdown fences, no commentary - \
-            with exactly these keys:
+            Respond with ONLY a single JSON object - no markdown fences, no commentary. \
+            It must be valid JSON: escape every double quote and line break inside string \
+            values, and use single quotes for any speech you quote verbatim. \
+            Use exactly these keys:
             - "title": specific and content-bearing, max 8 words. Never generic like \
             "Team meeting" or "Weekly sync".
             - "summary": 2-4 sentences a busy executive could read instead of attending. \
@@ -105,6 +107,60 @@ enum EnhancementService {
             throw EnhancementError.noJSONObject
         }
         let json = String(raw[start...end])
-        return try JSONDecoder().decode(EnhancementResult.self, from: Data(json.utf8))
+        let decoder = JSONDecoder()
+        if let result = try? decoder.decode(EnhancementResult.self, from: Data(json.utf8)) {
+            return result
+        }
+        // Models routinely emit raw newlines/tabs inside the multi-line markdown of
+        // `enhanced_notes`; strict JSON forbids unescaped control characters, so escape
+        // them and retry before giving up.
+        return try decoder.decode(
+            EnhancementResult.self,
+            from: Data(escapingRawControlCharacters(in: json).utf8))
+    }
+
+    /// Best-effort readable text when `parse` fails: the raw model reply, with a
+    /// wrapping markdown code fence stripped so the user keeps the report.
+    static func salvagedReport(from raw: String) -> String {
+        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.hasPrefix("```"), let firstNewline = text.firstIndex(of: "\n") {
+            text = String(text[text.index(after: firstNewline)...])
+            if text.hasSuffix("```") {
+                text = String(text.dropLast(3))
+            }
+        }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func escapingRawControlCharacters(in json: String) -> String {
+        var out = String.UnicodeScalarView()
+        out.reserveCapacity(json.unicodeScalars.count)
+        var inString = false
+        var escaped = false
+        for scalar in json.unicodeScalars {
+            if escaped {
+                out.append(scalar)
+                escaped = false
+                continue
+            }
+            switch scalar.value {
+            case 0x5C where inString:  // backslash opens an escape sequence
+                out.append(scalar)
+                escaped = true
+            case 0x22:  // an unescaped double quote toggles string state
+                out.append(scalar)
+                inString.toggle()
+            case 0..<0x20 where inString:  // raw control char is illegal inside a JSON string
+                switch scalar.value {
+                case 0x0A: out.append(contentsOf: "\\n".unicodeScalars)
+                case 0x0D: out.append(contentsOf: "\\r".unicodeScalars)
+                case 0x09: out.append(contentsOf: "\\t".unicodeScalars)
+                default: out.append(contentsOf: String(format: "\\u%04x", scalar.value).unicodeScalars)
+                }
+            default:
+                out.append(scalar)
+            }
+        }
+        return String(out)
     }
 }
