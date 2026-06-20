@@ -82,6 +82,22 @@ import Testing
         #expect(result.emailDraft == "E")
     }
 
+    @Test func parsesJSONWithRawControlCharactersInStrings() throws {
+        let raw = "{\"title\": \"T\", \"summary\": \"S\", "
+            + "\"enhanced_notes\": \"## Notes\n- one\n- two\", "
+            + "\"action_items\": [], \"email_draft\": \"Hi\"}"
+        let result = try EnhancementService.parse(raw)
+        #expect(result.title == "T")
+        #expect(result.enhancedNotes == "## Notes\n- one\n- two")
+    }
+
+    @Test func salvagesRawReportStrippingFences() {
+        let fenced = "```json\n# Report\n- point\n```"
+        #expect(EnhancementService.salvagedReport(from: fenced) == "# Report\n- point")
+        let plain = "# Report\n- point"
+        #expect(EnhancementService.salvagedReport(from: plain) == "# Report\n- point")
+    }
+
     @Test func parseFailsWithoutJSON() {
         #expect(throws: EnhancementError.self) {
             _ = try EnhancementService.parse("no json here")
