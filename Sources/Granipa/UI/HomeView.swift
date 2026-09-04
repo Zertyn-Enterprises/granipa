@@ -226,7 +226,7 @@ private struct HomeMeetingRow: View {
             app.selectedMeetingID = meeting.id
         } label: {
             HStack(spacing: 14) {
-                MeetingGlyph(seed: meeting.id, size: 42)
+                MeetingGlyph(size: 42)
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(meeting.title)

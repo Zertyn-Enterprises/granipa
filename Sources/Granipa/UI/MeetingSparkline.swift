@@ -45,11 +45,9 @@ struct MeetingSparklineView: View {
 }
 
 struct MeetingGlyph: View {
-    let seed: String
     var size: CGFloat = 40
 
     var body: some View {
-        let _ = seed
         RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
             .fill(Theme.fillSubtle)
             .frame(width: size, height: size)
