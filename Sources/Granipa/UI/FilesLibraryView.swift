@@ -2,6 +2,7 @@ import SwiftUI
 
 struct FilesLibraryView: View {
     @Environment(AppState.self) private var app
+    @State private var fileStatuses: [String: RecordingFileStatus] = [:]
 
     private var shown: [Meeting] {
         MeetingLibrary.matching(
@@ -10,6 +11,19 @@ struct FilesLibraryView: View {
 
     private var isSearching: Bool {
         !app.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var recordingPaths: [String] {
+        var seen = Set<String>()
+        var paths: [String] = []
+        for meeting in MeetingLibrary.recordings(in: app.meetings) {
+            for path in [meeting.audioMicPath, meeting.audioSystemPath].compactMap({ $0 }) {
+                if seen.insert(path).inserted {
+                    paths.append(path)
+                }
+            }
+        }
+        return paths
     }
 
     var body: some View {
@@ -53,7 +67,7 @@ struct FilesLibraryView: View {
                                 .foregroundStyle(Theme.textSecondary)
                                 .padding(.bottom, 2)
                             ForEach(group.meetings) { meeting in
-                                FilesLibraryRow(meeting: meeting)
+                                FilesLibraryRow(meeting: meeting, fileStatuses: fileStatuses)
                             }
                         }
                         .padding(.bottom, 8)
@@ -65,12 +79,21 @@ struct FilesLibraryView: View {
             .padding(.bottom, 32)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .task(id: recordingPaths) {
+            let paths = recordingPaths
+            let resolved = await Task.detached(priority: .utility) {
+                MeetingLibrary.fileStatuses(for: paths)
+            }.value
+            guard !Task.isCancelled else { return }
+            fileStatuses = resolved
+        }
     }
 }
 
 private struct FilesLibraryRow: View {
     @Environment(AppState.self) private var app
     let meeting: Meeting
+    let fileStatuses: [String: RecordingFileStatus]
 
     private var isLive: Bool { meeting.status == .recording }
 
@@ -92,10 +115,14 @@ private struct FilesLibraryRow: View {
                     } else {
                         VStack(alignment: .leading, spacing: 2) {
                             if let path = meeting.audioMicPath {
-                                Text(MeetingLibrary.fileLabel(path: path, channel: "Me"))
+                                Text(
+                                    MeetingLibrary.fileLabel(
+                                        path: path, channel: "Me", status: fileStatuses[path]))
                             }
                             if let path = meeting.audioSystemPath {
-                                Text(MeetingLibrary.fileLabel(path: path, channel: "Them"))
+                                Text(
+                                    MeetingLibrary.fileLabel(
+                                        path: path, channel: "Them", status: fileStatuses[path]))
                             }
                             if let duration = MeetingLibrary.durationLabel(
                                 from: meeting.startedAt, to: meeting.endedAt)

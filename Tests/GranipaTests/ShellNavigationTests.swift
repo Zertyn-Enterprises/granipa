@@ -166,14 +166,28 @@ import Testing
 
     @Test func fileStatusReportsMissingAndPresentFiles() throws {
         #expect(MeetingLibrary.fileStatus(path: nil) == nil)
-        let missing = MeetingLibrary.fileStatus(
-            path: "/tmp/granipa-no-such-file-\(UUID().uuidString).m4a")
-        #expect(missing == .missing)
+        let missingPath = "/tmp/granipa-no-such-file-\(UUID().uuidString).m4a"
+        #expect(MeetingLibrary.fileStatus(path: missingPath) == .missing)
 
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("granipa-t1a-\(UUID().uuidString).m4a")
         try Data("abc".utf8).write(to: url)
         defer { try? FileManager.default.removeItem(at: url) }
         #expect(MeetingLibrary.fileStatus(path: url.path) == .present(byteCount: 3))
+        let cached = MeetingLibrary.fileStatuses(for: [url.path, missingPath])
+        #expect(cached[url.path] == .present(byteCount: 3))
+        #expect(cached[missingPath] == .missing)
+    }
+
+    @Test func fileLabelUsesCachedStatusWithoutTreatingPendingAsMissing() {
+        let path = "/tmp/mic.m4a"
+        #expect(MeetingLibrary.fileLabel(path: path, channel: "Me", status: nil) == "Me · mic.m4a")
+        #expect(
+            MeetingLibrary.fileLabel(path: path, channel: "Me", status: .missing)
+                == "Me · Audio file missing")
+        let size = ByteCountFormatter.string(fromByteCount: 3, countStyle: .file)
+        #expect(
+            MeetingLibrary.fileLabel(path: path, channel: "Them", status: .present(byteCount: 3))
+                == "Them · mic.m4a · \(size)")
     }
 }

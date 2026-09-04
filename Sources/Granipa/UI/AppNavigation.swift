@@ -141,6 +141,7 @@ enum MeetingLibrary {
         return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 
+    /// Disk lookup. Call off the main actor and cache by path; do not use from a SwiftUI body.
     static func fileStatus(path: String?) -> RecordingFileStatus? {
         guard let path else { return nil }
         var isDirectory: ObjCBool = false
@@ -155,10 +156,23 @@ enum MeetingLibrary {
         return .present(byteCount: byteCount)
     }
 
-    static func fileLabel(path: String, channel: String) -> String {
+    static func fileStatuses(for paths: [String]) -> [String: RecordingFileStatus] {
+        var result: [String: RecordingFileStatus] = [:]
+        result.reserveCapacity(paths.count)
+        for path in paths {
+            if let status = fileStatus(path: path) {
+                result[path] = status
+            }
+        }
+        return result
+    }
+
+    static func fileLabel(path: String, channel: String, status: RecordingFileStatus?) -> String {
         let name = URL(fileURLWithPath: path).lastPathComponent
-        switch fileStatus(path: path) {
-        case .missing, nil:
+        switch status {
+        case nil:
+            return "\(channel) · \(name)"
+        case .missing:
             return "\(channel) · Audio file missing"
         case .present(let byteCount):
             let size = ByteCountFormatter.string(fromByteCount: byteCount, countStyle: .file)
