@@ -11,6 +11,20 @@ import Testing
         #expect(requirement.contains("R4V252C833"))
     }
 
+    /// Characterization: the helper's private `clientRequirement` is what
+    /// `setCodeSigningRequirement` enforces. BatteryHelperSecurity is the
+    /// tested app-side copy; this reads the helper source so the two cannot drift.
+    @Test func productionHelperRequirementMatchesAppSecurity() throws {
+        let source = URL(fileURLWithPath: #filePath)
+        let repo = source.deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let helper = try String(
+            contentsOf: repo.appendingPathComponent("Sources/BatteryHelper/main.swift"),
+            encoding: .utf8)
+        #expect(helper.contains(#"identifier \"com.zertyn.granipa\""#))
+        #expect(helper.contains(BatteryHelperSecurity.teamIdentifier))
+    }
+
     @Test func bundledDaemonRunsOnlyOnDemand() throws {
         let source = URL(fileURLWithPath: #filePath)
         let repo = source.deletingLastPathComponent().deletingLastPathComponent()
