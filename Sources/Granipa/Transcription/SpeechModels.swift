@@ -19,25 +19,6 @@ enum TranscriptionError: LocalizedError {
 }
 
 enum SpeechModels {
-    /// The single locale Record would start with. Prewarming the whole probe
-    /// list installed models the meeting pipeline never runs.
-    static func prewarmLocaleIDs(requested: String?, last: String?) -> [String] {
-        LanguageDetection.startLocales(requested: requested ?? "auto", last: last)
-            .prefix(1).map { $0 }
-    }
-
-    static func prewarmPreferredLocales() {
-        Task.detached {
-            let defaults = UserDefaults.standard
-            let ids = prewarmLocaleIDs(
-                requested: defaults.string(forKey: "defaultLocale"),
-                last: defaults.string(forKey: "lastSpeechLocale"))
-            for id in ids {
-                try? await ensureInstalled(locale: Locale(identifier: id))
-            }
-        }
-    }
-
     static func isInstalled(locale: Locale) async -> Bool {
         await SpeechTranscriber.installedLocales
             .contains { $0.identifier(.bcp47) == locale.identifier(.bcp47) }

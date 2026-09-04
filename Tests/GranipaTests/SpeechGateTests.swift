@@ -66,16 +66,3 @@ import Testing
         #expect(admitted == false)
     }
 }
-
-@Suite struct SpeechModelsPrewarmTests {
-    @Test func prewarmsExactlyOneLocale() {
-        #expect(
-            SpeechModels.prewarmLocaleIDs(requested: "fr-FR", last: "en-US") == ["fr-FR"])
-        #expect(
-            SpeechModels.prewarmLocaleIDs(requested: "auto", last: "es-ES") == ["es-ES"])
-        #expect(
-            SpeechModels.prewarmLocaleIDs(requested: "auto", last: nil) == ["en-US"])
-        #expect(
-            SpeechModels.prewarmLocaleIDs(requested: "auto", last: "ja-JP") == ["en-US"])
-    }
-}
