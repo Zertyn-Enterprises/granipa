@@ -90,8 +90,9 @@ optimization.
   flag. It builds/signs, submits to Apple notarization, staples, creates a ZIP,
   opens Archive Utility, and generates an appcast. It prints but does not execute
   the final `gh release create` command. It was not run.
-- No `package.json`, `Makefile`, `Justfile`, CI configuration, or other executable
-  project scripts were found.
+- No `package.json`, `Makefile`, `Justfile`, or other executable project scripts
+  were found. Correction recorded during Phase 4: `.github/workflows/ci.yml`
+  already existed at `c10dbb8` and runs `swift build` followed by `swift test`.
 
 ## Reproduction commands
 

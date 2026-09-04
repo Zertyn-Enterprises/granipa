@@ -146,6 +146,35 @@ implementation approach.
 - Proof per commit: pre/post whole-repo `rg`, build/test gates, and exact
   assertion comparison recorded in the audit.
 
+## Second execution loop
+
+The read-only second pass at `1cc9e60` found two additional 🟢 removals. They
+are planned before any source edit; every other new finding remains a proposal.
+
+### 11. Remove the unused image downsampling wrapper
+
+- Finding: `ImageCache.downsampled` has zero static, string, or Objective-C
+  selector callers; `loadDownsampled` remains the three-call implementation.
+- Change: remove only the three-line wrapper.
+- Risk: 🟢.
+- Proof: pre/post whole-repo caller grep, build, and all tests.
+
+### 12. Remove unreachable speech-model prewarming
+
+- Finding: `prewarmPreferredLocales` has zero callers; `prewarmLocaleIDs` is
+  reachable only from it and a test that duplicates four stronger assertions.
+- Change: remove both methods and only the redundant prewarm test suite.
+- Risk: 🟢.
+- Proof: whole-repo static/string/selector grep, exact assertion comparison,
+  build, and all remaining tests.
+
+### Second-loop proposals only
+
+- Prune clipboard retention only after insertion, after a real database test.
+- Stop retaining unused HTTP request bodies, after an API contract test.
+- Reset `meetingAppActive` in `stop()`, after a lifecycle regression test.
+- Reuse or reduce language-probe analysis only after a real long-audio profile.
+
 ## Proposals only — not executed
 
 These are 🔴 or lack a test/profile that can prove behavior preservation:

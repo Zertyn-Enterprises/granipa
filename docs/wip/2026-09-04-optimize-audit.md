@@ -348,3 +348,81 @@ verified evidence from inference. Line numbers refer to `c10dbb8`.
   identified.
 - The 55 files under `docs/wip/` are already in the required ephemeral-doc
   location and do not affect runtime.
+
+## Second pass after the first execution queue
+
+Audited commit: `chore/optimize-2026-09-04@1cc9e60`. This pass was read-only;
+the findings below were independently rechecked before being added here.
+
+- [dead code] `Sources/Granipa/Clipboard/ImageCache.swift:82-84`
+  Qué: `ImageCache.downsampled` only unwraps `loadDownsampled` and has zero
+  callers; the private implementation has three live callers.
+  Acción: eliminar.
+  Impacto: bajo (maintenance only).
+  Riesgo: 🟢 sin comportamiento observable.
+  Evidencia: `rg -n -w 'downsampled|loadDownsampled' Sources Tests Resources Package.swift`
+  returns one definition for the wrapper and three live calls to the private
+  implementation — Verificado. String and Objective-C selector searches also
+  return zero dynamic references — Verificado.
+
+- [dead code/tests de sobra] `Sources/Granipa/Transcription/SpeechModels.swift:24-39`
+  and `Tests/GranipaTests/SpeechGateTests.swift:70-80`
+  Qué: `prewarmPreferredLocales` has zero callers; its helper is called only by
+  that dead method and one test whose four cases duplicate
+  `LanguageDetectionTests.startLocalesUsesOneAnalyzer`.
+  Acción: eliminar both methods and the redundant suite.
+  Impacto: bajo (less dead concurrency/download code and test surface; zero
+  current runtime because the entry point is unreachable).
+  Riesgo: 🟢 sin comportamiento observable.
+  Evidencia: `rg -n -w 'prewarmPreferredLocales|prewarmLocaleIDs' Sources Tests Resources Package.swift`
+  plus line-by-line assertion comparison at
+  `LanguageDetectionTests.swift:96-109` — Verificado. String and Objective-C
+  selector searches return zero dynamic references — Verificado.
+
+- [runtime] `Sources/Granipa/Clipboard/ClipboardMonitor.swift:57-75,82-152`
+  and `Sources/Granipa/Storage/AppDatabase.swift:190-200`
+  Qué: every changed pasteboard value runs a retention fetch/delete transaction,
+  including duplicate text or image values that return before insertion.
+  Acción: proponer returning an insertion result and pruning only after a
+  successful insert, with a real database retention test first.
+  Impacto: medio (avoids an offset fetch/write transaction on duplicate copies).
+  Riesgo: 🟡 changes retention timing and lacks an insertion-outcome test.
+  Evidencia: the three unconditional `Self.prune` calls and both early duplicate
+  returns are visible in the named lines — Verificado.
+
+- [load/runtime] `Sources/Granipa/API/HTTPMessage.swift:3-8,25-60` and
+  `Sources/Granipa/API/APIServer.swift:64-92`
+  Qué: the server buffers up to 4 MiB and then copies the request body into
+  `HTTPRequest`, while no production route reads `HTTPRequest.body`.
+  Acción: proponer preserving Content-Length framing without retaining a second
+  body copy, after locking the internal request contract with an integration test.
+  Impacto: medio for large local API requests.
+  Riesgo: 🟡 changes a shared parser shape currently asserted by a test.
+  Evidencia: `rg -n '\.body\b|body:' Sources/Granipa/API Tests/GranipaTests/APITests.swift`
+  shows the request-body write and one test read, but no production read —
+  Verificado.
+
+- [correctness] `Sources/Granipa/Detection/MeetingDetector.swift:51-56`
+  Qué: `stop()` clears `detectedApp` and `lastActive` but leaves
+  `meetingAppActive` at its previous value.
+  Acción: proponer a lifecycle regression test before resetting the flag.
+  Impacto: bajo.
+  Riesgo: 🟡 observable state change without current lifecycle coverage.
+  Evidencia: declaration, sole write, stop body, and sole reader were compared
+  with `rg -n -w 'meetingAppActive' Sources Tests` — Verificado.
+
+- [runtime] `Sources/Granipa/Transcription/FileMeetingTranscriber.swift:42-60,93-160`
+  Qué: auto mode analyzes the 15-second prefix once per probe locale and then
+  analyzes the full channel, so default two-locale operation reads the prefix
+  three times; three configured languages read it four times.
+  Acción: proponer measuring the new correctness path on longer real meetings
+  before changing analyzer reuse or selection.
+  Impacto: medio during post-record transcription.
+  Riesgo: 🔴 meeting transcript correctness is a core persisted output.
+  Evidencia: sequential probe loop and later full-channel call are present in
+  the named lines — Verificado. Dominance on real workloads is an Inferencia;
+  confirmar with a post-Stop time profile.
+
+Second-pass negative sweep: zero `TODO`, `FIXME`, `HACK`, `XXX`, `print`,
+`debugPrint`, `dump`, or `NSLog` occurrences in `Sources`, `Tests`, `Scripts`,
+`Package.swift`, and `Resources` — Verificado with `rg`.
