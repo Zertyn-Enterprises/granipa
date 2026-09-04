@@ -75,6 +75,7 @@ final class BatteryService {
     private let smc = SMCClient()
     private var usingCHTE = false
     private let tempKeys = ["TB0T", "TB1T", "TW0P", "B0Te"]
+    private var temperatureKey: String?
 
     func start() {
         probeControl()
@@ -275,8 +276,17 @@ final class BatteryService {
 
     private func readTemperature() -> Double? {
         guard smc.open() else { return nil }
-        for key in tempKeys {
+        let preferredKey = temperatureKey
+        if let preferredKey,
+            let value = try? smc.readSP78(preferredKey),
+            value > 0, value < 90
+        {
+            return value
+        }
+        temperatureKey = nil
+        for key in tempKeys where key != preferredKey {
             if let value = try? smc.readSP78(key), value > 0, value < 90 {
+                temperatureKey = key
                 return value
             }
         }
