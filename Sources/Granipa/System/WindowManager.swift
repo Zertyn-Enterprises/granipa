@@ -11,10 +11,6 @@ final class WindowManager {
         UserDefaults.standard.object(forKey: "windowSnappingEnabled") as? Bool ?? true
     }
 
-    func registerHotkeys() {
-        ShortcutHub.shared.rebind()
-    }
-
     func setEnabled(_ enabled: Bool) {
         UserDefaults.standard.set(enabled, forKey: "windowSnappingEnabled")
         ShortcutHub.shared.rebind()
