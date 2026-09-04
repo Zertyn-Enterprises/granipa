@@ -4,7 +4,9 @@ import Testing
 
 @testable import Granipa
 
-@Suite struct FileMeetingTranscriberTests {
+/// Serialized because several of these paths persist `lastSpeechLocale` in
+/// the process-global `UserDefaults.standard`; parallel mutation would race.
+@Suite(.serialized) struct FileMeetingTranscriberTests {
     @Test func missingFilesLeaveNoSegments() async throws {
         let db = try AppDatabase(writer: DatabaseQueue())
         let meeting = Meeting.new(title: "T", language: "en-US")
@@ -141,6 +143,79 @@ import Testing
 
         #expect(outcome == .failed(.channels([.system], localeID: "en-US")))
         #expect((try db.fetchSegments(meetingID: meeting.id)).isEmpty)
+    }
+
+    @Test func partialChannelFailureStillStoresLocaleHint() async throws {
+        let db = try AppDatabase(writer: DatabaseQueue())
+        let meeting = Meeting.new(title: "T", language: "en-US")
+        try db.save(meeting)
+        let micURL = try makeAudioFixture()
+        let systemURL = try makeAudioFixture()
+        defer {
+            try? FileManager.default.removeItem(at: micURL)
+            try? FileManager.default.removeItem(at: systemURL)
+        }
+        let defaults = UserDefaults.standard
+        let previous = defaults.object(forKey: "lastSpeechLocale")
+        defaults.removeObject(forKey: "lastSpeechLocale")
+        defer { restoreLastSpeechLocale(previous) }
+        let boundary = FileMeetingTranscriber.Boundary(
+            installModel: { _ in },
+            analyzeChannel: { analysis in
+                if analysis.channel == .mic {
+                    throw TranscriptionError.noAudioFormat
+                }
+            })
+
+        let outcome = await FileMeetingTranscriber.transcribe(
+            micURL: micURL,
+            systemURL: systemURL,
+            meetingID: meeting.id,
+            language: "en-US",
+            database: db,
+            boundary: boundary)
+
+        // The mic channel failed, but the locale was still picked from real
+        // audio, so the hint for the next meeting must be stored.
+        #expect(outcome == .failed(.channels([.mic], localeID: "en-US")))
+        #expect(defaults.string(forKey: "lastSpeechLocale") == "en-US")
+    }
+
+    @Test func modelInstallFailureLeavesLocaleHintUntouched() async throws {
+        let db = try AppDatabase(writer: DatabaseQueue())
+        let meeting = Meeting.new(title: "T", language: "en-US")
+        try db.save(meeting)
+        let missing = URL(fileURLWithPath: "/tmp/granipa-no-such-\(UUID().uuidString).m4a")
+        let defaults = UserDefaults.standard
+        let previous = defaults.object(forKey: "lastSpeechLocale")
+        defaults.set("fr-FR", forKey: "lastSpeechLocale")
+        defer { restoreLastSpeechLocale(previous) }
+        let boundary = FileMeetingTranscriber.Boundary(
+            installModel: { _ in throw TranscriptionError.notAvailable },
+            analyzeChannel: { _ in })
+
+        let outcome = await FileMeetingTranscriber.transcribe(
+            micURL: missing,
+            systemURL: missing,
+            meetingID: meeting.id,
+            language: "en-US",
+            database: db,
+            boundary: boundary)
+
+        // Installation failed before any audio ran, so the previous hint
+        // must survive untouched.
+        #expect(outcome == .failed(.modelInstall(localeID: "en-US")))
+        #expect(defaults.string(forKey: "lastSpeechLocale") == "fr-FR")
+    }
+
+    /// Puts `lastSpeechLocale` back exactly as the test found it — including
+    /// the "key absent" case.
+    private func restoreLastSpeechLocale(_ previous: Any?) {
+        if let previous {
+            UserDefaults.standard.set(previous, forKey: "lastSpeechLocale")
+        } else {
+            UserDefaults.standard.removeObject(forKey: "lastSpeechLocale")
+        }
     }
 
     private func makeAudioFixture(byteCount: Int = 4_096) throws -> URL {

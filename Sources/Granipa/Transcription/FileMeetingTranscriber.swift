@@ -36,11 +36,6 @@ enum FileMeetingTranscriber {
     enum Outcome: Sendable, Equatable {
         case completed(localeID: String)
         case failed(Failure)
-
-        var isFailure: Bool {
-            if case .failed = self { return true }
-            return false
-        }
     }
 
     enum Failure: Sendable, Equatable {
@@ -103,10 +98,13 @@ enum FileMeetingTranscriber {
                 failedChannels.append(channel)
             }
         }
+        // The locale was picked from real audio, so the hint stays durable
+        // even when channel analysis failed. A model-install failure returns
+        // above, before any audio ran, and leaves the previous hint intact.
+        UserDefaults.standard.set(localeID, forKey: "lastSpeechLocale")
         guard failedChannels.isEmpty else {
             return .failed(.channels(failedChannels, localeID: localeID))
         }
-        UserDefaults.standard.set(localeID, forKey: "lastSpeechLocale")
         return .completed(localeID: localeID)
     }
 
