@@ -11,11 +11,20 @@ extension Color {
 }
 
 enum Theme {
-    static let bg = Color(hex: 0x161412)
-    static let bgSidebar = Color(hex: 0x1C1A18)
-    static let card = Color(hex: 0x232120)
+    static let bgHex: UInt32 = 0x141617
+    static let bgSidebarHex: UInt32 = 0x17191A
+    static let cardHex: UInt32 = 0x1E2123
+    static let accentHex: UInt32 = 0xF05423
+    static let accentGlowOpacity = 0.4
+    static let titleSize: CGFloat = 32
+    static let sectionSize: CGFloat = 16
+
+    static let bg = Color(hex: bgHex)
+    static let bgSidebar = Color(hex: bgSidebarHex)
+    static let card = Color(hex: cardHex)
     static let border = Color.white.opacity(0.07)
-    static let accent = Color(hex: 0xF05423)
+    static let accent = Color(hex: accentHex)
+    static let accentGlow = accent.opacity(accentGlowOpacity)
     static let brandPurple = Color(hex: 0x7C5CFF)
     static let brandPink = Color(hex: 0xE879A8)
     static let textPrimary = Color.white.opacity(0.92)
@@ -31,8 +40,9 @@ enum Theme {
     static let statusLoading = Color(hex: 0xE6C35C)
     static let statusFailed = Color(hex: 0xE08A3C)
 
-    static let titleFont = Font.system(size: 34, weight: .semibold, design: .serif)
+    static let titleFont = Font.system(size: titleSize, weight: .semibold, design: .serif)
     static let meetingTitleFont = Font.system(size: 28, weight: .bold)
+    static let sectionFont = Font.system(size: sectionSize, weight: .semibold)
 
     static let spaceM: CGFloat = 12
     static let spaceL: CGFloat = 16
@@ -103,6 +113,10 @@ struct HoverHighlight: ViewModifier {
 extension View {
     func hoverHighlight(cornerRadius: CGFloat = Theme.radiusS) -> some View {
         modifier(HoverHighlight(cornerRadius: cornerRadius))
+    }
+
+    func recordGlow() -> some View {
+        shadow(color: Theme.accentGlow, radius: 10)
     }
 }
 

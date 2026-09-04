@@ -53,6 +53,7 @@ struct HomeView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.large)
                     .tint(.white)
+                    .accessibilityLabel("Quick note")
                     Button {
                         app.startRecording()
                     } label: {
@@ -65,7 +66,9 @@ struct HomeView: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                     .tint(Theme.accent)
+                    .recordGlow()
                     .disabled(app.recorder.isBusy)
+                    .accessibilityLabel("Record")
                 }
 
                 if !isSearching, activeFolder == nil, let event = nextEvent {
@@ -118,16 +121,11 @@ struct HomeView: View {
 
     private var emptyState: some View {
         VStack(spacing: 10) {
-            Image(systemName: isSearching ? "magnifyingglass" : "calendar.badge.plus")
-                .font(.system(size: 30))
-                .foregroundStyle(Theme.textTertiary)
-            Text(
-                isSearching
+            EmptyStateView(
+                icon: isSearching ? "magnifyingglass" : "calendar.badge.plus",
+                title: isSearching
                     ? "No results for \"\(app.searchQuery)\""
-                    : activeFolder != nil ? "No meetings in this folder" : "No meetings yet"
-            )
-            .font(.system(size: 15, weight: .medium))
-            .foregroundStyle(Theme.textSecondary)
+                    : activeFolder != nil ? "No meetings in this folder" : "No meetings yet")
             if !isSearching {
                 HStack(spacing: 10) {
                     Button {
@@ -138,6 +136,7 @@ struct HomeView: View {
                     }
                     .buttonStyle(.borderless)
                     .foregroundStyle(Theme.textSecondary)
+                    .accessibilityLabel("Quick note")
                     Button {
                         app.startRecording()
                     } label: {
@@ -146,7 +145,9 @@ struct HomeView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(Theme.accent)
+                    .recordGlow()
                     .disabled(app.recorder.isBusy)
+                    .accessibilityLabel("Record")
                 }
                 .padding(.top, 6)
             }
@@ -207,7 +208,9 @@ private struct HeroEventCard: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
             .tint(Theme.accent)
+            .recordGlow()
             .disabled(app.recorder.isBusy)
+            .accessibilityLabel("Record")
         }
         .padding(Theme.spaceXL)
         .card(cornerRadius: Theme.radiusL)

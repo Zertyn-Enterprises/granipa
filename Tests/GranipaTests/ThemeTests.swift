@@ -23,6 +23,16 @@ import Testing
         #expect(DictationController.waveformBars == 40)
     }
 
+    @Test func darkTokensMatchTheV2Contract() {
+        #expect(Theme.bgHex == 0x141617)
+        #expect(Theme.bgSidebarHex == 0x17191A)
+        #expect(Theme.cardHex == 0x1E2123)
+        #expect(Theme.accentHex == 0xF05423)
+        #expect(Theme.accentGlowOpacity == 0.4)
+        #expect(Theme.titleSize == 32)
+        #expect(Theme.sectionSize == 16)
+    }
+
     @Test func sparklineIsStableAndBounded() {
         let a = MeetingSparkline.samples(id: "abc")
         let b = MeetingSparkline.samples(id: "abc")
