@@ -447,26 +447,19 @@ final class AppState {
                     meetingID: meetingID, database: db, providerID: providerID)
             }
         } else if diarizationEnabled, let meeting = try? db.fetchMeeting(id: meetingID) {
-            let finalSegments =
-                (try? db.fetchSegments(meetingID: meetingID, finalOnly: true)) ?? []
-            if fileTranscription?.isFailure == true, finalSegments.isEmpty {
-                // Zero segments because ASR failed — FluidAudio would load
-                // models for nothing. A silent meeting reports .completed,
-                // so its behavior is unchanged.
-                Self.log.info(
-                    "skipping diarization for \(meetingID, privacy: .public): transcription failed with no segments")
-            } else {
-                do {
-                    try await DiarizationService.diarize(
-                        meetingID: meetingID,
-                        audioSystemPath: meeting.audioSystemPath,
-                        database: db,
-                        nameInferenceProviderID: inferNames ? providerID : nil)
-                } catch {
-                    // Best-effort: segments keep their "Them" label, but leave evidence.
-                    Logger(subsystem: "com.zertyn.granipa", category: "diarization")
-                        .error("diarization failed: \(error.localizedDescription, privacy: .public)")
-                }
+            // DiarizationService returns before prepareModels when there are
+            // no final system segments, so a failed transcription with zero
+            // segments is already a cheap no-op here.
+            do {
+                try await DiarizationService.diarize(
+                    meetingID: meetingID,
+                    audioSystemPath: meeting.audioSystemPath,
+                    database: db,
+                    nameInferenceProviderID: inferNames ? providerID : nil)
+            } catch {
+                // Best-effort: segments keep their "Them" label, but leave evidence.
+                Logger(subsystem: "com.zertyn.granipa", category: "diarization")
+                    .error("diarization failed: \(error.localizedDescription, privacy: .public)")
             }
         }
 
