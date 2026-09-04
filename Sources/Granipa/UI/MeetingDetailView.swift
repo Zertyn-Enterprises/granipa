@@ -9,6 +9,10 @@ struct MeetingDetailView: View {
     @State private var renamingSpeaker: String?
     @State private var renameSpeakerTo = ""
 
+    private var isEnhancing: Bool {
+        app.enhancingMeetingIDs.contains(meeting.id)
+    }
+
     enum Tab: String, CaseIterable {
         case notes = "Notes"
         case enhanced = "Enhanced"
@@ -17,6 +21,10 @@ struct MeetingDetailView: View {
 
     init(meeting: Meeting) {
         _meeting = State(initialValue: meeting)
+        // A recorded meeting centers the transcript; a quick note centers the editor.
+        if meeting.audioMicPath != nil || meeting.status == .recording {
+            _tab = State(initialValue: .transcript)
+        }
     }
 
     var body: some View {
@@ -32,17 +40,7 @@ struct MeetingDetailView: View {
                 transcriptList
             }
         }
-        .task { loadSegments() }
-        .onAppear {
-            if app.enhancingMeetingIDs.contains(meeting.id) {
-                tab = .enhanced
-            }
-        }
-        .onChange(of: app.enhancingMeetingIDs.contains(meeting.id)) { _, isEnhancing in
-            if isEnhancing {
-                tab = .enhanced
-            }
-        }
+        .task(id: liveTranscription == nil) { await loadSegments() }
         .alert("Rename speaker", isPresented: .constant(renamingSpeaker != nil)) {
             TextField("Name", text: $renameSpeakerTo)
             Button("Rename") {
@@ -50,7 +48,7 @@ struct MeetingDetailView: View {
                     let to = renameSpeakerTo.trimmingCharacters(in: .whitespaces)
                     if !to.isEmpty, to != from {
                         try? db.renameSpeaker(meetingID: meeting.id, from: from, to: to)
-                        loadSegments()
+                        Task { await loadSegments() }
                     }
                 }
                 renamingSpeaker = nil
@@ -64,7 +62,7 @@ struct MeetingDetailView: View {
     // MARK: - Header
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 Button {
                     app.selectedMeetingID = nil
@@ -88,13 +86,20 @@ struct MeetingDetailView: View {
                         .foregroundStyle(Theme.textSecondary)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(Color.white.opacity(0.07), in: Capsule())
+                        .background(Theme.border, in: Capsule())
+                }
+
+                if let folder = app.folders.first(where: { $0.id == meeting.folderID }) {
+                    Label(folder.name, systemImage: "folder")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Theme.textSecondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Theme.fillSubtle, in: Capsule())
                 }
 
                 Spacer()
 
-                folderMenu
-                templateMenu
                 actionsMenu
             }
 
@@ -109,12 +114,12 @@ struct MeetingDetailView: View {
             tabBar
         }
         .padding(.horizontal, 28)
-        .padding(.top, 18)
+        .padding(.top, 14)
         .padding(.bottom, 0)
     }
 
-    private var folderMenu: some View {
-        Menu {
+    private var folderSection: some View {
+        Menu("Move to folder") {
             Button("No folder") {
                 meeting.folderID = nil
                 scheduleSave()
@@ -125,19 +130,11 @@ struct MeetingDetailView: View {
                     scheduleSave()
                 }
             }
-        } label: {
-            Label(
-                app.folders.first { $0.id == meeting.folderID }?.name ?? "No folder",
-                systemImage: "folder")
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.textSecondary)
         }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
     }
 
-    private var templateMenu: some View {
-        Menu {
+    private var templateSection: some View {
+        Menu("Template") {
             Button("Default template") {
                 meeting.templateID = nil
                 scheduleSave()
@@ -148,19 +145,14 @@ struct MeetingDetailView: View {
                     scheduleSave()
                 }
             }
-        } label: {
-            Label(
-                app.templates.first { $0.id == meeting.templateID }?.name ?? "Template",
-                systemImage: "doc.text")
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.textSecondary)
         }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
     }
 
     private var actionsMenu: some View {
         Menu {
+            folderSection
+            templateSection
+            Divider()
             Button("Export as Markdown…") {
                 if let db = app.database {
                     MeetingExporter.exportViaSavePanel(
@@ -188,9 +180,16 @@ struct MeetingDetailView: View {
                     tab = item
                 } label: {
                     VStack(spacing: 7) {
-                        Text(item.rawValue)
-                            .font(.system(size: 13, weight: tab == item ? .semibold : .regular))
-                            .foregroundStyle(tab == item ? Theme.textPrimary : Theme.textSecondary)
+                        HStack(spacing: 6) {
+                            Text(item.rawValue)
+                                .font(.system(size: 13, weight: tab == item ? .semibold : .regular))
+                                .foregroundStyle(tab == item ? Theme.textPrimary : Theme.textSecondary)
+                            if item == .enhanced, isEnhancing {
+                                Circle()
+                                    .fill(Theme.statusProcessing)
+                                    .frame(width: 5, height: 5)
+                            }
+                        }
                         Rectangle()
                             .fill(tab == item ? Theme.accent : .clear)
                             .frame(height: 2)
@@ -240,7 +239,25 @@ struct MeetingDetailView: View {
         let live = liveTranscription
         let shown = live.map(\.liveSegments) ?? segments
         return Group {
-            if shown.isEmpty && live == nil {
+            if let live, shown.isEmpty, case .failed(let message) = live.phase {
+                VStack(spacing: 10) {
+                    Image(systemName: "xmark.circle")
+                        .font(.system(size: 28))
+                        .foregroundStyle(Theme.statusFailed)
+                    Text("Transcription failed")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(Theme.textSecondary)
+                    Text(message)
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.textTertiary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 380)
+                    Button("Retry") { live.retryIfFailed() }
+                        .buttonStyle(.bordered)
+                        .tint(.white)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if shown.isEmpty && live == nil {
                 VStack(spacing: 10) {
                     Image(systemName: "text.quote")
                         .font(.system(size: 28))
@@ -256,7 +273,7 @@ struct MeetingDetailView: View {
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 14) {
+                        LazyVStack(alignment: .leading, spacing: 8) {
                             ForEach(shown) { segment in
                                 SegmentRow(segment: segment)
                                     .id(segment.id)
@@ -269,16 +286,9 @@ struct MeetingDetailView: View {
                                         }
                                     }
                             }
-                            if let live {
-                                if !live.volatileMic.isEmpty {
-                                    VolatileRow(speaker: "Me", text: live.volatileMic)
-                                        .id("volatile-mic")
-                                }
-                                if !live.volatileSystem.isEmpty {
-                                    VolatileRow(speaker: "Them", text: live.volatileSystem)
-                                        .id("volatile-system")
-                                }
-                            }
+                            // Volatile (in-flight) text stays in the HUD and captions
+                            // overlay; observing it here re-evaluated this whole list
+                            // at the volatile flush rate and stalled Record.
                         }
                         .padding(.horizontal, 28)
                         .padding(.vertical, 18)
@@ -289,24 +299,19 @@ struct MeetingDetailView: View {
                             proxy.scrollTo(last.id, anchor: .bottom)
                         }
                     }
-                    .onChange(of: (live?.volatileMic ?? "") + "|" + (live?.volatileSystem ?? "")) {
-                        if live?.volatileSystem.isEmpty == false {
-                            proxy.scrollTo("volatile-system", anchor: .bottom)
-                        } else if live?.volatileMic.isEmpty == false {
-                            proxy.scrollTo("volatile-mic", anchor: .bottom)
-                        }
-                    }
                 }
             }
         }
-        .onChange(of: app.transcription == nil) {
-            loadSegments()
-        }
     }
 
-    private func loadSegments() {
+    private func loadSegments() async {
         guard let db = app.database else { return }
-        segments = (try? db.fetchSegments(meetingID: meeting.id)) ?? []
+        let meetingID = meeting.id
+        let loaded = await Task.detached(priority: .userInitiated) {
+            (try? db.fetchSegments(meetingID: meetingID)) ?? []
+        }.value
+        guard !Task.isCancelled else { return }
+        segments = loaded
     }
 
     private func scheduleSave() {
@@ -326,7 +331,7 @@ struct SegmentRow: View {
     private static let palette: [Color] = [.orange, .purple, .teal, .pink, .indigo, .mint]
 
     private var speakerColor: Color {
-        if segment.channel == .mic { return Color(hex: 0x6FA8DC) }
+        if segment.channel == .mic { return Theme.channelMe }
         if segment.speaker == "Them" { return Theme.accent }
         let hash = segment.speaker.unicodeScalars.reduce(0) {
             ($0 &* 31 &+ Int($1.value)) & 0x7FFF_FFFF
@@ -338,41 +343,26 @@ struct SegmentRow: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 8) {
                 Text(segment.speaker)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(Theme.fontCaption.weight(.semibold))
                     .foregroundStyle(speakerColor)
                 Text(Self.timestamp(segment.startSeconds))
-                    .font(.system(size: 11))
+                    .font(Theme.fontSmall)
                     .foregroundStyle(Theme.textTertiary)
                     .monospacedDigit()
             }
             Text(segment.text)
-                .font(.system(size: 14))
-                .lineSpacing(3)
+                .font(.system(size: 15))
+                .lineSpacing(7)
                 .foregroundStyle(Theme.textPrimary)
                 .textSelection(.enabled)
         }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     static func timestamp(_ seconds: Double) -> String {
         let total = Int(seconds)
         return String(format: "%d:%02d", total / 60, total % 60)
-    }
-}
-
-struct VolatileRow: View {
-    let speaker: String
-    let text: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(speaker)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Theme.textTertiary)
-            Text(text)
-                .font(.system(size: 14))
-                .lineSpacing(3)
-                .italic()
-                .foregroundStyle(Theme.textSecondary)
-        }
     }
 }

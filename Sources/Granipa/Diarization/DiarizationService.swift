@@ -55,24 +55,49 @@ enum DiarizationService {
         var relabeled = SpeakerMapping.relabel(segments: systemSegments, spans: spans)
 
         if let providerID = nameInferenceProviderID {
-            let labels = Set(relabeled.map(\.speaker)).filter { $0.hasPrefix("Speaker ") }.sorted()
-            if !labels.isEmpty {
-                let micSegments = allSegments.filter { $0.channel == .mic }
-                let transcript = EnhancementService.transcriptText(
-                    segments: micSegments + relabeled)
-                let prompt = SpeakerMapping.nameInferencePrompt(
-                    transcript: transcript, speakerLabels: labels)
-                if let raw = try? await LLMService.generate(providerID: providerID, prompt: prompt) {
-                    let names = SpeakerMapping.parseNames(raw, speakerLabels: labels)
-                    log.info("name inference: \(names.count)/\(labels.count) labels named")
-                    relabeled = SpeakerMapping.applyNames(names, to: relabeled)
-                }
-            }
+            relabeled = await applyNames(
+                providerID: providerID,
+                systemSegments: relabeled,
+                allSegments: allSegments)
         }
 
         let finalSpeakers = Set(relabeled.map(\.speaker))
         log.info("done: speakers now \(finalSpeakers.sorted().joined(separator: ", "), privacy: .public)")
         try database.replaceSegments(meetingID: meetingID, channel: .system, with: relabeled)
         #endif
+    }
+
+    /// Name Muse/local "Speaker A" labels without running FluidAudio again.
+    static func inferNames(
+        meetingID: String,
+        database: AppDatabase,
+        providerID: String
+    ) async throws {
+        let allSegments = try database.fetchSegments(meetingID: meetingID, finalOnly: true)
+        let systemSegments = allSegments.filter { $0.channel == .system }
+        guard !systemSegments.isEmpty else { return }
+        let relabeled = await applyNames(
+            providerID: providerID,
+            systemSegments: systemSegments,
+            allSegments: allSegments)
+        try database.replaceSegments(meetingID: meetingID, channel: .system, with: relabeled)
+    }
+
+    private static func applyNames(
+        providerID: String,
+        systemSegments: [TranscriptSegment],
+        allSegments: [TranscriptSegment]
+    ) async -> [TranscriptSegment] {
+        let labels = Set(systemSegments.map(\.speaker)).filter { $0.hasPrefix("Speaker ") }.sorted()
+        guard !labels.isEmpty else { return systemSegments }
+        let micSegments = allSegments.filter { $0.channel == .mic }
+        let transcript = EnhancementService.transcriptText(segments: micSegments + systemSegments)
+        let prompt = SpeakerMapping.nameInferencePrompt(
+            transcript: transcript, speakerLabels: labels)
+        guard let raw = try? await LLMService.generate(providerID: providerID, prompt: prompt)
+        else { return systemSegments }
+        let names = SpeakerMapping.parseNames(raw, speakerLabels: labels)
+        log.info("name inference: \(names.count)/\(labels.count) labels named")
+        return SpeakerMapping.applyNames(names, to: systemSegments)
     }
 }

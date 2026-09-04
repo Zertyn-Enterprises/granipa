@@ -41,6 +41,19 @@ enum LanguageDetection {
         return parsed.isEmpty ? defaultProbeLocales : Array(parsed.prefix(maxProbeLocales))
     }
 
+    /// One SpeechAnalyzer per channel. Parallel locale probes (2–3 × mic+system)
+    /// peg the CPU and freeze the UI during Record.
+    static func startLocales(requested: String, last: String?, probes: [String]? = nil)
+        -> [String]
+    {
+        if requested != "auto" { return [requested] }
+        let list =
+            probes
+            ?? parseProbeLocales(UserDefaults.standard.string(forKey: "probeLocales"))
+        if let last, list.contains(last) { return [last] }
+        return [list[0]]
+    }
+
     static func dominantLanguage(of text: String) -> NLLanguage? {
         guard text.count >= 10 else { return nil }
         let recognizer = NLLanguageRecognizer()
@@ -48,7 +61,9 @@ enum LanguageDetection {
         return recognizer.dominantLanguage
     }
 
-    static func decide(_ probes: [LanguageProbeResult], force: Bool) -> String? {
+    static func decide(
+        _ probes: [LanguageProbeResult], force: Bool, systemHint: String? = nil
+    ) -> String? {
         let nonEmpty = probes.filter { !$0.text.isEmpty }
         guard !nonEmpty.isEmpty else { return nil }
         if !force, (probes.map { $0.text.count }.max() ?? 0) < 40 { return nil }
@@ -72,6 +87,18 @@ enum LanguageDetection {
             for other in probes
             where other.localeID != probe.localeID && code(other.localeID) == read {
                 crossVoted.insert(other.localeID)
+            }
+        }
+        // System audio transcribed by a locale-independent model (Muse) votes
+        // for the candidate its text reads as — same evidence, other channel.
+        // The vote only strengthens candidates that already hold mic text:
+        // adopt() is irreversible, so the hint breaks ties, it never decides
+        // alone.
+        if let read = systemHint.flatMap({ dominantLanguage(of: $0)?.rawValue }).map({
+            String($0.prefix(2))
+        }) {
+            for probe in nonEmpty where code(probe.localeID) == read {
+                crossVoted.insert(probe.localeID)
             }
         }
         // A cross-voted candidate only wins cleanly if its own output doesn't

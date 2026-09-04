@@ -121,6 +121,16 @@ struct AppDatabase: Sendable {
                 try template.save(db)
             }
         }
+        migrator.registerMigration("v8-dictation-history") { db in
+            try db.create(table: "dictationEntry") { t in
+                t.primaryKey("id", .text)
+                t.column("text", .text).notNull()
+                t.column("createdAt", .datetime).notNull().indexed()
+                t.column("durationSeconds", .double).notNull()
+                t.column("wordCount", .integer).notNull()
+                t.column("sourceApp", .text)
+            }
+        }
         return migrator
     }
 }
@@ -187,6 +197,71 @@ extension AppDatabase {
                 try victim.delete(db)
             }
             return victims.compactMap(\.imagePath)
+        }
+    }
+}
+
+extension AppDatabase {
+    func insertDictationEntry(_ entry: DictationEntry) throws {
+        try writer.write { db in try entry.insert(db) }
+    }
+
+    func fetchDictationEntries(search: String? = nil, since: Date? = nil, limit: Int = 500)
+        throws -> [DictationEntry]
+    {
+        try writer.read { db in
+            var request = DictationEntry.order(Column("createdAt").desc).limit(limit)
+            if let since {
+                request = request.filter(Column("createdAt") >= since)
+            }
+            if let search, !search.isEmpty {
+                let escaped = search
+                    .replacingOccurrences(of: "\\", with: "\\\\")
+                    .replacingOccurrences(of: "%", with: "\\%")
+                    .replacingOccurrences(of: "_", with: "\\_")
+                request = request.filter(
+                    sql: "text LIKE ? ESCAPE '\\' COLLATE NOCASE",
+                    arguments: ["%\(escaped)%"])
+            }
+            return try request.fetchAll(db)
+        }
+    }
+
+    func dictationStats(since: Date? = nil) throws -> DictationStats {
+        try writer.read { db in
+            var sql = """
+                SELECT COALESCE(SUM(wordCount), 0) AS words,
+                       COALESCE(SUM(durationSeconds), 0) AS duration,
+                       COUNT(DISTINCT sourceApp) AS apps
+                FROM dictationEntry
+                """
+            if since != nil {
+                sql += " WHERE createdAt >= ?"
+            }
+            let row: Row?
+            if let since {
+                row = try Row.fetchOne(db, sql: sql, arguments: [since])
+            } else {
+                row = try Row.fetchOne(db, sql: sql)
+            }
+            return DictationStats(
+                words: Int(row?["words"] as Int64? ?? 0),
+                durationSeconds: row?["duration"] ?? 0,
+                apps: Int(row?["apps"] as Int64? ?? 0))
+        }
+    }
+
+    func deleteDictationEntry(id: String) throws {
+        _ = try writer.write { db in try DictationEntry.deleteOne(db, key: id) }
+    }
+
+    func pruneDictationEntries(keep: Int = 2000) throws {
+        try writer.write { db in
+            let victims = try DictationEntry
+                .order(Column("createdAt").desc)
+                .limit(10_000, offset: keep)
+                .fetchAll(db)
+            for victim in victims { try victim.delete(db) }
         }
     }
 }

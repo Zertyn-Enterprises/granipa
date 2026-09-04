@@ -4,7 +4,15 @@ struct MainWindow: View {
     @Environment(AppState.self) private var app
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.openSettings) private var openSettings
     @AppStorage("onboardingCompleted") private var onboardingCompleted = false
+
+    private static func looksLikePermissionIssue(_ message: String) -> Bool {
+        let lower = message.lowercased()
+        return lower.contains("permission") || lower.contains("denied")
+            || lower.contains("not authorized") || lower.contains("privacy")
+    }
 
     var body: some View {
         @Bindable var app = app
@@ -20,32 +28,51 @@ struct MainWindow: View {
             VStack(spacing: 0) {
                 if let appName = app.detector.detectedApp, !app.recorder.isRecording {
                     detectionBanner(appName: appName)
+                        .transition(
+                            reduceMotion
+                                ? .opacity
+                                : .move(edge: .top).combined(with: .opacity))
                 }
                 Group {
-                    if let meeting = app.selectedMeeting {
+                    if app.showsDictationHistory {
+                        DictationHistoryView()
+                    } else if let meeting = app.selectedMeeting {
                         MeetingDetailView(meeting: meeting)
                             .id(meeting.id)
-                            .transition(.opacity)
                     } else {
                         HomeView()
-                            .transition(.opacity)
                     }
                 }
-                .animation(.easeInOut(duration: 0.15), value: app.selectedMeetingID)
             }
+            .animation(
+                reduceMotion ? nil : .easeOut(duration: Theme.motionNormal),
+                value: app.detector.detectedApp)
             .frame(maxWidth: .infinity)
             .background(Theme.bg)
         }
         .preferredColorScheme(.dark)
+        .tint(Theme.accent)
         .frame(minWidth: 960, minHeight: 600)
         .onChange(of: app.recorder.isRecording) {
             if app.recorder.isRecording {
+                CaptionsOverlayController.shared.resetDismissed()
                 openWindow(id: "recording-hud")
-            } else {
+            }
+        }
+        .onChange(of: app.processingMeetingID) {
+            if app.processingMeetingID == nil, !app.recorder.isRecording {
                 dismissWindow(id: "recording-hud")
+            } else if app.processingMeetingID != nil {
+                openWindow(id: "recording-hud")
             }
         }
         .alert("Error", isPresented: .constant(app.loadError != nil)) {
+            if let error = app.loadError, Self.looksLikePermissionIssue(error) {
+                Button("Open Settings") {
+                    app.loadError = nil
+                    openSettings()
+                }
+            }
             Button("OK") { app.loadError = nil }
         } message: {
             Text(app.loadError ?? "")

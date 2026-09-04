@@ -9,7 +9,7 @@ struct SidebarView: View {
     @State private var renameText = ""
 
     private var isHomeActive: Bool {
-        app.selectedMeetingID == nil && app.selectedFolderID == nil
+        !app.showsDictationHistory && app.selectedFolderID == nil
     }
 
     var body: some View {
@@ -20,19 +20,33 @@ struct SidebarView: View {
             searchField
                 .padding(.bottom, 10)
 
-            SideItem(title: "Home", icon: "house", isActive: isHomeActive) {
+            SideItem(title: "Home", icon: "house.fill", isActive: isHomeActive) {
                 app.selectedMeetingID = nil
                 app.selectedFolderID = nil
                 app.searchQuery = ""
+                app.showsDictationHistory = false
             }
 
-            Text("SPACES")
-                .font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(Theme.textTertiary)
-                .tracking(0.8)
-                .padding(.top, 18)
-                .padding(.bottom, 4)
-                .padding(.leading, 8)
+            SideItem(
+                title: "Dictation",
+                icon: "mic.fill",
+                isActive: app.showsDictationHistory
+            ) {
+                app.selectedMeetingID = nil
+                app.selectedFolderID = nil
+                app.searchQuery = ""
+                app.showsDictationHistory = true
+            }
+
+            if !app.folders.isEmpty {
+                Text("SPACES")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(Theme.textTertiary)
+                    .tracking(0.8)
+                    .padding(.top, 18)
+                    .padding(.bottom, 4)
+                    .padding(.leading, 8)
+            }
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
@@ -53,10 +67,13 @@ struct SidebarView: View {
                                 title: folder.name,
                                 icon: "folder",
                                 isActive: app.selectedFolderID == folder.id,
-                                indented: group.team != nil
+                                indented: group.team != nil,
+                                quiet: true
                             ) {
                                 app.selectedFolderID = folder.id
                                 app.selectedMeetingID = nil
+                                app.showsDictationHistory = false
+                                app.searchQuery = ""
                             }
                             .contextMenu {
                                 Button("Rename") {
@@ -80,7 +97,7 @@ struct SidebarView: View {
 
             if app.recorder.isRecording {
                 HStack(spacing: 7) {
-                    Circle().fill(.red).frame(width: 7, height: 7)
+                    Circle().fill(Theme.statusListening).frame(width: 7, height: 7)
                     Text("Recording")
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.textSecondary)
@@ -149,9 +166,12 @@ struct SidebarView: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(.vertical, 6)
-        .padding(.horizontal, 8)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .background(Theme.fillSubtle, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Theme.border, lineWidth: 1))
     }
 
     private var groupedFolders: [(team: String?, folders: [Folder])] {
@@ -168,33 +188,46 @@ private struct SideItem: View {
     let isActive: Bool
     var indented = false
     var dimmed = false
+    var quiet = false
+    var iconTint: Color?
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: icon)
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(dimmed ? Theme.textTertiary : Theme.textSecondary)
+                    .font(Theme.fontCaption.weight(.semibold))
+                    .foregroundStyle(iconColor)
                     .frame(width: 16)
                 Text(title)
-                    .font(.system(size: 13, weight: isActive ? .semibold : .regular))
-                    .foregroundStyle(
-                        dimmed
-                            ? Theme.textTertiary
-                            : (isActive ? Theme.textPrimary : Theme.textSecondary))
+                    .font(isActive ? Theme.fontBody.weight(.semibold) : Theme.fontBody)
+                    .foregroundStyle(textColor)
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
-            .padding(.vertical, 5.5)
-            .padding(.horizontal, 8)
+            .padding(.vertical, 8)
+            .padding(.horizontal, 10)
             .padding(.leading, indented ? 14 : 0)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(
-            isActive ? Color.white.opacity(0.08) : .clear,
-            in: RoundedRectangle(cornerRadius: 7))
-        .hoverHighlight(cornerRadius: 7)
+        .background {
+            if isActive {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Theme.fillSubtle)
+            }
+        }
+        .hoverHighlight(cornerRadius: 10)
+    }
+
+    private var iconColor: Color {
+        if let iconTint { return iconTint }
+        if dimmed || (quiet && !isActive) { return Theme.textTertiary }
+        return isActive ? Theme.textPrimary : Theme.textSecondary
+    }
+
+    private var textColor: Color {
+        if dimmed || (quiet && !isActive) { return Theme.textTertiary }
+        return isActive ? Theme.textPrimary : Theme.textSecondary
     }
 }

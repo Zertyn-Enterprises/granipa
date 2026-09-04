@@ -52,16 +52,18 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate {
 
         if let screen = NSScreen.main {
             let frame = screen.visibleFrame
-            panel.setFrameOrigin(
-                NSPoint(
-                    x: frame.midX - 400,
-                    y: frame.midY - 180))
+            PanelMotion.appear(
+                panel,
+                at: NSPoint(x: frame.midX - 400, y: frame.midY - 180),
+                makeKey: true)
+        } else {
+            panel.makeKeyAndOrderFront(nil)
         }
-        panel.makeKeyAndOrderFront(nil)
     }
 
     func hide() {
-        panel?.orderOut(nil)
+        guard let panel else { return }
+        PanelMotion.disappear(panel)
     }
 
     nonisolated func windowDidResignKey(_ notification: Notification) {

@@ -16,12 +16,48 @@ enum Theme {
     static let card = Color(hex: 0x232120)
     static let border = Color.white.opacity(0.07)
     static let accent = Color(hex: 0xF05423)
+    static let brandPurple = Color(hex: 0x7C5CFF)
+    static let brandPink = Color(hex: 0xE879A8)
+    static var brandGradient: LinearGradient {
+        LinearGradient(
+            colors: [brandPurple, brandPink, accent],
+            startPoint: .leading,
+            endPoint: .trailing)
+    }
     static let textPrimary = Color.white.opacity(0.92)
     static let textSecondary = Color.white.opacity(0.55)
     static let textTertiary = Color.white.opacity(0.34)
+    static let channelMe = Color(hex: 0x6FA8DC)
+    static let fillSubtle = Color.white.opacity(0.08)
+    static let fillHover = Color.white.opacity(0.04)
+    static let strokeStrong = Color.white.opacity(0.12)
+    static let statusListening = Color(hex: 0xE24B4A)
+    static let statusProcessing = Color(hex: 0x5B8DEF)
+    static let statusDone = Color(hex: 0x4CD981)
+    static let statusLoading = Color(hex: 0xE6C35C)
+    static let statusFailed = Color(hex: 0xE08A3C)
 
-    static let titleFont = Font.system(size: 30, weight: .semibold, design: .serif)
-    static let meetingTitleFont = Font.system(size: 24, weight: .semibold, design: .serif)
+    static let titleFont = Font.system(size: 34, weight: .semibold, design: .serif)
+    static let meetingTitleFont = Font.system(size: 28, weight: .bold)
+
+    static let spaceXS: CGFloat = 4
+    static let spaceS: CGFloat = 8
+    static let spaceM: CGFloat = 12
+    static let spaceL: CGFloat = 16
+    static let spaceXL: CGFloat = 24
+
+    static let radiusS: CGFloat = 8
+    static let radiusM: CGFloat = 12
+    static let radiusL: CGFloat = 16
+    static let radiusOverlay: CGFloat = 24
+
+    static let fontSmall = Font.caption2
+    static let fontCaption = Font.caption
+    static let fontBody = Font.callout
+
+    static let motionFast: TimeInterval = 0.08
+    static let motionNormal: TimeInterval = 0.15
+    static let spring = Animation.spring(response: 0.32, dampingFraction: 0.86)
 
     private static let avatarPalette: [Color] = [
         Color(hex: 0x8A6D3B), Color(hex: 0xA85B32), Color(hex: 0x5B7A6A),
@@ -41,7 +77,7 @@ enum Theme {
 }
 
 struct CardStyle: ViewModifier {
-    var cornerRadius: CGFloat = 12
+    var cornerRadius: CGFloat = Theme.radiusM
 
     func body(content: Content) -> some View {
         content
@@ -53,27 +89,29 @@ struct CardStyle: ViewModifier {
 }
 
 extension View {
-    func card(cornerRadius: CGFloat = 12) -> some View {
+    func card(cornerRadius: CGFloat = Theme.radiusM) -> some View {
         modifier(CardStyle(cornerRadius: cornerRadius))
     }
 }
 
 struct HoverHighlight: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hovering = false
-    var cornerRadius: CGFloat = 8
+    var cornerRadius: CGFloat = Theme.radiusS
 
     func body(content: Content) -> some View {
         content
             .background(
-                hovering ? Color.white.opacity(0.05) : .clear,
+                hovering ? Theme.fillHover : .clear,
                 in: RoundedRectangle(cornerRadius: cornerRadius))
-            .animation(.easeOut(duration: 0.12), value: hovering)
+            .animation(
+                reduceMotion ? nil : .easeOut(duration: Theme.motionFast), value: hovering)
             .onHover { hovering = $0 }
     }
 }
 
 extension View {
-    func hoverHighlight(cornerRadius: CGFloat = 8) -> some View {
+    func hoverHighlight(cornerRadius: CGFloat = Theme.radiusS) -> some View {
         modifier(HoverHighlight(cornerRadius: cornerRadius))
     }
 }
@@ -87,13 +125,13 @@ struct AvatarView: View {
         RoundedRectangle(cornerRadius: size * 0.24)
             .fill(
                 letterSource.map { Theme.avatarColor(for: $0).opacity(0.85) }
-                    ?? Color.white.opacity(0.08))
+                    ?? Theme.fillSubtle)
             .frame(width: size, height: size)
             .overlay {
                 if let source = letterSource, let first = source.first {
                     Text(String(first).uppercased())
                         .font(.system(size: size * 0.48, weight: .semibold, design: .serif))
-                        .foregroundStyle(.white.opacity(0.92))
+                        .foregroundStyle(Theme.textPrimary)
                 } else {
                     Image(systemName: fallbackIcon)
                         .font(.system(size: size * 0.4))

@@ -3,6 +3,7 @@ import SwiftUI
 struct HomeView: View {
     @Environment(AppState.self) private var app
     @State private var searchResults: [Meeting] = []
+    @State private var searchDebounce: Task<Void, Never>?
 
     private var isSearching: Bool { !app.searchQuery.isEmpty }
 
@@ -37,7 +38,7 @@ struct HomeView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            LazyVStack(alignment: .leading, spacing: 24) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(headerTitle)
                         .font(Theme.titleFont)
@@ -47,22 +48,24 @@ struct HomeView: View {
                         app.createMeeting()
                     } label: {
                         Label("Quick note", systemImage: "plus")
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.system(size: 14, weight: .medium))
                     }
                     .buttonStyle(.bordered)
+                    .controlSize(.large)
                     .tint(.white)
                     Button {
                         app.startRecording()
                     } label: {
                         Label(
-                            app.recorder.isRecording ? "Recording…" : "Record",
+                            app.recorder.isBusy ? "Recording…" : "Record",
                             systemImage: "record.circle"
                         )
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 15, weight: .semibold))
                     }
                     .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
                     .tint(Theme.accent)
-                    .disabled(app.recorder.isRecording)
+                    .disabled(app.recorder.isBusy)
                 }
 
                 if !isSearching, activeFolder == nil, let event = nextEvent {
@@ -75,7 +78,7 @@ struct HomeView: View {
                         .padding(.top, 60)
                 } else {
                     ForEach(dayGroups, id: \.day) { group in
-                        VStack(alignment: .leading, spacing: 6) {
+                        LazyVStack(alignment: .leading, spacing: 6) {
                             Text(Theme.dayHeader(group.day))
                                 .font(.system(size: 13, weight: .medium))
                                 .foregroundStyle(Theme.textSecondary)
@@ -84,6 +87,7 @@ struct HomeView: View {
                                 HomeMeetingRow(meeting: meeting)
                             }
                         }
+                        .padding(.bottom, 8)
                     }
                 }
             }
@@ -94,11 +98,21 @@ struct HomeView: View {
             .frame(maxWidth: .infinity)
         }
         .onChange(of: app.searchQuery) {
+            searchDebounce?.cancel()
             guard isSearching, let db = app.database else {
                 searchResults = []
                 return
             }
-            searchResults = (try? db.searchMeetings(query: app.searchQuery)) ?? []
+            let query = app.searchQuery
+            searchDebounce = Task {
+                try? await Task.sleep(for: .milliseconds(200))
+                guard !Task.isCancelled else { return }
+                let results = await Task.detached(priority: .userInitiated) {
+                    (try? db.searchMeetings(query: query)) ?? []
+                }.value
+                guard !Task.isCancelled, query == app.searchQuery else { return }
+                searchResults = results
+            }
         }
     }
 
@@ -107,13 +121,34 @@ struct HomeView: View {
             Image(systemName: isSearching ? "magnifyingglass" : "calendar.badge.plus")
                 .font(.system(size: 30))
                 .foregroundStyle(Theme.textTertiary)
-            Text(isSearching ? "No results for \"\(app.searchQuery)\"" : "No meetings yet")
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(Theme.textSecondary)
+            Text(
+                isSearching
+                    ? "No results for \"\(app.searchQuery)\""
+                    : activeFolder != nil ? "No meetings in this folder" : "No meetings yet"
+            )
+            .font(.system(size: 15, weight: .medium))
+            .foregroundStyle(Theme.textSecondary)
             if !isSearching {
-                Text("Hit Record when a meeting starts, or create a quick note.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.textTertiary)
+                HStack(spacing: 10) {
+                    Button {
+                        app.createMeeting()
+                    } label: {
+                        Label("Quick note", systemImage: "plus")
+                            .font(Theme.fontBody)
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(Theme.textSecondary)
+                    Button {
+                        app.startRecording()
+                    } label: {
+                        Label("Record", systemImage: "record.circle")
+                            .font(.system(size: 13, weight: .semibold))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.accent)
+                    .disabled(app.recorder.isBusy)
+                }
+                .padding(.top, 6)
             }
         }
     }
@@ -127,28 +162,28 @@ private struct HeroEventCard: View {
         HStack(spacing: 18) {
             VStack(spacing: 2) {
                 Text(event.start, format: .dateTime.day())
-                    .font(.system(size: 32, weight: .bold, design: .serif))
+                    .font(.system(size: 44, weight: .bold, design: .serif))
                     .foregroundStyle(Theme.textPrimary)
                 Text(event.start, format: .dateTime.month(.wide))
-                    .font(.system(size: 12))
+                    .font(Theme.fontCaption)
                     .foregroundStyle(Theme.textSecondary)
                 Text(event.start, format: .dateTime.weekday(.wide))
-                    .font(.system(size: 11))
+                    .font(Theme.fontSmall)
                     .foregroundStyle(Theme.textTertiary)
             }
             .frame(minWidth: 76)
 
             RoundedRectangle(cornerRadius: 2)
                 .fill(Theme.accent)
-                .frame(width: 3, height: 52)
+                .frame(width: 3, height: 64)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(event.title)
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.system(size: 19, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                 Text("\(event.start, format: .dateTime.hour().minute()) – \(event.end, format: .dateTime.hour().minute())")
-                    .font(.system(size: 13))
+                    .font(.system(size: 15))
                     .foregroundStyle(Theme.textSecondary)
             }
 
@@ -157,23 +192,25 @@ private struct HeroEventCard: View {
             if let url = event.joinURL {
                 Link(destination: url) {
                     Label("Join", systemImage: "video")
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: 15, weight: .medium))
                 }
                 .buttonStyle(.bordered)
+                .controlSize(.large)
                 .tint(.white)
             }
             Button {
                 app.startRecording(fromEvent: event)
             } label: {
                 Label("Record", systemImage: "record.circle")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
             }
             .buttonStyle(.borderedProminent)
+            .controlSize(.large)
             .tint(Theme.accent)
-            .disabled(app.recorder.isRecording)
+            .disabled(app.recorder.isBusy)
         }
-        .padding(20)
-        .card(cornerRadius: 14)
+        .padding(Theme.spaceXL)
+        .card(cornerRadius: Theme.radiusL)
     }
 }
 
@@ -185,52 +222,55 @@ private struct HomeMeetingRow: View {
 
     var body: some View {
         Button {
+            app.showsDictationHistory = false
             app.selectedMeetingID = meeting.id
         } label: {
-            HStack(spacing: 12) {
-                AvatarView(letterSource: folder.map { $0.team ?? $0.name })
+            HStack(spacing: 14) {
+                MeetingGlyph(seed: meeting.id, size: 42)
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(meeting.title)
-                        .font(.system(size: 14.5, weight: .medium))
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(Theme.textPrimary)
                         .lineLimit(1)
-                    HStack(spacing: 6) {
-                        if meeting.status == .recording {
-                            Label("Recording", systemImage: "record.circle")
-                                .font(.system(size: 11.5))
-                                .foregroundStyle(.red)
-                        } else if meeting.status == .processing {
-                            Label("Processing", systemImage: "gearshape.2")
-                                .font(.system(size: 11.5))
+                    HStack(spacing: 8) {
+                        let phase = app.pipelinePhase(for: meeting)
+                        if phase.isLive {
+                            Label(phase.label, systemImage: phase.systemImage)
+                                .font(Theme.fontSmall)
+                                .foregroundStyle(phase.color)
+                        } else if meeting.audioMicPath != nil {
+                            MeetingSparklineView(seed: meeting.id)
+                            Text(folder?.name ?? "Me")
+                                .font(Theme.fontCaption)
                                 .foregroundStyle(Theme.textSecondary)
+                                .lineLimit(1)
                         } else {
                             Text(folder?.name ?? "Me")
-                                .font(.system(size: 12))
+                                .font(Theme.fontCaption)
                                 .foregroundStyle(Theme.textSecondary)
                                 .lineLimit(1)
                         }
                     }
                 }
 
-                Spacer()
+                Spacer(minLength: 8)
 
-                if folder != nil {
-                    Image(systemName: "folder")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.textTertiary)
-                }
                 Text(meeting.createdAt, format: .dateTime.hour().minute())
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(Theme.textSecondary)
+                    .font(Theme.fontCaption)
+                    .foregroundStyle(Theme.textTertiary)
                     .monospacedDigit()
             }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 10)
+            .padding(.vertical, 12)
+            .padding(.horizontal, 12)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .hoverHighlight(cornerRadius: 10)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Theme.border, lineWidth: 1))
+        .hoverHighlight(cornerRadius: 14)
         .contextMenu {
             Menu("Move to folder") {
                 Button("No folder") {

@@ -36,7 +36,12 @@ final class MeetingDetector {
         guard pollTask == nil else { return }
         pollTask = Task {
             while !Task.isCancelled {
-                poll()
+                // CoreAudio documents kAudioHardwarePropertyProcessObjectList
+                // as a query property with no change notification, so polling
+                // is the only supported option. The CoreAudio reads run
+                // detached; only the state write hops back to the main actor.
+                let name = await Task.detached { Self.activeMeetingApp() }.value
+                apply(active: name)
                 try? await Task.sleep(for: .seconds(5))
             }
         }
@@ -53,8 +58,7 @@ final class MeetingDetector {
         detectedApp = nil
     }
 
-    private func poll() {
-        let active = Self.activeMeetingApp()
+    private func apply(active: String?) {
         let isActive = active != nil
         meetingAppActive = isActive
         if isActive, !lastActive, let name = active {

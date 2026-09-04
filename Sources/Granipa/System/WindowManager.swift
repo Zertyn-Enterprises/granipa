@@ -12,31 +12,12 @@ final class WindowManager {
     }
 
     func registerHotkeys() {
-        let bindings: [(id: UInt32, key: Int, action: WindowAction)] = [
-            (100, kVK_LeftArrow, .leftHalf),
-            (101, kVK_RightArrow, .rightHalf),
-            (102, kVK_UpArrow, .topHalf),
-            (103, kVK_DownArrow, .bottomHalf),
-            (104, kVK_Return, .maximize),
-            (105, kVK_ANSI_C, .center),
-            (106, kVK_ANSI_U, .topLeft),
-            (107, kVK_ANSI_I, .topRight),
-            (108, kVK_ANSI_J, .bottomLeft),
-            (109, kVK_ANSI_K, .bottomRight),
-            (110, kVK_ANSI_D, .firstThird),
-            (111, kVK_ANSI_F, .centerThird),
-            (112, kVK_ANSI_G, .lastThird),
-            (113, kVK_Delete, .restore),
-        ]
-        for binding in bindings {
-            HotkeyManager.shared.register(
-                id: binding.id,
-                keyCode: UInt32(binding.key),
-                modifiers: UInt32(controlKey | optionKey)
-            ) { [weak self] in
-                self?.perform(binding.action)
-            }
-        }
+        ShortcutHub.shared.rebind()
+    }
+
+    func setEnabled(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: "windowSnappingEnabled")
+        ShortcutHub.shared.rebind()
     }
 
     func perform(_ action: WindowAction) {
@@ -55,8 +36,10 @@ final class WindowManager {
             return
         }
 
-        guard let screen = visibleFrameAX(forWindowFrame: current),
-            let target = WindowLayout.frame(for: action, screen: screen, current: current)
+        guard let screen = visibleFrameAX(forWindowFrame: current) else { return }
+        let occupied = WindowInventory.occupiedFrames(on: screen, ignoring: current)
+        guard let target = WindowLayout.frame(
+            for: action, screen: screen, current: current, occupied: occupied)
         else { return }
 
         if lastSnap == nil || !CFEqual(lastSnap!.window, window) {

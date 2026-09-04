@@ -15,13 +15,15 @@
 
 ---
 
-Grañipa records your meetings (no bot joins the call), transcribes them live on-device, figures out who said what, turns your rough notes into polished ones with AI, and pushes everything to your own services — while also replacing your clipboard manager, OCR tool, and window manager.
+Grañipa records your meetings (no bot joins the call), transcribes them live on-device, figures out who said what, turns your rough notes into polished ones with AI, and pushes everything to your own services — while also replacing your clipboard manager, OCR tool, window manager, and Superwhisper-style dictation.
 
-**No accounts. No cloud. No subscriptions.** Your data never leaves your Mac unless *you* send it somewhere.
+**Local by default.** Recording, live transcription, and dictation stay on your Mac unless you opt into a cloud engine (Muse) or send notes through the AI CLI you already use.
 
 > Built as a personal replacement for Granola ($14/month), Raycast clipboard history, TextSniper, and Rectangle — in one native app.
 
 > 🚧 **Beta** — currently in internal testing. The v1.0 public release (with a notarized download, demo video and screenshots) is around the corner. Found a bug? [Open an issue](../../issues).
+
+First launch is a 3-step tour (welcome, permissions, AI & shortcuts). Cloud engines (Muse, rewrite) stay off until you turn them on in Settings.
 
 <p align="center">
   <img src="docs/home.png" width="760" alt="Grañipa home — meetings organized by day">
@@ -32,35 +34,48 @@ Grañipa records your meetings (no bot joins the call), transcribes them live on
 ### 🎙 Meetings
 
 - **Bot-free recording** — captures your mic and the system audio (other participants) as two clean channels via a Core Audio process tap. Works with Zoom, Meet, Teams, Webex, anything that plays audio.
-- **Live on-device transcription** — Apple SpeechAnalyzer (macOS 26), streaming word-by-word. Free and offline.
+- **Live on-device transcription** — Apple SpeechAnalyzer (macOS 26), streaming word-by-word. Your mic always stays local. Optional **Muse** for the *computer* channel only (other participants), never your microphone. If the speech model fails to prepare, retry from the HUD or recording bar. Muse sessions rotate at 55 minutes so Meta's 60-minute cap doesn't kill a long meeting; timestamps stay meeting-relative. If Muse dies, the HUD (and captions) warn — your mic stays on-device.
+- **Live captions** — a floating overlay of what's being said while you record. Hide or show them from the menu bar. Motion follows macOS Reduce Motion. Color, type, and motion tokens live in one `Theme`.
+- **Menu bar** — elapsed time while you record (`h:mm:ss` after an hour); a processing glyph while notes enhance. Toasts sit top-center so they don't cover dictation or captions.
 - **Automatic language detection** — pick up to 3 languages (15+ supported by Apple's engine); each recording probes them in parallel for the first seconds and keeps the winner.
 - **Speaker diarization** — splits remote participants into Speaker 1/2/3 locally (CoreML), then infers their real names from conversation context.
-- **AI-enhanced notes** — your rough notes + the transcript become structured notes, a summary, action items, and a ready-to-send follow-up email. Auto-titles the meeting.
+- **AI-enhanced notes** — your rough notes + the transcript become structured notes, a summary, action items, and a ready-to-send follow-up email. Auto-titles the meeting. After a recording you stay on Notes; open the Enhanced tab when you want the report (it shows progress while the CLI runs).
 - **Bring your own AI subscription** — shells out to the `claude`, `codex`, `gemini`, or `grok` CLI you already pay for. **No API keys, no per-token billing.**
 - **Templates** — per-meeting-type prompts (1:1, standup, sales call…), fully editable.
-- **Folders & teams** — organize meetings Granola-style; structure is exposed through the API.
+- **Folders & teams** — organize meetings Granola-style; structure is exposed through the API. The sidebar hides Spaces until you add a folder.
 - **Calendar integration** — upcoming meetings in the app, one-click record, auto-titling from the event.
 - **Auto-detection** — notices when a meeting app starts using the mic and offers to record; can auto-stop when the call ends.
 - **Search** — full-text across titles, notes, and transcripts.
+
+### ⌨️ Dictation
+
+- **Hold to talk** — hold Right Option (configurable), speak, release, and the text pastes into the front app. Quick tap toggles. Esc cancels. History (`⌥⇧H`) keeps every dictation with WPM, word count, apps used, and estimated typing time saved.
+- **On-device by default** — Apple SpeechAnalyzer. Optional instant rewrite of the text (not the audio) via SpaceXAI or a custom OpenAI-compatible endpoint (Mac Mini / VPS / Ollama).
 
 ### 🧰 Productivity
 
 - **Clipboard history** (`⌥⇧V`) — Raycast-style floating panel: search, type filters, image previews, source app, auto-paste into the active app. Respects password-manager confidentiality markers. 100% local.
 - **Screen text capture / OCR** (`⌥⇧T`) — select any screen region, the text lands in your clipboard (Vision framework, follows your selected languages).
-- **Window management** (`⌃⌥` + arrows/letters) — Rectangle-compatible shortcuts: halves, quarters, thirds, maximize, center, restore.
+- **Emoji & Symbols** (`⌥⇧E`) — opens the macOS character viewer so you can insert an emoji or symbol in the front app.
+- **Window management** — snap halves / quarters / thirds. If a window is already parked on the left (or right), the next snap that way fills the remaining space instead of covering it.
+- **Shortcuts** — Settings → Shortcuts. Optional **macro key** (Caps Lock, like Raycast, or Right Shift) applies to clipboard, OCR, emoji, history, and windows so chords never clash with other apps. Defaults stay `⌥⇧` / `⌃⌥` until you pick a macro.
+- **Battery care** — AlDente-style charge limit, heat protection (pause charging above a temperature), calibration cycle, and MagSafe LED. Opt-in; charging is restored when Grañipa quits. On MacBooks, Settings → Extras → Battery → **Install battery helper…** (admin password once) so the 70% limit actually writes to the SMC.
 
 ### 🔌 Integrations
 
-- **Local REST API** — `127.0.0.1:7799`, bearer-token auth: meetings, transcripts, notes, folders, trigger enhancement.
+- **Local REST API** — off by default; `127.0.0.1:7799`, bearer-token auth: meetings, transcripts, notes, folders, trigger enhancement.
 - **Webhooks** — HMAC-SHA256-signed POSTs on `meeting.started`, `meeting.completed` (full transcript included), `notes.enhanced`, with retry + backoff.
 
 ## Shortcuts
 
 | Shortcut | Action |
 |---|---|
-| `⌥⇧V` | Clipboard history panel |
-| `⌥⇧T` | Capture screen text (OCR) |
-| `⌃⌥ ←` `→` `↑` `↓` | Snap window to half |
+| Hold Right `⌥` | Dictate into the front app (own key, not the macro) |
+| `⌥⇧V` (or macro+V) | Clipboard history panel |
+| `⌥⇧T` (or macro+T) | Capture screen text (OCR) |
+| `⌥⇧E` (or macro+E) | Emoji & Symbols viewer |
+| `⌥⇧H` (or macro+H) | Dictation history |
+| `⌃⌥ ←` `→` `↑` `↓` (or macro+arrow) | Snap window to half |
 | `⌃⌥ ⏎` / `⌃⌥ C` | Maximize / center window |
 | `⌃⌥ U` `I` `J` `K` | Window quarters |
 | `⌃⌥ D` `F` `G` | Window thirds |
@@ -100,11 +115,13 @@ The bundle script signs with your first Apple Development certificate if you hav
 | Screen Recording | OCR capture (`⌥⇧T`) | First OCR |
 | Accessibility | Auto-paste + window snapping | First use |
 
-On the first recording per language, macOS downloads the speech model once. On the first multi-speaker meeting, the diarization models (~130 MB) download once from HuggingFace; everything runs offline afterwards.
+On the first recording per language, macOS downloads the speech model once. On the first multi-speaker meeting, the diarization models (~20 MB) download once from HuggingFace; everything runs offline afterwards.
+
+Settings live under six tabs: General, Dictation, Permissions, AI, Extras, Integrations.
 
 ## REST API
 
-Settings → API holds the bearer token.
+Settings → Integrations holds the bearer token. The local API is off until you enable it.
 
 ```sh
 TOKEN=...
@@ -126,7 +143,7 @@ valid = hmac.compare_digest(expected, request.headers["X-Granipa-Signature"])
 ## Privacy
 
 - Audio, transcripts, notes, and clipboard history live in `~/Library/Application Support/Granipa/` (SQLite + files). Delete the folder, everything is gone.
-- The **only** data that leaves your Mac: transcripts sent to the AI CLI *you* configured when enhancement runs, and webhook payloads to URLs *you* added.
+- The **only** data that leaves your Mac: transcripts sent to the AI CLI *you* configured when enhancement runs, webhook payloads to URLs *you* added, optional dictation *text* to SpaceXAI or your rewrite endpoint, and — if you opt in — computer-audio (not your mic) to Muse during meetings.
 - No telemetry, no analytics, no accounts. The only background network call is the update check against GitHub Releases (Sparkle), and you can disable it.
 
 ## Development

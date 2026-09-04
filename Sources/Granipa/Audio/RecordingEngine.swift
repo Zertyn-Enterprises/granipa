@@ -1,10 +1,19 @@
 import Foundation
 import Observation
 
+enum SystemTapRetryPolicy {
+    static let maxAttempts = 1
+
+    static func shouldRetry(bufferCount: Int, attempts: Int) -> Bool {
+        bufferCount == 0 && attempts < maxAttempts
+    }
+}
+
 @MainActor
 @Observable
 final class RecordingEngine {
     private(set) var isRecording = false
+    private(set) var isStarting = false
     private(set) var meetingID: String?
     private(set) var startedAt: Date?
     private(set) var micLevel: Float = 0
@@ -13,16 +22,30 @@ final class RecordingEngine {
     private(set) var micWarning: String?
 
     private(set) var session: RecordingSession?
+    private let levelGate = LevelGate()
+    @ObservationIgnored private var isStopping = false
+    @ObservationIgnored private var startingSession: RecordingSession?
+    @ObservationIgnored private var channelWatchTask: Task<Void, Never>?
 
-    func start(meetingID: String) throws -> RecordingSession {
-        guard !isRecording else {
+    var isBusy: Bool { isRecording || isStarting }
+
+    func start(meetingID: String) async throws -> RecordingSession {
+        guard !isRecording, !isStarting else {
             throw NSError(
                 domain: "Granipa", code: 1,
                 userInfo: [NSLocalizedDescriptionKey: "Already recording another meeting."])
         }
+        isStarting = true
+        defer { isStarting = false }
         let directory = try AppPaths.audioDirectory(meetingID: meetingID)
-        let session = RecordingSession(meetingID: meetingID, directory: directory) {
+        let gate = levelGate
+        let session = RecordingSession(
+            meetingID: meetingID,
+            directory: directory,
+            fanOutChunks: MeetingASRPolicy.usesLiveASR()
+        ) {
             [weak self] channel, level in
+            guard gate.shouldPublish(channel, level) else { return }
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 switch channel {
@@ -31,8 +54,26 @@ final class RecordingEngine {
                 }
             }
         }
-        let echoCancellation = UserDefaults.standard.object(forKey: "echoCancellation") as? Bool ?? true
-        try session.start(echoCancellation: echoCancellation)
+        startingSession = session
+        self.meetingID = meetingID
+        defer {
+            if !isRecording, startingSession === session {
+                startingSession = nil
+                self.meetingID = nil
+            }
+        }
+        // Voice processing AEC on the input node pegs a core and hangs Record
+        // (pid 25501: 134% CPU, 8 hangs) even with live ASR off. Capture without it.
+        await Task.yield()
+        try Task.checkCancellation()
+        try session.startMic(echoCancellation: false)
+        try Task.checkCancellation()
+        // Process-tap + aggregate device creation blocks for seconds on some
+        // machines; never do it on the main actor (Record → Not Responding).
+        await session.startSystemTapOnControlQueue()
+        try Task.checkCancellation()
+        guard startingSession === session else { throw CancellationError() }
+        session.installListeners()
         if session.systemAudioError != nil {
             systemAudioWarning =
                 "System audio capture failed - only your microphone is being recorded. "
@@ -41,15 +82,16 @@ final class RecordingEngine {
             systemAudioWarning = nil
         }
         self.session = session
-        self.meetingID = meetingID
+        startingSession = nil
         self.startedAt = .now
         self.isRecording = true
-        watchForDeadChannels(session: session, echoCancellationWasOn: echoCancellation)
+        watchForDeadChannels(session: session, echoCancellationWasOn: false)
         return session
     }
 
     private func watchForDeadChannels(session: RecordingSession, echoCancellationWasOn: Bool) {
-        Task { [weak self, weak session] in
+        channelWatchTask?.cancel()
+        channelWatchTask = Task { [weak self, weak session] in
             try? await Task.sleep(for: .seconds(3))
             guard let self, let session, self.session === session, self.isRecording else { return }
             if session.micBufferCount == 0, echoCancellationWasOn {
@@ -58,8 +100,6 @@ final class RecordingEngine {
             }
 
             var tapRestarts = 0
-            var lastSystemCount = 0
-            var stallTicks = 0
             var micRestarts = 0
             var lastMicCount = 0
             var micStallTicks = 0
@@ -67,21 +107,9 @@ final class RecordingEngine {
                 try? await Task.sleep(for: .seconds(5))
                 guard self.session === session, self.isRecording else { return }
 
-                // Buffers flowed and then stopped: route died without a device-change
-                // notification (e.g. sample-rate renegotiation). Rebuild as backstop.
-                let systemCount = session.systemBufferCount
-                if systemCount > 0 {
-                    stallTicks = systemCount == lastSystemCount ? stallTicks + 1 : 0
-                    if stallTicks >= 3 {
-                        session.restartSystemTap()
-                        stallTicks = 0
-                    }
-                }
-                lastSystemCount = systemCount
-
                 // The mic tap delivers buffers continuously even during silence, so a
-                // flat count means the route genuinely died (unlike the system tap,
-                // which only flows while audio plays — hence the lower stall threshold).
+                // flat count means the route genuinely died. The system tap only flows
+                // while audio plays, so a flat system count is valid silence.
                 let micCount = session.micBufferCount
                 if micCount == 0 {
                     micWarning =
@@ -114,18 +142,19 @@ final class RecordingEngine {
                 }
                 lastMicCount = micCount
 
-                if session.systemBufferCount == 0 {
-                    // A tap created before the permission grant stays dead forever;
-                    // recreating it picks the grant up mid-recording.
-                    if tapRestarts < 8 {
-                        session.restartSystemTap()
-                        tapRestarts += 1
-                    }
+                let systemCount = session.systemBufferCount
+                if SystemTapRetryPolicy.shouldRetry(
+                    bufferCount: systemCount, attempts: tapRestarts)
+                {
+                    // One bounded retry recovers a grant completed during startup
+                    // without recreating a silent system tap indefinitely.
+                    session.restartSystemTap()
+                    tapRestarts += 1
                     systemAudioWarning =
                         "No system audio captured yet — it only flows while sound is playing. "
-                        + "If macOS just asked for the permission, grant it and keep recording: "
-                        + "capture starts by itself."
-                } else if session.systemNonSilentCount == 0, session.systemBufferCount > 200 {
+                        + "Grant Screen & System Audio Recording permission, then stop and start "
+                        + "a new recording."
+                } else if session.systemNonSilentCount == 0, systemCount > 200 {
                     systemAudioWarning =
                         "System audio is arriving but completely silent — macOS may have denied "
                         + "the permission. Check System Settings > Privacy & Security > Screen & "
@@ -137,14 +166,20 @@ final class RecordingEngine {
         }
     }
 
-    func stop() -> (micURL: URL, systemURL: URL)? {
-        guard let session else { return nil }
-        session.stop()
-        let urls = (session.micURL, session.systemURL)
+    func stop() async -> (micURL: URL, systemURL: URL)? {
+        guard let activeSession = session ?? startingSession, !isStopping else { return nil }
+        isStopping = true
+        defer { isStopping = false }
+        channelWatchTask?.cancel()
+        channelWatchTask = nil
+        await activeSession.stop()
+        let urls = (activeSession.micURL, activeSession.systemURL)
         self.session = nil
+        startingSession = nil
         meetingID = nil
         startedAt = nil
         isRecording = false
+        isStarting = false
         micLevel = 0
         systemLevel = 0
         systemAudioWarning = nil

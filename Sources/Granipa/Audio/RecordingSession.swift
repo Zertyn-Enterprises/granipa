@@ -4,8 +4,8 @@ import Synchronization
 import os
 
 // Mutable state is queue-confined: mic* fields are touched only from the mic tap
-// callback thread, system* fields only from the tap IO queue. start/stop run on
-// the main actor after callbacks have ceased.
+// callback thread, system* fields only from the tap IO queue. Capture lifecycle
+// operations are serialized on controlQueue.
 final class RecordingSession: @unchecked Sendable {
     private static let log = Logger(subsystem: "com.zertyn.granipa", category: "session")
     let meetingID: String
@@ -23,6 +23,11 @@ final class RecordingSession: @unchecked Sendable {
     private let systemBuffers = Mutex(0)
     private let systemNonSilent = Mutex(0)
     private let onLevel: @Sendable (AudioChannel, Float) -> Void
+    private let fanOutChunks: Bool
+    private let controlQueue = DispatchQueue(
+        label: "com.zertyn.granipa.session-control", qos: .utility)
+    private let writer = DispatchQueue(label: "com.zertyn.granipa.session-write")
+    private let controlState = Mutex(ControlState())
 
     private var micFile: AVAudioFile?
     private var micPadSeconds: Double = 0
@@ -33,6 +38,12 @@ final class RecordingSession: @unchecked Sendable {
     private var deviceChangeListener: AudioObjectPropertyListenerBlock?
     private var inputDeviceChangeListener: AudioObjectPropertyListenerBlock?
 
+    private struct ControlState {
+        var isStopping = false
+        var micRestartPending = false
+        var systemRestartPending = false
+    }
+
     var micBufferCount: Int { micBuffers.withLock { $0 } }
     var micNonSilentCount: Int { micNonSilent.withLock { $0 } }
     var systemBufferCount: Int { systemBuffers.withLock { $0 } }
@@ -41,30 +52,55 @@ final class RecordingSession: @unchecked Sendable {
     init(
         meetingID: String,
         directory: URL,
+        fanOutChunks: Bool = true,
         onLevel: @escaping @Sendable (AudioChannel, Float) -> Void
     ) {
         self.meetingID = meetingID
         self.micURL = directory.appendingPathComponent("mic.m4a")
         self.systemURL = directory.appendingPathComponent("system.m4a")
+        self.fanOutChunks = fanOutChunks
         self.onLevel = onLevel
         (micChunks, micContinuation) = AsyncStream.makeStream(of: AudioChunk.self)
         (systemChunks, systemContinuation) = AsyncStream.makeStream(of: AudioChunk.self)
     }
 
     func start(echoCancellation: Bool) throws {
+        try startMic(echoCancellation: echoCancellation)
+        startSystemTap()
+        installListeners()
+    }
+
+    func startMic(echoCancellation: Bool) throws {
         sessionStartHostSeconds = AVAudioTime.seconds(forHostTime: mach_absolute_time())
-
-        try mic.start(echoCancellation: echoCancellation) { [weak self] buffer in
-            self?.handleMic(buffer)
+        try mic.start(echoCancellation: echoCancellation) { [weak self] buffer, time in
+            self?.handleMic(buffer, time: time)
         }
+    }
 
+    func startSystemTap() {
         do {
             try tap.start { [weak self] buffer, timestamp in
                 self?.handleSystem(buffer, timestamp: timestamp)
             }
+            systemAudioError = nil
         } catch {
             systemAudioError = error
         }
+    }
+
+    func startSystemTapOnControlQueue() async {
+        await withCheckedContinuation { continuation in
+            controlQueue.async { [self] in
+                let shouldStart = controlState.withLock { !$0.isStopping }
+                if shouldStart {
+                    startSystemTap()
+                }
+                continuation.resume()
+            }
+        }
+    }
+
+    func installListeners() {
         installDeviceChangeListener()
     }
 
@@ -122,6 +158,23 @@ final class RecordingSession: @unchecked Sendable {
     // tearing it down and recreating it picks the grant up without touching the
     // mic. Timing stays correct: gaps are padded with silence on the next buffer.
     func restartSystemTap() {
+        let shouldSchedule = controlState.withLock { state in
+            guard !state.isStopping, !state.systemRestartPending else { return false }
+            state.systemRestartPending = true
+            return true
+        }
+        guard shouldSchedule else { return }
+        controlQueue.async { [weak self] in
+            guard let self else { return }
+            let shouldRestart = self.controlState.withLock { !$0.isStopping }
+            if shouldRestart {
+                self.performSystemTapRestart()
+            }
+            self.controlState.withLock { $0.systemRestartPending = false }
+        }
+    }
+
+    private func performSystemTapRestart() {
         Self.log.info("restarting system tap (buffers so far: \(self.systemBufferCount))")
         tap.stop()
         do {
@@ -141,29 +194,57 @@ final class RecordingSession: @unchecked Sendable {
     // the current meeting time so "file time == meeting time" stays true across the
     // gap; otherwise keep appending to preserve already-recorded audio.
     func restartMic(recreateFile: Bool) {
+        let shouldSchedule = controlState.withLock { state in
+            guard !state.isStopping, !state.micRestartPending else { return false }
+            state.micRestartPending = true
+            return true
+        }
+        guard shouldSchedule else { return }
+        controlQueue.async { [weak self] in
+            guard let self else { return }
+            let shouldRestart = self.controlState.withLock { !$0.isStopping }
+            if shouldRestart {
+                self.performMicRestart(recreateFile: recreateFile)
+            }
+            self.controlState.withLock { $0.micRestartPending = false }
+        }
+    }
+
+    private func performMicRestart(recreateFile: Bool) {
         mic.stop()
         if recreateFile {
-            micFile = nil
-            micPadSeconds =
+            let pad =
                 AVAudioTime.seconds(forHostTime: mach_absolute_time()) - sessionStartHostSeconds
+            writer.async { [weak self] in
+                self?.micFile = nil
+                self?.micPadSeconds = pad
+            }
         }
         mic = MicRecorder()
-        try? mic.start(echoCancellation: false) { [weak self] buffer in
-            self?.handleMic(buffer)
+        try? mic.start(echoCancellation: false) { [weak self] buffer, time in
+            self?.handleMic(buffer, time: time)
         }
     }
 
-    func stop() {
-        removeDeviceChangeListener()
-        mic.stop()
-        tap.stop()
-        micContinuation.finish()
-        systemContinuation.finish()
-        micFile = nil
-        systemFile = nil
+    func stop() async {
+        controlState.withLock { $0.isStopping = true }
+        await withCheckedContinuation { continuation in
+            controlQueue.async { [self] in
+                removeDeviceChangeListener()
+                mic.stop()
+                tap.stop()
+                writer.sync {
+                    micFile = nil
+                    systemFile = nil
+                }
+                micContinuation.finish()
+                systemContinuation.finish()
+                continuation.resume()
+            }
+        }
     }
 
-    private func handleMic(_ buffer: AVAudioPCMBuffer) {
+    private func handleMic(_ buffer: AVAudioPCMBuffer, time: AVAudioTime) {
         let count = micBuffers.withLock { count in
             count += 1
             return count
@@ -171,25 +252,21 @@ final class RecordingSession: @unchecked Sendable {
         if count == 1 {
             Self.log.info("first mic buffer: \(buffer.format.sampleRate)Hz")
         }
-        if micFile == nil {
-            micFile = try? AVAudioFile(
-                forWriting: micURL,
-                settings: Self.aacSettings(for: buffer.format, bitRate: 96_000),
-                commonFormat: buffer.format.commonFormat,
-                interleaved: buffer.format.isInterleaved)
-            if let file = micFile, micPadSeconds > 0 {
-                appendSilence(to: file, seconds: micPadSeconds, format: buffer.format)
-            }
-            micPadSeconds = 0
-        }
-        try? micFile?.write(from: buffer)
         let level = buffer.rmsLevel
         if level > 0.0005 {
             micNonSilent.withLock { $0 += 1 }
         }
         onLevel(.mic, level)
-        if let copy = buffer.deepCopy() {
-            micContinuation.yield(AudioChunk(buffer: copy, startSeconds: nil))
+        guard let copy = buffer.deepCopy() else { return }
+        let host = time.isHostTimeValid ? time.hostTime : mach_absolute_time()
+        let startSeconds =
+            AVAudioTime.seconds(forHostTime: host) - sessionStartHostSeconds
+        let chunk = AudioChunk(buffer: copy, startSeconds: startSeconds)
+        if fanOutChunks {
+            micContinuation.yield(chunk)
+        }
+        writer.async { [weak self] in
+            self?.writeMic(chunk.buffer)
         }
     }
 
@@ -213,24 +290,42 @@ final class RecordingSession: @unchecked Sendable {
         if count == 1 {
             Self.log.info("first system buffer: \(buffer.format.sampleRate)Hz")
         }
-        let sampleRate = buffer.format.sampleRate
-        if systemFile == nil {
-            systemFile = try? AVAudioFile(
-                forWriting: systemURL,
-                settings: Self.aacSettings(for: buffer.format, bitRate: 128_000),
-                commonFormat: buffer.format.commonFormat,
-                interleaved: buffer.format.isInterleaved)
+        let level = buffer.rmsLevel
+        if level > 0.0005 {
+            systemNonSilent.withLock { $0 += 1 }
         }
-
+        onLevel(.system, level)
+        guard let copy = buffer.deepCopy() else { return }
         var startSeconds: Double?
         if timestamp.mFlags.contains(.hostTimeValid) {
             startSeconds =
                 AVAudioTime.seconds(forHostTime: timestamp.mHostTime) - sessionStartHostSeconds
         }
+        let chunk = AudioChunk(buffer: copy, startSeconds: startSeconds)
+        if fanOutChunks {
+            systemContinuation.yield(chunk)
+        }
+        writer.async { [weak self] in
+            self?.writeSystem(chunk.buffer, startSeconds: chunk.startSeconds)
+        }
+    }
 
-        // The tap only delivers buffers while system audio is playing. Pad gaps
-        // with silence so file time stays equal to meeting time (transcript and
-        // diarization timestamps must line up across channels).
+    private func writeMic(_ buffer: AVAudioPCMBuffer) {
+        if micFile == nil {
+            micFile = Self.openAudioFile(url: micURL, format: buffer.format, bitRate: 96_000)
+            if let file = micFile, micPadSeconds > 0 {
+                appendSilence(to: file, seconds: micPadSeconds, format: buffer.format)
+            }
+            micPadSeconds = 0
+        }
+        try? micFile?.write(from: buffer)
+    }
+
+    private func writeSystem(_ buffer: AVAudioPCMBuffer, startSeconds: Double?) {
+        let sampleRate = buffer.format.sampleRate
+        if systemFile == nil {
+            systemFile = Self.openAudioFile(url: systemURL, format: buffer.format, bitRate: 128_000)
+        }
         if let file = systemFile, let start = startSeconds, start > 0 {
             let expectedFrame = AVAudioFramePosition((start * sampleRate).rounded())
             var gap = expectedFrame - systemFramesWritten
@@ -248,17 +343,17 @@ final class RecordingSession: @unchecked Sendable {
                 }
             }
         }
-
         try? systemFile?.write(from: buffer)
         systemFramesWritten += AVAudioFramePosition(buffer.frameLength)
-        let level = buffer.rmsLevel
-        if level > 0.0005 {
-            systemNonSilent.withLock { $0 += 1 }
-        }
-        onLevel(.system, level)
-        if let copy = buffer.deepCopy() {
-            systemContinuation.yield(AudioChunk(buffer: copy, startSeconds: startSeconds))
-        }
+    }
+
+    private static func openAudioFile(url: URL, format: AVAudioFormat, bitRate: Int) -> AVAudioFile?
+    {
+        try? AVAudioFile(
+            forWriting: url,
+            settings: aacSettings(for: format, bitRate: bitRate),
+            commonFormat: format.commonFormat,
+            interleaved: format.isInterleaved)
     }
 
     private static func aacSettings(for format: AVAudioFormat, bitRate: Int) -> [String: Any] {

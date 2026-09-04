@@ -26,7 +26,6 @@ struct OnboardingView: View {
         .frame(width: 540, height: 600)
         .background(Theme.bg)
         .preferredColorScheme(.dark)
-        .onDisappear { onboardingCompleted = true }
     }
 
     // MARK: - Step 0
@@ -42,9 +41,10 @@ struct OnboardingView: View {
                 .foregroundStyle(Theme.textPrimary)
             VStack(spacing: 10) {
                 bullet("waveform", "Records meetings without a bot — your mic and the other participants, straight from system audio.")
-                bullet("cpu", "Transcribes live, on this Mac. Audio never leaves your machine.")
-                bullet("wand.and.stars", "Turns your rough notes into polished reports using the AI subscription you already have — no API keys.")
-                bullet("lock", "Everything stays local: no accounts, no cloud, no telemetry.")
+                bullet("cpu", "Transcribes live on this Mac by default. Audio never leaves unless you opt into a cloud engine.")
+                bullet("mic", "Hold \(DictationController.shortcutLabel) to dictate into any app — same feel as Superwhisper.")
+                bullet("wand.and.stars", "Turns your rough notes into polished reports using the AI CLI you already pay for.")
+                bullet("lock", "Local by default: no accounts, no telemetry. Cloud engines are off until you turn them on.")
             }
             .padding(.top, 6)
             Spacer()
@@ -59,7 +59,7 @@ struct OnboardingView: View {
                 .font(.system(size: 24, weight: .semibold, design: .serif))
                 .foregroundStyle(Theme.textPrimary)
             Text("macOS will ask for these as you use each feature — nothing is requested up front. This list shows the live status (revisit it anytime in Settings → Permissions):")
-                .font(.system(size: 13))
+                .font(Theme.fontBody)
                 .foregroundStyle(Theme.textSecondary)
 
             PermissionsListView()
@@ -70,13 +70,13 @@ struct OnboardingView: View {
     // MARK: - Step 2
 
     private var toolsAndShortcuts: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 10) {
             Text("Your AI & shortcuts")
                 .font(.system(size: 24, weight: .semibold, design: .serif))
                 .foregroundStyle(Theme.textPrimary)
 
             Text("AI providers detected (used for note enhancement — install and log into at least one):")
-                .font(.system(size: 13))
+                .font(Theme.fontBody)
                 .foregroundStyle(Theme.textSecondary)
             VStack(spacing: 6) {
                 ForEach(LLMProviders.all) { spec in
@@ -86,26 +86,26 @@ struct OnboardingView: View {
                                 != nil ? "checkmark.circle.fill" : "circle")
                             .foregroundStyle(
                                 LLMProviders.resolveExecutable(named: spec.executableName) != nil
-                                    ? .green : Theme.textTertiary)
+                                    ? Theme.statusDone : Theme.textTertiary)
                         Text(spec.displayName)
-                            .font(.system(size: 13))
+                            .font(Theme.fontBody)
                             .foregroundStyle(Theme.textPrimary)
                         Spacer()
                     }
                 }
             }
             .padding(12)
-            .card()
+            .card(cornerRadius: Theme.radiusOverlay)
 
             if LLMProviders.all.allSatisfy({
                 LLMProviders.resolveExecutable(named: $0.executableName) == nil
             }) {
                 HStack(spacing: 6) {
                     Text("None yet? Paste in Terminal:")
-                        .font(.system(size: 12))
+                        .font(Theme.fontCaption)
                         .foregroundStyle(Theme.textSecondary)
                     Text("npm install -g @anthropic-ai/claude-code")
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(Theme.fontSmall.monospaced())
                         .foregroundStyle(Theme.textPrimary)
                     Button {
                         NSPasteboard.general.clearContents()
@@ -114,26 +114,34 @@ struct OnboardingView: View {
                         ToastController.shared.show("Copied")
                     } label: {
                         Image(systemName: "doc.on.doc")
-                            .font(.system(size: 11))
+                            .font(Theme.fontSmall)
                     }
                     .buttonStyle(.plain)
                 }
                 Text("Then run \"claude\" once — the browser opens to sign in with your subscription. That's the whole setup.")
-                    .font(.system(size: 11))
+                    .font(Theme.fontSmall)
                     .foregroundStyle(Theme.textTertiary)
             }
 
             Text("Shortcuts that work everywhere:")
-                .font(.system(size: 13))
+                .font(Theme.fontBody)
                 .foregroundStyle(Theme.textSecondary)
                 .padding(.top, 4)
             VStack(spacing: 6) {
+                shortcutRow("\(DictationController.shortcutLabel) hold", "Dictate into the front app")
+                shortcutRow("During a call", "Live captions overlay (Settings → General)")
                 shortcutRow("⌥⇧V", "Clipboard history")
                 shortcutRow("⌥⇧T", "Capture screen text (OCR)")
+                shortcutRow("⌥⇧E", "Emoji & Symbols")
+                shortcutRow("⌥⇧H", "Dictation history")
                 shortcutRow("⌃⌥ ← → ↑ ↓ ⏎", "Snap & maximize windows")
             }
             .padding(12)
-            .card()
+            .card(cornerRadius: Theme.radiusOverlay)
+            Text("Cloud engines (Muse transcription, instant rewrite) stay off until you enable them in Settings → Dictation.")
+                .font(Theme.fontSmall)
+                .foregroundStyle(Theme.textTertiary)
+                .padding(.top, 2)
             Spacer()
         }
     }
@@ -147,7 +155,7 @@ struct OnboardingView: View {
                 .foregroundStyle(Theme.accent)
                 .frame(width: 20)
             Text(text)
-                .font(.system(size: 13))
+                .font(Theme.fontBody)
                 .foregroundStyle(Theme.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -157,13 +165,13 @@ struct OnboardingView: View {
     private func shortcutRow(_ keys: String, _ what: String) -> some View {
         HStack {
             Text(keys)
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .font(Theme.fontCaption.weight(.semibold).monospaced())
                 .foregroundStyle(Theme.textPrimary)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
-                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
+                .background(Theme.fillSubtle, in: RoundedRectangle(cornerRadius: 5))
             Text(what)
-                .font(.system(size: 13))
+                .font(Theme.fontBody)
                 .foregroundStyle(Theme.textSecondary)
             Spacer()
         }
@@ -180,7 +188,7 @@ struct OnboardingView: View {
             HStack(spacing: 6) {
                 ForEach(0..<totalSteps, id: \.self) { index in
                     Circle()
-                        .fill(index == step ? Theme.accent : Color.white.opacity(0.15))
+                        .fill(index == step ? Theme.accent : Theme.strokeStrong)
                         .frame(width: 7, height: 7)
                 }
             }

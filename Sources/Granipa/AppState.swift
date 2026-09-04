@@ -15,7 +15,10 @@ final class AppState {
     private var webhookLoop: Task<Void, Never>?
     private var clipboardMonitor: ClipboardMonitor?
     private var autoStopTask: Task<Void, Never>?
+    @ObservationIgnored private var recordingStartTask: Task<Void, Never>?
     private(set) var transcription: TranscriptionCoordinator?
+    private(set) var processingMeetingID: String?
+    let dictation = DictationController.shared
     private(set) var enhancingMeetingIDs: Set<String> = []
     var meetings: [Meeting] = []
     var templates: [MeetingTemplate] = []
@@ -24,11 +27,20 @@ final class AppState {
     var selectedFolderID: String?
     var searchQuery = ""
     var selectedMeetingID: String?
+    var showsDictationHistory = false
     var loadError: String?
 
     var selectedMeeting: Meeting? {
         guard let id = selectedMeetingID else { return nil }
         return meetings.first { $0.id == id }
+    }
+
+    func pipelinePhase(for meeting: Meeting) -> MeetingPipelinePhase {
+        MeetingPipeline.phase(
+            status: meeting.status,
+            isRecording: recorder.isRecording && recorder.meetingID == meeting.id,
+            transcriptionPhase: recorder.meetingID == meeting.id ? transcription?.phase : nil,
+            isEnhancing: enhancingMeetingIDs.contains(meeting.id))
     }
 
     init() {
@@ -62,21 +74,52 @@ final class AppState {
             clipboardMonitor = monitor
         }
         ClipboardPanelController.shared.configure(appState: self)
-        HotkeyManager.shared.register(
-            id: 1,
-            keyCode: UInt32(kVK_ANSI_V),
-            modifiers: UInt32(optionKey | shiftKey)
-        ) {
-            ClipboardPanelController.shared.toggle()
+        DictationHistoryPanelController.shared.configure(appState: self)
+        CaptionsOverlayController.shared.attach(appState: self)
+        DictationOverlayController.shared.attach(dictation)
+        dictation.onCommitted = { [weak self] text, duration, appName in
+            self?.recordDictation(text: text, duration: duration, sourceApp: appName)
         }
-        HotkeyManager.shared.register(
-            id: 2,
-            keyCode: UInt32(kVK_ANSI_T),
-            modifiers: UInt32(optionKey | shiftKey)
-        ) {
-            Task { await OCRService.captureAndCopy() }
+        registerDictationHotkey()
+        BatteryService.shared.start()
+        ShortcutHub.shared.rebind()
+    }
+
+    func setClipboardCaptureEnabled(_ enabled: Bool) {
+        if enabled {
+            clipboardMonitor?.start()
+        } else {
+            clipboardMonitor?.stop()
         }
-        WindowManager.shared.registerHotkeys()
+    }
+
+    func registerDictationHotkey() {
+        let keyCode = UInt32(
+            UserDefaults.standard.object(forKey: "dictationKeyCode") as? Int
+                ?? Int(kVK_RightOption))
+        let modifiers = UInt32(
+            UserDefaults.standard.object(forKey: "dictationModifiers") as? Int ?? 0)
+        HotkeyManager.shared.register(
+            id: 3,
+            keyCode: keyCode,
+            modifiers: modifiers,
+            onPress: { DictationController.shared.handlePress() },
+            onRelease: { DictationController.shared.handleRelease() }
+        )
+        if HotkeyBinding.isModifierOnly(keyCode: keyCode, modifiers: modifiers),
+            !PasteService.isTrusted
+        {
+            PasteService.requestTrust()
+        }
+    }
+
+    func recordDictation(text: String, duration: TimeInterval, sourceApp: String?) {
+        guard let db = database, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return }
+        let entry = DictationEntry.new(
+            text: text, durationSeconds: duration, sourceApp: sourceApp)
+        try? db.insertDictationEntry(entry)
+        try? db.pruneDictationEntries()
     }
 
     private func purgeOldAudio() {
@@ -160,7 +203,7 @@ final class AppState {
     }
 
     func startRecordingFromDetection() {
-        guard !recorder.isRecording else { return }
+        guard !recorder.isBusy else { return }
         detector.dismiss()
         startRecording()
         NSApp.activate(ignoringOtherApps: true)
@@ -180,7 +223,7 @@ final class AppState {
 
     func startServices(database db: AppDatabase) {
         let defaults = UserDefaults.standard
-        let apiEnabled = defaults.object(forKey: "apiEnabled") as? Bool ?? true
+        let apiEnabled = defaults.object(forKey: "apiEnabled") as? Bool ?? false
         if apiEnabled {
             let port = UInt16(defaults.integer(forKey: "apiPort"))
             let token = Self.apiToken()
@@ -197,9 +240,11 @@ final class AppState {
             }
         }
         webhookLoop?.cancel()
-        webhookLoop = Task {
+        webhookLoop = Task { [weak self] in
             while !Task.isCancelled {
-                await WebhookService.deliverDue(database: db)
+                if self?.webhooks.isEmpty == false {
+                    await WebhookService.deliverDue(database: db)
+                }
                 try? await Task.sleep(for: .seconds(30))
             }
         }
@@ -263,6 +308,7 @@ final class AppState {
 
     func startRecording(meetingID: String? = nil) {
         guard database != nil else { return }
+        guard recordingStartTask == nil, !recorder.isBusy else { return }
         let targetID: String
         if let meetingID {
             targetID = meetingID
@@ -274,10 +320,17 @@ final class AppState {
             guard let id = selectedMeetingID else { return }
             targetID = id
         }
+        recordingStartTask = Task { [weak self] in
+            await self?.activateRecording(targetID: targetID)
+            self?.recordingStartTask = nil
+        }
+    }
+
+    private func activateRecording(targetID: String) async {
         guard var meeting = meetings.first(where: { $0.id == targetID }) else { return }
         do {
-            let session = try recorder.start(meetingID: targetID)
-            if let db = database {
+            let session = try await recorder.start(meetingID: targetID)
+            if MeetingASRPolicy.usesLiveASR(), let db = database {
                 let coordinator = TranscriptionCoordinator(
                     meetingID: targetID,
                     language: meeting.language,
@@ -291,6 +344,11 @@ final class AppState {
             update(meeting)
             selectedMeetingID = targetID
             startMeetingEndWatch()
+            dictation.meetingIsRecording = true
+            CaptionsOverlayController.shared.resetDismissed()
+            if MeetingASRPolicy.usesLiveASR(), !dictation.phase.isActive {
+                CaptionsOverlayController.shared.setVisible(true)
+            }
             if let db = database {
                 WebhookService.enqueue(
                     event: .meetingStarted,
@@ -299,6 +357,7 @@ final class AppState {
                         meeting: MeetingSummaryDTO(meeting, folder: folder(for: meeting))),
                     database: db)
             }
+        } catch is CancellationError {
         } catch {
             loadError = error.localizedDescription
         }
@@ -307,30 +366,69 @@ final class AppState {
     func stopRecording() async {
         autoStopTask?.cancel()
         autoStopTask = nil
-        guard let id = recorder.meetingID, let urls = recorder.stop() else { return }
+        let wasStarting = recorder.isStarting && !recorder.isRecording
+        recordingStartTask?.cancel()
+        dictation.meetingIsRecording = false
+        CaptionsOverlayController.shared.setVisible(false)
+        guard let id = recorder.meetingID, let urls = await recorder.stop() else { return }
+        if wasStarting {
+            try? FileManager.default.removeItem(at: urls.micURL.deletingLastPathComponent())
+            return
+        }
+        processingMeetingID = id
+        defer {
+            if processingMeetingID == id {
+                processingMeetingID = nil
+            }
+        }
         // Re-fetch: the transcription coordinator may have written the detected
         // language while the array copy was stale.
-        guard let db = database, var meeting = try? db.fetchMeeting(id: id) else { return }
+        guard let db = database, var meeting = try? db.fetchMeeting(id: id) else {
+            if let live = transcription {
+                await live.finishAndWait()
+            }
+            transcription = nil
+            return
+        }
         meeting.status = .processing
         meeting.endedAt = .now
         meeting.audioMicPath = urls.micURL.path
         meeting.audioSystemPath = urls.systemURL.path
         update(meeting)
 
-        await transcription?.finishAndWait()
-        transcription = nil
-
-        await postProcess(meetingID: id)
+        if let live = transcription {
+            await live.finishAndWait()
+            let usedMuseForSystem = live.systemUsedMuse
+            transcription = nil
+            await postProcess(meetingID: id, skipLocalDiarize: usedMuseForSystem)
+        } else {
+            transcription = nil
+            let language = meeting.language
+            await Task.detached {
+                await FileMeetingTranscriber.transcribe(
+                    micURL: urls.micURL,
+                    systemURL: urls.systemURL,
+                    meetingID: id,
+                    language: language,
+                    database: db)
+            }.value
+            await postProcess(meetingID: id, skipLocalDiarize: false)
+        }
     }
 
-    func postProcess(meetingID: String) async {
+    func postProcess(meetingID: String, skipLocalDiarize: Bool = false) async {
         guard let db = database else { return }
         let defaults = UserDefaults.standard
         let diarizationEnabled = defaults.object(forKey: "diarizationEnabled") as? Bool ?? true
         let inferNames = defaults.object(forKey: "inferSpeakerNames") as? Bool ?? true
         let providerID = defaults.string(forKey: "llmProvider") ?? "claude"
 
-        if diarizationEnabled, let meeting = try? db.fetchMeeting(id: meetingID) {
+        if skipLocalDiarize {
+            if inferNames {
+                try? await DiarizationService.inferNames(
+                    meetingID: meetingID, database: db, providerID: providerID)
+            }
+        } else if diarizationEnabled, let meeting = try? db.fetchMeeting(id: meetingID) {
             do {
                 try await DiarizationService.diarize(
                     meetingID: meetingID,
@@ -405,7 +503,8 @@ final class AppState {
             guard var updated = try? db.fetchMeeting(id: meetingID) else { return }
             updated.enhancedNotesMarkdown = EnhancementService.salvagedReport(from: raw)
             update(updated)
-            ToastController.shared.show("Notes saved, but couldn't format fully")
+            ToastController.shared.show(
+                "Notes saved, but couldn't format fully", style: .warning)
             return
         }
 
@@ -434,8 +533,12 @@ final class AppState {
     func createFolder(name: String, team: String?) {
         guard let db = database, !name.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         do {
-            try db.save(Folder.new(name: name, team: team))
+            let folder = Folder.new(name: name, team: team)
+            try db.save(folder)
             folders = try db.fetchFolders()
+            selectedFolderID = folder.id
+            selectedMeetingID = nil
+            showsDictationHistory = false
         } catch {
             loadError = error.localizedDescription
         }
