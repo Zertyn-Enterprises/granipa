@@ -13,8 +13,6 @@ import Testing
     }
 
     @Test func scaleTokensMatchTheContract() {
-        #expect(Theme.spaceXS == 4)
-        #expect(Theme.spaceS == 8)
         #expect(Theme.spaceM == 12)
         #expect(Theme.spaceL == 16)
         #expect(Theme.spaceXL == 24)
@@ -25,7 +23,6 @@ import Testing
         _ = Theme.fontSmall
         _ = Theme.fontCaption
         _ = Theme.fontBody
-        _ = Theme.spring
         #expect(DictationController.waveformBars == 40)
     }
 
@@ -39,7 +36,6 @@ import Testing
         _ = Theme.statusDone
         _ = Theme.statusLoading
         _ = Theme.statusFailed
-        _ = Theme.brandGradient
         _ = Theme.brandPurple
     }
 

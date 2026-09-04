@@ -18,12 +18,6 @@ enum Theme {
     static let accent = Color(hex: 0xF05423)
     static let brandPurple = Color(hex: 0x7C5CFF)
     static let brandPink = Color(hex: 0xE879A8)
-    static var brandGradient: LinearGradient {
-        LinearGradient(
-            colors: [brandPurple, brandPink, accent],
-            startPoint: .leading,
-            endPoint: .trailing)
-    }
     static let textPrimary = Color.white.opacity(0.92)
     static let textSecondary = Color.white.opacity(0.55)
     static let textTertiary = Color.white.opacity(0.34)
@@ -40,8 +34,6 @@ enum Theme {
     static let titleFont = Font.system(size: 34, weight: .semibold, design: .serif)
     static let meetingTitleFont = Font.system(size: 28, weight: .bold)
 
-    static let spaceXS: CGFloat = 4
-    static let spaceS: CGFloat = 8
     static let spaceM: CGFloat = 12
     static let spaceL: CGFloat = 16
     static let spaceXL: CGFloat = 24
@@ -57,8 +49,6 @@ enum Theme {
 
     static let motionFast: TimeInterval = 0.08
     static let motionNormal: TimeInterval = 0.15
-    static let spring = Animation.spring(response: 0.32, dampingFraction: 0.86)
-
     private static let avatarPalette: [Color] = [
         Color(hex: 0x8A6D3B), Color(hex: 0xA85B32), Color(hex: 0x5B7A6A),
         Color(hex: 0x6B5B95), Color(hex: 0x3F6F8A), Color(hex: 0x9A4F4F),
