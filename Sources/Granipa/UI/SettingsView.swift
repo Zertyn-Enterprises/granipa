@@ -1,3 +1,4 @@
+import Carbon.HIToolbox
 import ServiceManagement
 import Speech
 import SwiftUI
@@ -7,23 +8,88 @@ struct SettingsView: View {
         TabView {
             GeneralSettings()
                 .tabItem { Label("General", systemImage: "gearshape") }
+            DictationSettings()
+                .tabItem { Label("Dictation", systemImage: "mic") }
+            ShortcutsSettings()
+                .tabItem { Label("Shortcuts", systemImage: "keyboard") }
             PermissionsSettings()
                 .tabItem { Label("Permissions", systemImage: "lock.shield") }
-            AISettings()
+            AITab()
                 .tabItem { Label("AI", systemImage: "wand.and.stars") }
-            TemplateSettings()
-                .tabItem { Label("Templates", systemImage: "doc.text") }
-            ProductivitySettings()
-                .tabItem { Label("Productivity", systemImage: "doc.on.clipboard") }
-            WindowSettings()
-                .tabItem { Label("Windows", systemImage: "macwindow.on.rectangle") }
-            APISettings()
-                .tabItem { Label("API", systemImage: "network") }
-            WebhookSettings()
-                .tabItem { Label("Webhooks", systemImage: "arrow.up.right.square") }
+            ExtrasTab()
+                .tabItem { Label("Extras", systemImage: "puzzlepiece") }
+            IntegrationsTab()
+                .tabItem { Label("Integrations", systemImage: "network") }
         }
-        .frame(width: 560, height: 460)
+        .frame(width: 640, height: 600)
+        .tint(Theme.accent)
         .preferredColorScheme(.dark)
+    }
+}
+
+private struct AITab: View {
+    @State private var pane = 0
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("", selection: $pane) {
+                Text("Providers").tag(0)
+                Text("Templates").tag(1)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(10)
+            if pane == 0 {
+                AISettings()
+            } else {
+                TemplateSettings()
+            }
+        }
+    }
+}
+
+private struct ExtrasTab: View {
+    @State private var pane = 0
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("", selection: $pane) {
+                Text("Clipboard & OCR").tag(0)
+                Text("Windows").tag(1)
+                Text("Battery").tag(2)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(10)
+            if pane == 0 {
+                ProductivitySettings()
+            } else if pane == 1 {
+                WindowSettings()
+            } else {
+                BatterySettings()
+            }
+        }
+    }
+}
+
+private struct IntegrationsTab: View {
+    @State private var pane = 0
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("", selection: $pane) {
+                Text("API").tag(0)
+                Text("Webhooks").tag(1)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(10)
+            if pane == 0 {
+                APISettings()
+            } else {
+                WebhookSettings()
+            }
+        }
     }
 }
 
@@ -31,6 +97,9 @@ private struct GeneralSettings: View {
     @Environment(AppState.self) private var app
     @AppStorage("defaultLocale") private var defaultLocale = "auto"
     @AppStorage("echoCancellation") private var echoCancellation = true
+    @AppStorage("liveMeetingASR") private var liveMeetingASR = false
+    @AppStorage("meetingCaptionsEnabled") private var meetingCaptions = true
+    @AppStorage("meetingSystemEngine") private var meetingSystemEngine = "local"
     @AppStorage("meetingDetectionEnabled") private var meetingDetection = true
     @AppStorage("autoStopMode") private var autoStopMode = "ask"
     @AppStorage("audioRetentionDays") private var audioRetentionDays = 0
@@ -79,11 +148,34 @@ private struct GeneralSettings: View {
                                 !probeSelection.contains(id)
                                     && probeSelection.count >= LanguageDetection.maxProbeLocales)
                     }
-                    Text("Each recording probes your selected languages in parallel for the first seconds and keeps the one that matches what it hears. Each language downloads its on-device model once.")
+                    Text("Each recording probes these languages for the first seconds and keeps the best match. Each language downloads its on-device model once.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
+            Toggle("Live transcription during meetings", isOn: $liveMeetingASR)
+                .onChange(of: liveMeetingASR) { syncLiveCaptionsOverlay() }
+            Text("Streams speech while you record. Off by default — meetings still transcribe after you stop.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Toggle("Live captions during meetings", isOn: $meetingCaptions)
+                .disabled(!liveMeetingASR)
+                .onChange(of: meetingCaptions) { syncLiveCaptionsOverlay() }
+            Text(
+                liveMeetingASR
+                    ? "Floating overlay of what's being said. Stays on this Mac."
+                    : "Needs live transcription. The overlay has nothing to show until then."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            Picker("Them (computer audio)", selection: $meetingSystemEngine) {
+                Text("On-device (Apple)").tag("local")
+                Text("Muse (computer audio only)").tag("muse")
+            }
+            .disabled(!liveMeetingASR)
+            Text(computerAudioHelp)
+            .font(.caption)
+            .foregroundStyle(.secondary)
             Toggle("Detect meetings automatically", isOn: $meetingDetection)
                 .onChange(of: meetingDetection) {
                     meetingDetection ? app.detector.start() : app.detector.stop()
@@ -110,7 +202,7 @@ private struct GeneralSettings: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Toggle("Echo cancellation (mic)", isOn: $echoCancellation)
-            Text("Keep this on if you use speakers; it stops other participants' voices from bleeding into your mic channel.")
+            Text("Stops other participants' voices from bleeding into your mic channel.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -122,6 +214,19 @@ private struct GeneralSettings: View {
                 languageName($0.identifier(.bcp47)) < languageName($1.identifier(.bcp47))
             }
         }
+    }
+
+    private var computerAudioHelp: String {
+        if !liveMeetingASR {
+            return "Computer-audio engine applies only while live transcription is on. After Stop, both channels transcribe on this Mac."
+        }
+        return meetingSystemEngine == "muse"
+            ? "Only the other participants' audio is sent to Meta. Your microphone stays on this Mac. Needs a Muse API key in Settings → Dictation."
+            : "Both channels transcribe on this Mac."
+    }
+
+    private func syncLiveCaptionsOverlay() {
+        CaptionsOverlayController.shared.setVisible(app.recorder.isRecording)
     }
 
     // One entry per language; regional variants are an implementation detail.
@@ -180,6 +285,166 @@ private struct GeneralSettings: View {
     }
 }
 
+private struct DictationSettings: View {
+    @Environment(AppState.self) private var app
+    @AppStorage("dictationEngine") private var engine = "local"
+    @AppStorage("dictationAutoPaste") private var autoPaste = true
+    @AppStorage("dictationKeywords") private var keywords = ""
+    @AppStorage("dictationShortcut") private var shortcut = "rightOption"
+    @AppStorage("dictationLocale") private var dictationLocale = "auto"
+    @AppStorage("probeLocales") private var probeLocalesRaw = "en-US,es-ES"
+    @AppStorage("dictationRewrite") private var rewrite = "off"
+    @AppStorage("rewriteCustomURL") private var rewriteURL = "http://127.0.0.1:11434/v1"
+    @AppStorage("rewriteCustomModel") private var rewriteModel = "llama3.2"
+    @State private var museKey = ""
+    @State private var keySaved: Bool?
+    @State private var spaceXAIKey = ""
+    @State private var spaceXAIKeySaved: Bool?
+    @State private var customKey = ""
+    @State private var customKeySaved: Bool?
+
+    private var probeIDs: [String] {
+        LanguageDetection.parseProbeLocales(probeLocalesRaw)
+    }
+
+    var body: some View {
+        ScrollView {
+        Form {
+            Section("Shortcut") {
+                Picker("Hold to dictate", selection: $shortcut) {
+                    Text("Right Option (⌥)").tag("rightOption")
+                    Text("Right Command (⌘)").tag("rightCommand")
+                    Text("Option + Space").tag("optionSpace")
+                }
+                .onChange(of: shortcut) { applyShortcut(); app.registerDictationHotkey() }
+                Text("Hold to talk, release to paste. A quick tap toggles; press again to stop. Esc cancels only while you hold, not in toggle. Right Option and Right Command need Accessibility (same grant as auto-paste) so they work in other apps. Option+Space uses a Carbon hotkey and does not.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("Every dictation is saved locally. Open history from the sidebar, the menu bar, or the shortcut in Settings → Shortcuts — stats (WPM, words, apps, time saved) live at the top.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("Language") {
+                Picker("Dictation language", selection: $dictationLocale) {
+                    Text("Auto (last meeting / this Mac)").tag("auto")
+                    ForEach(probeIDs, id: \.self) { id in
+                        Text(id).tag(id)
+                    }
+                }
+                Text("Meetings still probe languages. Dictation uses one model so it stays fast.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("Engine") {
+                Picker("Transcription engine", selection: $engine) {
+                    Text("On-device (Apple)").tag("local")
+                    Text("Muse Voice Transcribe").tag("muse")
+                }
+                Text(
+                    engine == "local"
+                        ? "Your voice stays on this Mac. This is the default for dictation."
+                        : "Sends YOUR microphone to Meta. For meetings, prefer Settings → General → Them (computer audio only)."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            if engine == "muse" {
+                Section("Muse") {
+                    SecureField("Meta API key", text: $museKey)
+                    Button("Save key") {
+                        keySaved = KeychainStore.set(
+                            museKey, account: KeychainStore.museAPIKeyAccount)
+                    }
+                    if keySaved == false {
+                        Text("Could not save the key in Keychain.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    } else if keySaved == true {
+                        Text("Saved in Keychain.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("Audio is sent with zero-data-retention requested. $0.18/hour.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("Vocabulary hints (comma-separated)", text: $keywords)
+                    Text("Names, products, jargon Muse should prefer.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Toggle("Paste into the front app", isOn: $autoPaste)
+                .onChange(of: autoPaste) {
+                    if autoPaste, !PasteService.isTrusted {
+                        PasteService.requestTrust()
+                    }
+                }
+            Text("Needs Accessibility permission. If it's off, dictation still copies the text.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Section("Instant rewrite") {
+                Picker("After dictation", selection: $rewrite) {
+                    Text("Off — paste what I said").tag("off")
+                    Text("SpaceXAI (Grok)").tag("spacexai")
+                    Text("Custom (Mac Mini / VPS)").tag("custom")
+                }
+                Text("Cleans punctuation and obvious ASR mistakes, then pastes. Your mic audio never goes to the rewrite API — only the text.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if rewrite == "spacexai" {
+                    SecureField("SpaceXAI API key", text: $spaceXAIKey)
+                    Button("Save SpaceXAI key") {
+                        spaceXAIKeySaved = KeychainStore.set(
+                            spaceXAIKey, account: KeychainStore.spaceXAIKeyAccount)
+                    }
+                    if spaceXAIKeySaved == false {
+                        Text("Could not save the key in Keychain.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                    Text("Uses grok-4.6 at api.x.ai. Get a key at console.x.ai.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if rewrite == "custom" {
+                    TextField("Base URL", text: $rewriteURL)
+                    TextField("Model", text: $rewriteModel)
+                    SecureField("API key (optional)", text: $customKey)
+                    Button("Save endpoint key") {
+                        customKeySaved = KeychainStore.set(
+                            customKey, account: KeychainStore.rewriteCustomKeyAccount)
+                    }
+                    Text("OpenAI-compatible /v1/chat/completions. Example: Ollama or llama.cpp on your Mac Mini (http://192.168.x.x:11434/v1), or a VPS.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        }
+        .onAppear {
+            museKey = KeychainStore.get(account: KeychainStore.museAPIKeyAccount) ?? ""
+            spaceXAIKey = KeychainStore.get(account: KeychainStore.spaceXAIKeyAccount) ?? ""
+            customKey = KeychainStore.get(account: KeychainStore.rewriteCustomKeyAccount) ?? ""
+            applyShortcut()
+        }
+    }
+
+    private func applyShortcut() {
+        switch shortcut {
+        case "rightCommand":
+            UserDefaults.standard.set(Int(kVK_RightCommand), forKey: "dictationKeyCode")
+            UserDefaults.standard.set(0, forKey: "dictationModifiers")
+        case "optionSpace":
+            UserDefaults.standard.set(Int(kVK_Space), forKey: "dictationKeyCode")
+            UserDefaults.standard.set(Int(optionKey), forKey: "dictationModifiers")
+        default:
+            UserDefaults.standard.set(Int(kVK_RightOption), forKey: "dictationKeyCode")
+            UserDefaults.standard.set(0, forKey: "dictationModifiers")
+        }
+    }
+}
+
 private struct AISettings: View {
     @AppStorage("llmProvider") private var llmProvider = "claude"
     @AppStorage("diarizationEnabled") private var diarizationEnabled = true
@@ -198,7 +463,7 @@ private struct AISettings: View {
 
             Section("Speakers") {
                 Toggle("Identify individual speakers", isOn: $diarizationEnabled)
-                Text("Splits remote participants into Speaker 1, 2, 3… after the meeting (local CoreML model, ~130 MB downloaded on first use).")
+                Text("Splits remote participants into Speaker 1, 2, 3… after the meeting (local CoreML model, ~20 MB downloaded on first use).")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Toggle("Infer speaker names with AI", isOn: $inferSpeakerNames)
@@ -209,7 +474,7 @@ private struct AISettings: View {
                 ForEach(LLMProviders.all) { spec in
                     ProviderRow(spec: spec)
                 }
-                Text("Sign-in happens in each provider's own CLI (one-time browser login). Grañipa never sees your credentials — it only runs the CLI you already authenticated.")
+                Text("Sign-in happens in each provider's CLI (one-time browser login). Grañipa never sees your credentials.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -227,11 +492,8 @@ private struct ProviderRow: View {
         case failed(String)
     }
 
-    private var installedPath: String? {
-        LLMProviders.resolveExecutable(named: spec.executableName)?.path
-    }
-
     var body: some View {
+        let installedPath = LLMProviders.resolveExecutable(named: spec.executableName)?.path
         VStack(alignment: .leading, spacing: 5) {
             HStack {
                 Image(systemName: installedPath != nil ? "checkmark.circle.fill" : "circle")
@@ -324,17 +586,17 @@ private struct ProductivitySettings: View {
         Form {
             Section("Clipboard history") {
                 Toggle("Capture clipboard history", isOn: $clipboardEnabled)
-                LabeledContent("Open panel", value: "⌥⇧V")
+                .onChange(of: clipboardEnabled) { app.setClipboardCaptureEnabled(clipboardEnabled) }
                 Toggle("Paste automatically after selecting", isOn: $autoPaste)
                     .onChange(of: autoPaste) {
                         if autoPaste, !PasteService.isTrusted {
                             PasteService.requestTrust()
                         }
                     }
-                Text("Auto-paste sends ⌘V to the active app and needs Accessibility permission (System Settings → Privacy & Security → Accessibility).")
+                Text("Sends ⌘V to the active app. Needs Accessibility permission.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text("Keeps the last 500 items locally. Entries marked confidential by password managers are never captured.")
+                Text("Keeps the last 500 items locally. Password-manager entries are never captured.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button("Clear history", role: .destructive) {
@@ -347,13 +609,183 @@ private struct ProductivitySettings: View {
                 }
             }
             Section("Text capture (OCR)") {
-                LabeledContent("Capture screen text", value: "⌥⇧T")
-                Text("Select a screen region; recognized text (Spanish/English) is copied to the clipboard. Needs Screen Recording permission on first use.")
+                Text("Recognized text lands in your clipboard. Needs Screen Recording on first use.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Section("Emoji & Symbols") {
+                Text("Sends ⌃⌘Space to the front app (the system emoji picker). Needs Accessibility, same as auto-paste.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Text("Keyboard shortcuts for these live in Settings → Shortcuts, including the global macro key.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
+    }
+}
+
+private enum ShortcutRecordTarget: Equatable {
+    case extra(ExtraShortcut)
+    case window(WindowAction)
+}
+
+private struct ShortcutsSettings: View {
+    @State private var hyperRaw = WindowHyperKey.current.rawValue
+    @AppStorage("windowSnappingEnabled") private var snapping = true
+    @State private var recording: ShortcutRecordTarget?
+    @State private var captureMonitor: Any?
+    @State private var stamp = 0
+
+    private var hyper: WindowHyperKey {
+        WindowHyperKey(rawValue: hyperRaw) ?? .off
+    }
+
+    var body: some View {
+        Form {
+            Section("Macro key") {
+                Picker("Macro key", selection: $hyperRaw) {
+                    ForEach(WindowHyperKey.allCases) { key in
+                        Text(key.title).tag(key.rawValue)
+                    }
+                }
+                .onChange(of: hyperRaw) {
+                    WindowHyperKey.setCurrent(hyper)
+                    ShortcutHub.shared.rebind()
+                }
+                Text(hyperHelp)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("Click a shortcut, then press the full chord (⌘→, ⌃⌥←, ⌥⇧V…). Esc cancels.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("Hold to dictate stays on the Dictation tab — that key is independent so you can talk without arming the macro.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("Productivity") {
+                extraRow(.clipboard)
+                extraRow(.ocr)
+                extraRow(.emoji)
+                extraRow(.history)
+            }
+            if snapping {
+                Section("Windows") {
+                    ForEach(
+                        [
+                            WindowAction.leftHalf, .rightHalf, .topHalf, .bottomHalf,
+                            .maximize, .center, .restore,
+                        ], id: \.self
+                    ) { windowRow($0) }
+                }
+                Section("Quarters") {
+                    ForEach(
+                        [WindowAction.topLeft, .topRight, .bottomLeft, .bottomRight],
+                        id: \.self
+                    ) { windowRow($0) }
+                }
+                Section("Thirds") {
+                    ForEach(
+                        [WindowAction.firstThird, .centerThird, .lastThird],
+                        id: \.self
+                    ) { windowRow($0) }
+                }
+            }
+            Button("Reset shortcuts") {
+                WindowShortcuts.reset()
+                hyperRaw = WindowHyperKey.off.rawValue
+                stamp += 1
+                ShortcutHub.shared.rebind()
+            }
+        }
+        .formStyle(.grouped)
+        .onDisappear { stopCapture() }
+    }
+
+    private var hyperHelp: String {
+        switch hyper {
+        case .off:
+            "Each shortcut keeps its built-in modifiers (⌥⇧ for clipboard, ⌃⌥ for windows)."
+        case .capsLock:
+            "Press Caps Lock to arm, then any shortcut (⇪V clipboard, ⇪← left half). Press Caps Lock again to exit. Needs Accessibility."
+        case .rightShift, .rightCommand, .rightOption:
+            "Hold the macro key, then any shortcut. Other apps never see that chord. Needs Accessibility."
+        }
+    }
+
+    private func extraRow(_ item: ExtraShortcut) -> some View {
+        recorderRow(
+            title: item.title,
+            label: WindowShortcuts.chordLabel(for: item, hyper: hyper),
+            target: .extra(item))
+    }
+
+    private func windowRow(_ action: WindowAction) -> some View {
+        recorderRow(
+            title: action.title,
+            label: WindowShortcuts.chordLabel(for: action, hyper: hyper),
+            target: .window(action))
+    }
+
+    private func recorderRow(title: String, label: String, target: ShortcutRecordTarget)
+        -> some View
+    {
+        HStack {
+            Text(title)
+            Spacer()
+            Button(recording == target ? "Press a key…" : label) {
+                beginCapture(target)
+            }
+            .font(.system(.body, design: .monospaced))
+        }
+        .id("\(title)-\(stamp)-\(hyperRaw)")
+    }
+
+    private func beginCapture(_ target: ShortcutRecordTarget) {
+        stopCapture()
+        recording = target
+        captureMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let code = UInt32(event.keyCode)
+            if Int(event.keyCode) == kVK_Escape {
+                stopCapture()
+                return nil
+            }
+            if let hyperCode = hyper.keyCode, code == hyperCode {
+                return nil
+            }
+            if HotkeyBinding.modifierFlag(forKeyCode: code) != nil {
+                return nil
+            }
+            let mods = HotkeyBinding.carbonModifiers(from: event.modifierFlags)
+            if hyper == .off, mods == 0 {
+                return nil
+            }
+            switch target {
+            case .extra(let item):
+                ExtraShortcut.setChord(
+                    keyCode: code,
+                    modifiers: hyper == .off ? mods : item.fallbackModifiers,
+                    for: item)
+            case .window(let action):
+                WindowShortcuts.setChord(
+                    keyCode: code,
+                    modifiers: hyper == .off ? mods : WindowShortcuts.defaultModifiers(for: action),
+                    for: action)
+            }
+            stamp += 1
+            ShortcutHub.shared.rebind()
+            stopCapture()
+            return nil
+        }
+    }
+
+    private func stopCapture() {
+        if let captureMonitor {
+            NSEvent.removeMonitor(captureMonitor)
+        }
+        captureMonitor = nil
+        recording = nil
     }
 }
 
@@ -364,29 +796,19 @@ private struct WindowSettings: View {
     var body: some View {
         Form {
             Toggle("Window snapping shortcuts", isOn: $snapping)
-            Text("Uses the same Accessibility permission as auto-paste. All shortcuts are Control + Option.")
+                .onChange(of: snapping) { WindowManager.shared.setEnabled(snapping) }
+            Text("If a window is already parked on the left (or right), snapping another window that way fills the remaining space instead of covering it.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            if let conflictingApp {
+            Text("Keys and the global macro live in Settings → Shortcuts.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if WindowHyperKey.current == .off, let conflictingApp {
                 Label(
-                    "\(conflictingApp) is running and owns these same shortcuts. Quit it (and remove it from Login Items), then relaunch Grañipa.",
+                    "\(conflictingApp) is running and owns ⌃⌥. Set a macro key in Shortcuts, or quit that app.",
                     systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
                     .foregroundStyle(.orange)
-            }
-            Section("Halves & maximize") {
-                LabeledContent("Left / Right half", value: "⌃⌥←  ⌃⌥→")
-                LabeledContent("Top / Bottom half", value: "⌃⌥↑  ⌃⌥↓")
-                LabeledContent("Maximize", value: "⌃⌥⏎")
-                LabeledContent("Center", value: "⌃⌥C")
-                LabeledContent("Restore previous size", value: "⌃⌥⌫")
-            }
-            Section("Quarters") {
-                LabeledContent("Top left / Top right", value: "⌃⌥U  ⌃⌥I")
-                LabeledContent("Bottom left / Bottom right", value: "⌃⌥J  ⌃⌥K")
-            }
-            Section("Thirds") {
-                LabeledContent("First / Center / Last third", value: "⌃⌥D  ⌃⌥F  ⌃⌥G")
             }
         }
         .formStyle(.grouped)
@@ -403,9 +825,133 @@ private struct WindowSettings: View {
     }
 }
 
+private struct BatterySettings: View {
+    var body: some View {
+        @Bindable var battery = BatteryService.shared
+        Form {
+            if !battery.snapshot.isPresent {
+                Text("No internal battery — charge limiting is for MacBooks.")
+                    .foregroundStyle(.secondary)
+            } else {
+                LabeledContent("Current charge", value: "\(battery.snapshot.percent)%")
+                if let temp = battery.temperatureC {
+                    LabeledContent("Battery temperature", value: String(format: "%.1f°C", temp))
+                }
+                Toggle("Limit charging", isOn: $battery.limiterEnabled)
+                    .disabled(battery.isCalibrating)
+                if battery.limiterEnabled {
+                    Slider(
+                        value: Binding(
+                            get: { Double(battery.limit) },
+                            set: { battery.limit = Int($0) }),
+                        in: Double(ChargePolicy.minLimit)...Double(ChargePolicy.maxLimit),
+                        step: 5,
+                        onEditingChanged: { editing in
+                            if !editing { battery.tick() }
+                        })
+                    Text("Stop charging at \(battery.limit)%. Discharge while plugged in to come down from a higher level. Top Up charges to 100% once, then the limit returns.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if battery.canControl {
+                    Section("Battery helper") {
+                        LabeledContent(
+                            "Status",
+                            value: battery.helperEnabled ? "Installed" : "Not installed")
+                        if let message = battery.controlMessage {
+                            Text(message)
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
+                        Button(
+                            battery.helperEnabled
+                                ? "Reinstall battery helper…" : "Install battery helper…"
+                        ) {
+                            battery.installHelper()
+                        }
+                        Text(
+                            "Charge-limit writes need a root helper. One admin password. Same pattern as AlDente."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Heat Protection") {
+                    Toggle("Heat Protection", isOn: $battery.heatProtection)
+                        .disabled(battery.isCalibrating)
+                    if battery.heatProtection {
+                        Stepper(
+                            "Halt charging at \(battery.heatThresholdC)°C",
+                            value: $battery.heatThresholdC, in: 30...45)
+                        Text("Recommended 35°C. Disabled automatically during calibration.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Calibration Mode") {
+                    Text("Charge to 100% → discharge to 10% → charge to 100% → hold 1h → discharge to 75%. Recalibrates the battery gauge. Leave the Mac plugged in.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        ForEach(CalibrationStep.allCases) { step in
+                            Text(step.title)
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(
+                                    battery.calibrationStep == step
+                                        ? Theme.accent : Theme.textTertiary)
+                                .multilineTextAlignment(.center)
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    if battery.isCalibrating {
+                        Button("Stop Calibration", role: .destructive) {
+                            battery.stopCalibration()
+                        }
+                    } else {
+                        Button("Start Calibration") {
+                            battery.startCalibration()
+                        }
+                        .disabled(!battery.canControl)
+                    }
+                    LabeledContent("Last calibration") {
+                        if let date = battery.lastCalibrationAt {
+                            Text(date, format: .dateTime.month().day().hour().minute())
+                        } else {
+                            Text("—")
+                        }
+                    }
+                }
+
+                if battery.hasMagSafeLED {
+                    Section("MagSafe LED") {
+                        Picker("LED setting", selection: $battery.magSafeLED) {
+                            ForEach(MagSafeLEDMode.allCases) { mode in
+                                Text(mode.title).tag(mode)
+                            }
+                        }
+                    }
+                }
+
+                if !battery.canControl, let message = battery.controlMessage {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+                Text("On quit, Grañipa re-enables charging and returns the MagSafe LED to System. macOS 26 also has a system charge limit in System Settings → Battery; the lower of the two wins.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
 private struct APISettings: View {
     @Environment(AppState.self) private var app
-    @AppStorage("apiEnabled") private var apiEnabled = true
+    @AppStorage("apiEnabled") private var apiEnabled = false
     @AppStorage("apiPort") private var apiPort = 7799
     @State private var token = AppState.apiToken()
 

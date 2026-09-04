@@ -10,14 +10,19 @@ SIGN_ID="${CODESIGN_ID:-$(security find-identity -v -p codesigning 2>/dev/null \
 SIGN_ID="${SIGN_ID:--}"
 
 swift build -c "$CONFIG"
-BIN="$(swift build -c "$CONFIG" --show-bin-path)/Granipa"
+BIN_DIR="$(swift build -c "$CONFIG" --show-bin-path)"
+BIN="$BIN_DIR/Granipa"
+HELPER="$BIN_DIR/GranipaBatteryHelper"
 
 APP="build/Grañipa.app"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Library/LaunchDaemons"
 cp "$BIN" "$APP/Contents/MacOS/Granipa"
+cp "$HELPER" "$APP/Contents/MacOS/GranipaBatteryHelper"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+cp Resources/com.zertyn.granipa.batteryhelper.plist \
+  "$APP/Contents/Library/LaunchDaemons/com.zertyn.granipa.batteryhelper.plist"
 
 # Embed Sparkle (SPM binary artifact) so the bundle is self-contained.
 SPARKLE_SRC="$(find .build -type d -name "Sparkle.framework" -path "*macos*" 2>/dev/null | head -1)"
@@ -28,20 +33,28 @@ if [ -n "$SPARKLE_SRC" ]; then
     "$APP/Contents/MacOS/Granipa" 2>/dev/null || true
 fi
 
-# Hardened runtime + entitlements: required for notarization, harmless in dev.
+# Hardened runtime + entitlements are required for notarization. Ad-hoc
+# signatures have no Team ID, so library validation rejects embedded Sparkle.
 # Sparkle's nested executables must be signed before the framework and the app.
 # Secure timestamps need a real certificate, so ad-hoc skips them.
 sign_bundle() {
   local id="$1"; shift
+  local options=(--force)
+  if [ "$id" != "-" ]; then
+    options+=(--options runtime)
+  fi
   local fw="$APP/Contents/Frameworks/Sparkle.framework"
   if [ -d "$fw" ]; then
     find "$fw" \( -name "*.xpc" -o -name "Autoupdate" -o -name "Updater.app" \) -print0 \
       | while IFS= read -r -d '' item; do
-        codesign --force --options runtime "$@" --sign "$id" "$item"
+        codesign "${options[@]}" "$@" --sign "$id" "$item"
       done
-    codesign --force --options runtime "$@" --sign "$id" "$fw"
+    codesign "${options[@]}" "$@" --sign "$id" "$fw"
   fi
-  codesign --force --options runtime --entitlements Resources/Granipa.entitlements \
+  codesign "${options[@]}" --identifier com.zertyn.granipa.batteryhelper \
+    "$@" --sign "$id" \
+    "$APP/Contents/MacOS/GranipaBatteryHelper"
+  codesign "${options[@]}" --entitlements Resources/Granipa.entitlements \
     "$@" --sign "$id" "$APP"
 }
 
@@ -53,4 +66,5 @@ elif ! sign_bundle "$SIGN_ID" --timestamp 2>/dev/null; then
   sign_bundle -
 fi
 
+codesign --verify --deep --strict "$APP"
 echo "Built $APP"

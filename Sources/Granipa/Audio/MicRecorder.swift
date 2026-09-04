@@ -4,10 +4,11 @@ import os
 final class MicRecorder {
     private static let log = Logger(subsystem: "com.zertyn.granipa", category: "mic")
     private let engine = AVAudioEngine()
+    private var hasTap = false
 
     func start(
         echoCancellation: Bool,
-        onBuffer: @escaping @Sendable (AVAudioPCMBuffer) -> Void
+        onBuffer: @escaping @Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void
     ) throws {
         let input = engine.inputNode
         if echoCancellation {
@@ -27,16 +28,26 @@ final class MicRecorder {
                 domain: "Granipa", code: 2,
                 userInfo: [NSLocalizedDescriptionKey: "Microphone input device is not ready."])
         }
-        input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
-            onBuffer(buffer)
+        input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, time in
+            onBuffer(buffer, time)
         }
+        hasTap = true
         engine.prepare()
-        try engine.start()
+        do {
+            try engine.start()
+        } catch {
+            input.removeTap(onBus: 0)
+            hasTap = false
+            throw error
+        }
         Self.log.info("mic engine running")
     }
 
     func stop() {
-        engine.inputNode.removeTap(onBus: 0)
+        if hasTap {
+            engine.inputNode.removeTap(onBus: 0)
+            hasTap = false
+        }
         engine.stop()
     }
 }

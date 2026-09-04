@@ -4,6 +4,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppRelocator.offerMoveIfNeeded()
     }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        BatteryService.shared.stop()
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        BatteryHelperClient.shared.invalidateStatusCache()
+    }
 }
 
 @main
@@ -19,12 +27,11 @@ struct GranipaApp: App {
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1120, height: 720)
 
-        MenuBarExtra(
-            "Grañipa",
-            systemImage: appState.recorder.isRecording ? "record.circle.fill" : "waveform"
-        ) {
+        MenuBarExtra {
             MenuBarView()
                 .environment(appState)
+        } label: {
+            MenuBarLabel(app: appState)
         }
 
         Window("Welcome to Grañipa", id: "onboarding") {
@@ -48,6 +55,25 @@ struct GranipaApp: App {
         Settings {
             SettingsView()
                 .environment(appState)
+                .tint(Theme.accent)
         }
+    }
+
+}
+
+private struct MenuBarLabel: View {
+    var app: AppState
+
+    var body: some View {
+        Image(systemName: symbol)
+    }
+
+    private var symbol: String {
+        if app.recorder.isRecording { return "record.circle.fill" }
+        if app.dictation.phase.isActive { return "mic.fill" }
+        if app.meetings.contains(where: { $0.status == .processing }) {
+            return "ellipsis.circle.fill"
+        }
+        return "waveform"
     }
 }

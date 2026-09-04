@@ -9,7 +9,8 @@ struct PermissionsListView: View {
                 icon: "mic.fill", name: "Microphone",
                 why: "Your side of the conversation.",
                 state: center.microphone,
-                pane: "\(PermissionCenter.securityPane)?Privacy_Microphone")
+                pane: "\(PermissionCenter.securityPane)?Privacy_Microphone",
+                onRequest: { await center.requestMicrophone() })
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: "speaker.wave.2.fill")
                     .font(.system(size: 14))
@@ -45,12 +46,14 @@ struct PermissionsListView: View {
                 icon: "calendar", name: "Calendars",
                 why: "Shows upcoming meetings and auto-titles recordings.",
                 state: center.calendar,
-                pane: "\(PermissionCenter.securityPane)?Privacy_Calendars")
+                pane: "\(PermissionCenter.securityPane)?Privacy_Calendars",
+                onRequest: { await center.requestCalendar() })
             row(
                 icon: "bell.badge.fill", name: "Notifications",
                 why: "\u{201C}Meeting detected — record?\u{201D} prompts.",
                 state: center.notifications,
-                pane: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")
+                pane: "x-apple.systempreferences:com.apple.Notifications-Settings.extension",
+                onRequest: { await center.requestNotifications() })
             row(
                 icon: "rectangle.dashed.badge.record", name: "Screen Recording",
                 why: "Only for text capture (OCR).",
@@ -72,7 +75,8 @@ struct PermissionsListView: View {
     }
 
     private func row(
-        icon: String, name: String, why: String, state: PermissionState, pane: String
+        icon: String, name: String, why: String, state: PermissionState, pane: String,
+        onRequest: (@MainActor () async -> Void)? = nil
     ) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: icon)
@@ -89,6 +93,11 @@ struct PermissionsListView: View {
             }
             Spacer(minLength: 0)
             badge(state)
+            if state == .notDetermined, let onRequest {
+                Button("Request") { Task { await onRequest() } }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
             if state == .denied {
                 settingsLink(pane)
             }
@@ -104,17 +113,17 @@ struct PermissionsListView: View {
         case .granted:
             Label("Granted", systemImage: "checkmark.circle.fill")
                 .font(.caption)
-                .foregroundStyle(.green)
+                .foregroundStyle(Theme.statusDone)
                 .labelStyle(.titleAndIcon)
         case .denied:
             Label("Denied", systemImage: "xmark.circle.fill")
                 .font(.caption)
-                .foregroundStyle(.red)
+                .foregroundStyle(Theme.statusListening)
                 .labelStyle(.titleAndIcon)
         case .notDetermined:
             Label("Not asked yet", systemImage: "questionmark.circle")
                 .font(.caption)
-                .foregroundStyle(.orange)
+                .foregroundStyle(Theme.statusLoading)
                 .labelStyle(.titleAndIcon)
         case .unchecked:
             EmptyView()

@@ -31,11 +31,16 @@
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Grañipa records your microphone during meetings to transcribe what you say.</string>
+	<string>Grañipa uses the microphone to transcribe meetings and to dictate text into other apps.</string>
 	<key>NSAudioCaptureUsageDescription</key>
 	<string>Grañipa records system audio during meetings to transcribe what other participants say.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Grañipa transcribes meeting audio on-device.</string>
+	<string>Grañipa transcribes meetings and dictation on-device unless you opt into a cloud engine.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Grañipa shows your upcoming meetings and links recordings to calendar events.</string>
 </dict>

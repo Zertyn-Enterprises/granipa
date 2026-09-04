@@ -12,7 +12,7 @@ final class SystemAudioTap {
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private var procID: AudioDeviceIOProcID?
-    private let queue = DispatchQueue(label: "com.zertyn.granipa.system-tap", qos: .userInitiated)
+    private let queue = DispatchQueue(label: "com.zertyn.granipa.system-tap", qos: .utility)
 
     func start(onBuffer: @escaping @Sendable (AVAudioPCMBuffer, AudioTimeStamp) -> Void) throws {
         let description = CATapDescription(stereoGlobalTapButExcludeProcesses: [])

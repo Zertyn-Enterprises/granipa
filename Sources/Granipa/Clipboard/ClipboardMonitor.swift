@@ -4,6 +4,8 @@ import Foundation
 @MainActor
 final class ClipboardMonitor {
     private let database: AppDatabase
+    private let processingQueue = DispatchQueue(
+        label: "com.zertyn.granipa.clipboard-processing", qos: .utility)
     private var task: Task<Void, Never>?
     private var lastChangeCount = NSPasteboard.general.changeCount
 
@@ -12,11 +14,14 @@ final class ClipboardMonitor {
     }
 
     func start() {
+        guard isEnabled else { return }
         guard task == nil else { return }
         task = Task {
             while !Task.isCancelled {
-                poll()
-                try? await Task.sleep(for: .milliseconds(700))
+                if isEnabled { poll() }
+                // NSPasteboard exposes no change notification; 1 s is the
+                // fastest poll that still feels instant on paste.
+                try? await Task.sleep(for: .milliseconds(isEnabled ? 1_000 : 2_000))
             }
         }
     }
@@ -48,24 +53,40 @@ final class ClipboardMonitor {
             forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
             !urls.isEmpty
         {
-            saveText(urls.map(\.path).joined(separator: "\n"), type: .file, source: source)
+            let text = urls.map(\.path).joined(separator: "\n")
+            processingQueue.async { [database] in
+                Self.saveText(text, type: .file, source: source, database: database)
+                Self.prune(database: database)
+            }
         } else if let data = pasteboard.data(forType: .png) ?? pasteboard.data(forType: .tiff) {
-            saveImage(data, source: source)
+            processingQueue.async { [database] in
+                Self.saveImage(data, source: source, database: database)
+                Self.prune(database: database)
+            }
         } else if let string = pasteboard.string(forType: .string),
             !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         {
-            saveText(string, type: ClipboardClassifier.classify(string), source: source)
+            processingQueue.async { [database] in
+                Self.saveText(
+                    string,
+                    type: ClipboardClassifier.classify(string),
+                    source: source,
+                    database: database)
+                Self.prune(database: database)
+            }
         } else {
             return
         }
-
-        if let orphanedImages = try? database.pruneClipboardItems() {
-            removeFiles(orphanedImages)
-        }
     }
 
-    private func saveText(_ text: String, type: ClipboardItemType, source: String?) {
+    nonisolated private static func saveText(
+        _ text: String,
+        type: ClipboardItemType,
+        source: String?,
+        database: AppDatabase
+    ) {
         if let latest = try? database.latestClipboardItem(),
+            latest.type == type,
             latest.textContent == text
         {
             return
@@ -83,7 +104,11 @@ final class ClipboardMonitor {
         try? database.insertClipboardItem(item)
     }
 
-    private func saveImage(_ data: Data, source: String?) {
+    nonisolated private static func saveImage(
+        _ data: Data,
+        source: String?,
+        database: AppDatabase
+    ) {
         guard let rep = NSBitmapImageRep(data: data),
             let png = rep.representation(using: .png, properties: [:]),
             let dir = try? AppPaths.clipboardDirectory()
@@ -93,7 +118,9 @@ final class ClipboardMonitor {
             latest.type == .image,
             latest.sizeBytes == png.count,
             latest.width == rep.pixelsWide,
-            latest.height == rep.pixelsHigh
+            latest.height == rep.pixelsHigh,
+            let latestPath = latest.imagePath,
+            (try? Data(contentsOf: URL(fileURLWithPath: latestPath))) == png
         {
             return
         }
@@ -112,10 +139,19 @@ final class ClipboardMonitor {
             sizeBytes: png.count,
             width: rep.pixelsWide,
             height: rep.pixelsHigh)
-        try? database.insertClipboardItem(item)
+        do {
+            try database.insertClipboardItem(item)
+        } catch {
+            removeFiles([url.path])
+        }
     }
 
-    private func removeFiles(_ paths: [String]) {
+    nonisolated private static func prune(database: AppDatabase) {
+        guard let orphanedImages = try? database.pruneClipboardItems() else { return }
+        removeFiles(orphanedImages)
+    }
+
+    nonisolated private static func removeFiles(_ paths: [String]) {
         for path in paths {
             try? FileManager.default.removeItem(atPath: path)
             try? FileManager.default.removeItem(atPath: ImageCache.thumbnailPath(for: path))
