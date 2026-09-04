@@ -65,14 +65,7 @@ private struct MenuBarLabel: View {
     var app: AppState
 
     var body: some View {
-        let battery = BatteryService.shared.snapshot
-        HStack(spacing: 4) {
-            Image(systemName: symbol)
-            if !app.recorder.isRecording, battery.isPresent {
-                Text(battery.menuBarText)
-                    .monospacedDigit()
-            }
-        }
+        Image(systemName: symbol)
     }
 
     private var symbol: String {
