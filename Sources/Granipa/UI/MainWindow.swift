@@ -7,6 +7,8 @@ struct MainWindow: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.openSettings) private var openSettings
     @AppStorage("onboardingCompleted") private var onboardingCompleted = false
+    @State private var windowWidth = ShellLayout.defaultWindowWidth
+    @State private var inspectorOverride: Bool?
 
     private static func looksLikePermissionIssue(_ message: String) -> Bool {
         let lower = message.lowercased()
@@ -14,59 +16,79 @@ struct MainWindow: View {
             || lower.contains("not authorized") || lower.contains("privacy")
     }
 
+    private var inspectorKind: InspectorContentKind {
+        AppNavigation.inspectorKind(
+            destination: app.sidebarDestination,
+            hasSelectedMeeting: app.selectedMeeting != nil,
+            dictationShowsInspector: AppNavigation.dictationShowsInspector(app.dictation.phase),
+            windowWidth: windowWidth)
+    }
+
+    private var inspectorPresentation: InspectorPresentation {
+        ShellLayout.presentation(
+            windowWidth: windowWidth,
+            userExpanded: inspectorOverride,
+            hasContent: inspectorKind != .none)
+    }
+
     var body: some View {
-        @Bindable var app = app
         HStack(spacing: 0) {
             SidebarView()
-                .frame(width: 248)
+                .frame(width: ShellLayout.sidebarWidth)
                 .background(Theme.bgSidebar)
 
             Rectangle()
                 .fill(Theme.border)
                 .frame(width: 1)
 
-            VStack(spacing: 0) {
-                if let appName = app.detector.detectedApp, !app.recorder.isRecording {
-                    detectionBanner(appName: appName)
-                        .transition(
-                            reduceMotion
-                                ? .opacity
-                                : .move(edge: .top).combined(with: .opacity))
-                }
-                Group {
-                    if app.sidebarDestination == .dictation {
-                        DictationHistoryView()
-                    } else if let meeting = app.selectedMeeting {
-                        MeetingDetailView(
-                            meeting: meeting,
-                            preferNotes: app.sidebarDestination == .notes
-                        )
-                        .id(meeting.id)
-                    } else {
-                        switch app.sidebarDestination {
-                        case .home:
-                            HomeView(mode: app.selectedFolderID == nil ? .inbox : .library)
-                        case .meetings:
-                            HomeView(mode: .library)
-                        case .notes:
-                            NotesLibraryView()
-                        case .files:
-                            FilesLibraryView()
-                        case .dictation:
-                            DictationHistoryView()
-                        }
-                    }
-                }
+            contentColumn
+
+            if inspectorPresentation == .column {
+                Rectangle()
+                    .fill(Theme.border)
+                    .frame(width: 1)
+                InspectorPane(kind: inspectorKind)
+                    .frame(width: ShellLayout.inspectorColumnWidth)
+                    .transition(.opacity)
             }
-            .animation(
-                reduceMotion ? nil : .easeOut(duration: Theme.motionNormal),
-                value: app.detector.detectedApp)
-            .frame(maxWidth: .infinity)
-            .background(Theme.bg)
         }
+        .overlay(alignment: .trailing) {
+            if inspectorPresentation == .overlay {
+                InspectorPane(kind: inspectorKind)
+                    .frame(minWidth: ShellLayout.inspectorOverlayMinWidth)
+                    .frame(width: ShellLayout.inspectorColumnWidth)
+                    .overlay(alignment: .leading) {
+                        Rectangle().fill(Theme.border).frame(width: 1)
+                    }
+                    .transition(.opacity)
+            }
+        }
+        .animation(
+            reduceMotion ? nil : .easeOut(duration: Theme.motionNormal),
+            value: inspectorPresentation)
         .preferredColorScheme(.dark)
         .tint(Theme.accent)
-        .frame(minWidth: 960, minHeight: 600)
+        .frame(minWidth: ShellLayout.minWidth, minHeight: 600)
+        .environment(\.granipaWindowWidth, windowWidth)
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(key: MainWindowWidthKey.self, value: proxy.size.width)
+            }
+        }
+        .onPreferenceChange(MainWindowWidthKey.self) { windowWidth = $0 }
+        .toolbar {
+            if inspectorKind != .none {
+                Button {
+                    inspectorOverride = inspectorPresentation == .hidden
+                } label: {
+                    Image(systemName: "sidebar.trailing")
+                }
+                .help(
+                    inspectorPresentation == .hidden ? "Show inspector" : "Hide inspector")
+                .accessibilityLabel(
+                    inspectorPresentation == .hidden ? "Show inspector" : "Hide inspector")
+            }
+        }
         .onChange(of: app.recorder.isRecording) {
             if app.recorder.isRecording {
                 CaptionsOverlayController.shared.resetDismissed()
@@ -98,6 +120,47 @@ struct MainWindow: View {
         }
     }
 
+    private var contentColumn: some View {
+        VStack(spacing: 0) {
+            if let appName = app.detector.detectedApp, !app.recorder.isRecording {
+                detectionBanner(appName: appName)
+                    .transition(
+                        reduceMotion
+                            ? .opacity
+                            : .move(edge: .top).combined(with: .opacity))
+            }
+            Group {
+                if app.sidebarDestination == .dictation {
+                    DictationHistoryView()
+                } else if let meeting = app.selectedMeeting {
+                    MeetingDetailView(
+                        meeting: meeting,
+                        preferNotes: app.sidebarDestination == .notes
+                    )
+                    .id(meeting.id)
+                } else {
+                    switch app.sidebarDestination {
+                    case .home:
+                        HomeView(mode: app.selectedFolderID == nil ? .inbox : .library)
+                    case .meetings:
+                        HomeView(mode: .library)
+                    case .notes:
+                        NotesLibraryView()
+                    case .files:
+                        FilesLibraryView()
+                    case .dictation:
+                        DictationHistoryView()
+                    }
+                }
+            }
+        }
+        .animation(
+            reduceMotion ? nil : .easeOut(duration: Theme.motionNormal),
+            value: app.detector.detectedApp)
+        .frame(maxWidth: .infinity)
+        .background(Theme.bg)
+    }
+
     private func detectionBanner(appName: String) -> some View {
         HStack(spacing: 10) {
             Image(systemName: "video.fill")
@@ -123,5 +186,12 @@ struct MainWindow: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.border).frame(height: 1)
         }
+    }
+}
+
+private struct MainWindowWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = ShellLayout.defaultWindowWidth
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }

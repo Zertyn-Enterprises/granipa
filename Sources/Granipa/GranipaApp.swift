@@ -1,8 +1,13 @@
+import os
 import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private static let lifecycleLog = OSLog(
+        subsystem: "com.zertyn.granipa", category: "lifecycle")
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppRelocator.offerMoveIfNeeded()
+        os_signpost(.event, log: Self.lifecycleLog, name: "appReady")
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -25,7 +30,7 @@ struct GranipaApp: App {
                 .environment(appState)
         }
         .windowStyle(.hiddenTitleBar)
-        .defaultSize(width: 1120, height: 720)
+        .defaultSize(width: ShellLayout.defaultWindowWidth, height: 720)
 
         MenuBarExtra {
             MenuBarView()
