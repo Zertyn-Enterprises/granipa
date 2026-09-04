@@ -41,6 +41,7 @@ final class MeetingDetector {
                 // is the only supported option. The CoreAudio reads run
                 // detached; only the state write hops back to the main actor.
                 let name = await Task.detached { Self.activeMeetingApp() }.value
+                guard !Task.isCancelled else { return }
                 apply(active: name)
                 try? await Task.sleep(for: .seconds(5))
             }
@@ -71,15 +72,6 @@ final class MeetingDetector {
     }
 
     private nonisolated static func activeMeetingApp() -> String? {
-        for (bundleID, capturing) in audioCaptureProcesses() where capturing {
-            if let name = MeetingApps.displayName(forBundleID: bundleID) {
-                return name
-            }
-        }
-        return nil
-    }
-
-    private nonisolated static func audioCaptureProcesses() -> [(String, Bool)] {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyProcessObjectList,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -87,21 +79,25 @@ final class MeetingDetector {
         var size: UInt32 = 0
         let system = AudioObjectID(kAudioObjectSystemObject)
         guard AudioObjectGetPropertyDataSize(system, &address, 0, nil, &size) == noErr else {
-            return []
+            return nil
         }
         let count = Int(size) / MemoryLayout<AudioObjectID>.size
         var processes = [AudioObjectID](repeating: 0, count: count)
         guard AudioObjectGetPropertyData(system, &address, 0, nil, &size, &processes) == noErr
         else {
-            return []
+            return nil
         }
 
-        return processes.compactMap { process in
-            guard let bundleID = stringProperty(process, kAudioProcessPropertyBundleID) else {
-                return nil
+        for process in processes {
+            guard
+                let bundleID = stringProperty(process, kAudioProcessPropertyBundleID),
+                let name = MeetingApps.displayName(forBundleID: bundleID)
+            else { continue }
+            if boolProperty(process, kAudioProcessPropertyIsRunningInput) {
+                return name
             }
-            return (bundleID, boolProperty(process, kAudioProcessPropertyIsRunningInput))
         }
+        return nil
     }
 
     private nonisolated static func stringProperty(
