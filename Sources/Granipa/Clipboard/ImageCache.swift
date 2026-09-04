@@ -79,10 +79,6 @@ final class ImageCache {
         }
     }
 
-    static func downsampled(path: String, maxPixel: CGFloat) -> NSImage? {
-        loadDownsampled(path: path, maxPixel: maxPixel)?.image
-    }
-
     private static func loadDownsampled(path: String, maxPixel: CGFloat) -> DownsampledImage? {
         guard
             let source = CGImageSourceCreateWithURL(
