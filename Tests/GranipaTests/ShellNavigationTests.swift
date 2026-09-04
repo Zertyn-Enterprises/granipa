@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import Testing
 
@@ -93,46 +94,56 @@ import Testing
         #expect(MeetingLibrary.matching([alpha, beta], query: "  ").map(\.title) == ["Standup", "Retro"])
     }
 
-    @Test func meetingInspectorFollowsTheOpenMeetingNotTheList() {
-        #expect(
-            AppNavigation.inspectorKind(
-                destination: .home,
-                hasSelectedMeeting: true,
-                dictationShowsInspector: false,
-                windowWidth: 1120) == .meeting)
-        #expect(
-            AppNavigation.inspectorKind(
-                destination: .meetings,
-                hasSelectedMeeting: false,
-                dictationShowsInspector: true,
-                windowWidth: 1440) == .none)
+    @Test func selectedMeetingHasNoInspectorOccupant() {
+        let destinations: [SidebarDestination] = [.home, .meetings, .notes, .files]
+        let widths: [CGFloat] = [1120, 1279, 1280, 1440]
+        for destination in destinations {
+            for width in widths {
+                #expect(
+                    AppNavigation.inspectorKind(
+                        destination: destination,
+                        dictationShowsInspector: false,
+                        windowWidth: width) == .none)
+                #expect(
+                    AppNavigation.inspectorKind(
+                        destination: destination,
+                        dictationShowsInspector: true,
+                        windowWidth: width) == .none)
+            }
+        }
     }
 
-    @Test func dictationInspectorDocksOnlyWhenWideAndLive() {
+    @Test func idleDictationInspectorIsAvailableAtEveryWidth() {
+        for width: CGFloat in [1120, 1279, 1280, 1440] {
+            #expect(
+                AppNavigation.inspectorKind(
+                    destination: .dictation,
+                    dictationShowsInspector: false,
+                    windowWidth: width) == .dictationIdle)
+        }
+    }
+
+    @Test func liveDictationInspectorDocksOnlyWhenWide() {
         #expect(
             AppNavigation.inspectorKind(
                 destination: .dictation,
-                hasSelectedMeeting: false,
-                dictationShowsInspector: true,
-                windowWidth: 1280) == .dictationLive)
-        #expect(
-            AppNavigation.inspectorKind(
-                destination: .dictation,
-                hasSelectedMeeting: false,
                 dictationShowsInspector: true,
                 windowWidth: 1120) == .none)
         #expect(
             AppNavigation.inspectorKind(
                 destination: .dictation,
-                hasSelectedMeeting: false,
-                dictationShowsInspector: false,
-                windowWidth: 1440) == .none)
+                dictationShowsInspector: true,
+                windowWidth: 1279) == .none)
         #expect(
             AppNavigation.inspectorKind(
                 destination: .dictation,
-                hasSelectedMeeting: true,
                 dictationShowsInspector: true,
                 windowWidth: 1280) == .dictationLive)
+        #expect(
+            AppNavigation.inspectorKind(
+                destination: .dictation,
+                dictationShowsInspector: true,
+                windowWidth: 1440) == .dictationLive)
     }
 
     @Test func dictationInspectorPhasesExcludeIdleAndDone() {

@@ -19,7 +19,6 @@ struct MainWindow: View {
     private var inspectorKind: InspectorContentKind {
         AppNavigation.inspectorKind(
             destination: app.sidebarDestination,
-            hasSelectedMeeting: app.selectedMeeting != nil,
             dictationShowsInspector: AppNavigation.dictationShowsInspector(app.dictation.phase),
             windowWidth: windowWidth)
     }

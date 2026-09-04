@@ -36,7 +36,7 @@ enum SidebarHighlight: Equatable, Sendable {
 
 enum InspectorContentKind: Equatable, Sendable {
     case none
-    case meeting
+    case dictationIdle
     case dictationLive
 }
 
@@ -74,18 +74,14 @@ enum AppNavigation {
 
     static func inspectorKind(
         destination: SidebarDestination,
-        hasSelectedMeeting: Bool,
         dictationShowsInspector: Bool,
         windowWidth: CGFloat
     ) -> InspectorContentKind {
-        if destination == .dictation {
-            if dictationShowsInspector, windowWidth >= ShellLayout.inspectorBreakWidth {
-                return .dictationLive
-            }
-            return .none
+        guard destination == .dictation else { return .none }
+        if dictationShowsInspector {
+            return windowWidth >= ShellLayout.inspectorBreakWidth ? .dictationLive : .none
         }
-        if hasSelectedMeeting { return .meeting }
-        return .none
+        return .dictationIdle
     }
 }
 
