@@ -50,14 +50,23 @@ final class BatteryHelperClient {
         throw BatteryHelperError.install("macOS could not register the battery helper.")
     }
 
-    func apply(action: ChargeAction, usingCHTE: Bool, reply: @escaping (Bool, String?) -> Void) {
-        guard let proxy = proxy(reply: reply) else { return }
-        proxy.applyAction(action.helperRaw, usingCHTE: usingCHTE, reply: reply)
+    func apply(
+        action: ChargeAction,
+        usingCHTE: Bool,
+        reply: @escaping @MainActor @Sendable (Bool, String?) -> Void
+    ) {
+        let deliver = BatteryHelperCallbacks.mainActor(reply)
+        guard let proxy = proxy(errorHandler: BatteryHelperCallbacks.error(deliver)) else { return }
+        proxy.applyAction(action.helperRaw, usingCHTE: usingCHTE, reply: deliver)
     }
 
-    func applyLED(_ value: UInt8, reply: @escaping (Bool, String?) -> Void) {
-        guard let proxy = proxy(reply: reply) else { return }
-        proxy.applyLED(value, reply: reply)
+    func applyLED(
+        _ value: UInt8,
+        reply: @escaping @MainActor @Sendable (Bool, String?) -> Void
+    ) {
+        let deliver = BatteryHelperCallbacks.mainActor(reply)
+        guard let proxy = proxy(errorHandler: BatteryHelperCallbacks.error(deliver)) else { return }
+        proxy.applyLED(value, reply: deliver)
     }
 
     func applySynchronously(
@@ -65,14 +74,13 @@ final class BatteryHelperClient {
         usingCHTE: Bool,
         timeout: TimeInterval = 1
     ) -> Bool {
-        let completion = DispatchSemaphore(value: 0)
-        var succeeded = false
-        apply(action: action, usingCHTE: usingCHTE) { ok, _ in
-            succeeded = ok
-            completion.signal()
+        let result = BatteryHelperResultLatch()
+        let deliver = BatteryHelperCallbacks.latch(result)
+        guard let proxy = proxy(errorHandler: BatteryHelperCallbacks.error(deliver)) else {
+            return false
         }
-        guard completion.wait(timeout: .now() + timeout) == .success else { return false }
-        return succeeded
+        proxy.applyAction(action.helperRaw, usingCHTE: usingCHTE, reply: deliver)
+        return result.wait(timeout: timeout)
     }
 
     private func registerSMAppService() throws -> BatteryHelperInstallOutcome? {
@@ -107,26 +115,87 @@ final class BatteryHelperClient {
         connection = nil
     }
 
-    private func proxy(reply: @escaping (Bool, String?) -> Void) -> GranipaBatteryHelping? {
+    private func proxy(errorHandler: @escaping @Sendable (Error) -> Void)
+        -> GranipaBatteryHelping?
+    {
         if connection == nil {
             // LaunchDaemons live in the system bootstrap, not the user one.
             let conn = NSXPCConnection(
                 machServiceName: batteryHelperMachName, options: .privileged)
             conn.remoteObjectInterface = NSXPCInterface(with: GranipaBatteryHelping.self)
-            conn.invalidationHandler = { [weak self] in
-                Task { @MainActor in self?.connection = nil }
+            conn.invalidationHandler = BatteryHelperCallbacks.mainActor { [weak self] in
+                self?.connection = nil
             }
             conn.resume()
             connection = conn
         }
         guard
-            let proxy = connection?.remoteObjectProxyWithErrorHandler({ error in
-                reply(false, error.localizedDescription)
-            }) as? GranipaBatteryHelping
+            let proxy = connection?.remoteObjectProxyWithErrorHandler(errorHandler)
+                as? GranipaBatteryHelping
         else {
-            reply(false, "Battery helper is not connected.")
+            errorHandler(BatteryHelperError.install("Battery helper is not connected."))
             return nil
         }
         return proxy
+    }
+}
+
+enum BatteryHelperCallbacks {
+    typealias Reply = @Sendable (Bool, String?) -> Void
+
+    static func mainActor(
+        _ reply: @escaping @MainActor @Sendable (Bool, String?) -> Void
+    ) -> Reply {
+        { ok, error in
+            Task { @MainActor in
+                reply(ok, error)
+            }
+        }
+    }
+
+    static func mainActor(
+        _ action: @escaping @MainActor @Sendable () -> Void
+    ) -> @Sendable () -> Void {
+        {
+            Task { @MainActor in
+                action()
+            }
+        }
+    }
+
+    static func error(_ reply: @escaping Reply) -> @Sendable (Error) -> Void {
+        { error in
+            reply(false, error.localizedDescription)
+        }
+    }
+
+    fileprivate static func latch(_ result: BatteryHelperResultLatch) -> Reply {
+        { ok, _ in
+            result.resolve(ok)
+        }
+    }
+}
+
+final class BatteryHelperResultLatch: @unchecked Sendable {
+    private let lock = NSLock()
+    private let semaphore = DispatchSemaphore(value: 0)
+    private var result: Bool?
+
+    func resolve(_ value: Bool) {
+        lock.lock()
+        guard result == nil else {
+            lock.unlock()
+            return
+        }
+        result = value
+        lock.unlock()
+        semaphore.signal()
+    }
+
+    func wait(timeout: TimeInterval) -> Bool {
+        guard semaphore.wait(timeout: .now() + timeout) == .success else { return false }
+        lock.lock()
+        defer { lock.unlock() }
+        return result ?? false
     }
 }
