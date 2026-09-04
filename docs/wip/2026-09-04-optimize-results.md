@@ -4,7 +4,7 @@ Baseline: `c10dbb8`
 
 Measured Swift result: `02bb1d8`
 
-Validated local bundle: `c61cd2a`
+Validated installed bundle: `77ca895`
 
 This report is incomplete only where a signed app, UI interaction, external
 review, or remote write is required. Those gates are listed explicitly below.
@@ -19,15 +19,15 @@ review, or remote write is required. Those gates are listed explicitly below.
 | Test runtime | 0.657 s | 0.661 s | +0.004 s |
 | Tests / suites / skipped | 177 / 37 / 0 | 180 / 36 / 0 | +3 / -1 / 0 |
 | Unique Swift warning locations | 28 | 0 | -28 |
-| Production Swift | 14,143 LOC / 99 files | 14,289 LOC / 99 files | +146 LOC |
+| Production Swift | 14,143 LOC / 99 files | 14,292 LOC / 99 files | +149 LOC |
 | Test Swift | 2,182 LOC / 32 files | 2,218 LOC / 32 files | +36 LOC |
 | Direct dependencies | 3 | 3 | 0 |
 | `Sources/` | 728 KiB | 732 KiB | +4 KiB |
 | `Tests/` | 156 KiB | 156 KiB | 0 KiB |
 | `Resources/` | 1,884 KiB | 1,884 KiB | 0 KiB |
 | Checkout excluding external scratch | 3,300 KiB | 3,352 KiB | +52 KiB |
-| SwiftPM scratch after build/tests | 1,496,832 KiB | 1,497,372 KiB | +540 KiB |
-| Debug `Granipa` executable | 29,091,184 B | 29,115,360 B | +24,176 B (+0.083%) |
+| SwiftPM scratch after build/tests | 1,496,832 KiB | 1,502,104 KiB | +5,272 KiB |
+| Debug `Granipa` executable | 29,091,184 B | 29,114,640 B | +23,456 B (+0.081%) |
 | Debug battery helper | 207,040 B | 207,040 B | 0 B |
 | `node_modules` / virtualenv | absent | absent | unchanged |
 
@@ -37,11 +37,11 @@ comes from the requested XPC, hotkey, and language fixes plus regression tests.
 It must not be presented as a measured resource improvement. Controlled
 idle/Record profiles are still required to quantify runtime savings.
 
-Git churn in `Sources/` and `Tests/` was 358 additions and 178 deletions: 132
-production lines and 46 test lines were removed. The bundle-script repair added
-10 and removed 5 more lines, for 183 deleted code/script lines in total. Net LOC
-grew because the three requested bug fixes needed implementation and regression
-coverage; this optimization did not trade safety for a smaller line count.
+Final Git churn in `Sources/`, `Tests/`, and `Scripts/` was 383 additions and
+195 deletions: 144 production lines, 46 test lines, and 5 script lines were
+removed. Net LOC grew because the requested bug fixes needed implementation and
+regression coverage; this optimization did not trade safety for a smaller line
+count.
 
 The checkout size was measured before adding this result file. Baseline and
 result both include their then-current `docs/wip` content, so this metric is a
@@ -57,7 +57,11 @@ coarse repository-size indicator rather than application payload size.
   reply resolution. This directly addresses the supplied SIGTRAP stack.
 - Modifier-only hotkeys now derive left/right physical state from the received
   `NSEvent` before the actor hop. The new edge test failed before the change and
-  passes after it. A signed Right Command smoke remains pending.
+  passes after it. The user confirmed that Right Command opens dictation in the
+  installed, signed build.
+- Clipboard History now posts Command-V only after the animated panel has
+  completed `orderOut`; it no longer uses a 140 ms delay while the key panel can
+  retain focus for 200 ms.
 - Automatic file transcription probes a bounded 15-second microphone prefix
   across distinct configured languages before one full decode per channel.
   A copied 12.1-second user recording with stale `lastSpeechLocale=en-US`
@@ -96,14 +100,20 @@ coarse repository-size indicator rather than application payload size.
   exit 0; zero source/test compiler warning locations.
 - Full `swift test --scratch-path ../../../.build --skip-update`: exit 0;
   180 tests in 36 suites; zero failures and zero skipped.
+- After the Clipboard fix, the same clean verification passed again: build
+  39.59 s and tests 15.31 s. This slower second timing under different machine
+  load confirms that the single-run timing deltas above are not a benchmark.
 - `.github/workflows/ci.yml` runs the same build/test gates. No project lint
   configuration or installed project linter exists.
 - `bash -n Scripts/bundle.sh` and `bash -n Scripts/release.sh`: exit 0.
   Neither script has a non-mutating help/dry-run mode; release was not executed.
-- The local 33,336 KiB ad-hoc bundle passes
-  `codesign --verify --deep --strict`; its app and Sparkle signatures both have
-  `flags=0x2(adhoc)`, and the process remained alive after launch on macOS 26.2.
-  The bundle retains only the audio-input and calendar entitlements.
+- The local 33,340 KiB bundle and installed copy pass
+  `codesign --verify --deep --strict`. They are signed with
+  `Apple Development: Pablo Muñoz (J4S275P398)`, retain Team ID `R4V252C833`
+  and Hardened Runtime, and contain only the audio-input and calendar
+  entitlements. The installed executable matches the worktree bundle.
+- On the final launch, TCC reported `ListenEvent=2` and `Accessibility=2` before
+  the user confirmed the Right Command smoke.
 - Three directed audit loops covered functions, properties, types, dynamic
   string/selector references, dependencies, debug artifacts, tests, and hot
   loops. The final lexical pass found no additional 🟢 zero-caller removal.
@@ -112,23 +122,19 @@ coarse repository-size indicator rather than application payload size.
 
 Logs: `/tmp/granipa-opt-final-build.log`,
 `/tmp/granipa-opt-final-build.time`, `/tmp/granipa-opt-final-test.log`, and
-`/tmp/granipa-opt-final-test.time`.
+`/tmp/granipa-opt-final-test.time`. The post-Clipboard rerun is in
+`/tmp/granipa-post-clipboard-clean-{build,test}.{log,time}`.
 
 ## Blocked or deliberately not changed
 
-- Clipboard History paste remains unresolved. The completion-based fix was
-  exercised with two AppKit test-harness variants; one hung and one failed
-  under the test runner, so all related source/test edits were reverted. A
-  third unproved timing patch is forbidden by the task budget.
-- The installed `/Applications/Grañipa.app` is not this branch: its executable
-  was dated `2026-09-04 09:21:14` with SHA-256
-  `6c75c457e88806bed2a5af03b4ad2a9880a9e5cf07c307d6063db4c4b6c7abfb`;
-  the measured branch executable was dated `2026-09-04 11:07:04` with SHA-256
-  `559f99b8a65acb876a55002605775b5ffc61c6dcd7147a4019bc47d2e72c4a3c`.
-  The Right Command commit was created at `10:12:42`.
-- `security find-identity -v -p codesigning` returned `0 valid identities` in
-  this session. The tested build is therefore ad-hoc and may re-prompt for audio
-  and Accessibility permissions; a Developer ID release cannot be tested here.
+- Clipboard's focus-transfer path has no automated AppKit test. Two test-runner
+  harnesses failed earlier, and the automation smoke was blocked by macOS
+  error `-1743` before it could control System Events. The deterministic timing
+  defect was removed, the full suite passed, and the signed build was installed
+  for the user's smoke.
+- The previous 09:21 installed app is preserved at
+  `build/Grañipa-pre-refactor-2026-09-04-0921.app`; the replacement is
+  recoverable without rebuilding.
 - Exact cold launch-to-ready is unmeasurable without adding instrumentation;
   the app has no ready signal/signpost, and the baseline had no signed-bundle
   measurement.
@@ -138,13 +144,12 @@ Logs: `/tmp/granipa-opt-final-build.log`,
   while the new one had run for two minutes, so these mixed figures do not prove
   a resource reduction. A controlled navigation/dictation/Record profile is
   still required.
-- Manual Right Command, Clipboard paste, Record/Stop, language, navigation, and
-  battery smoke remain pending user interaction and relevant TCC permissions.
+- Controlled navigation/dictation/Record and physical battery-policy profiling
+  remain pending; the available idle samples are not directly comparable.
 - Attempts to invoke Grok, Kimi, and GLM review were blocked before transmitting
   data because the external-review approval must explicitly authorize sending
   the complete local diff to those providers.
-- Push and the single PR are pending manual smoke and cross-review. No merge is
-  authorized.
+- The single PR remains pending cross-review. No merge is authorized.
 
 The following audited items were proposals only because they touch persisted
 media/delivery, visible motion, external contracts, or lack a sufficient test or
@@ -157,7 +162,7 @@ stop state, and language-probe analyzer reuse.
 
 ## Commit groups
 
-- Bugs: `eb6ce5f`, `8404721`, `fbe9b94`, `4037e7c`.
+- Bugs: `eb6ce5f`, `8404721`, `fbe9b94`, `4037e7c`, `77ca895`.
 - Build tooling: `c61cd2a`.
 - Runtime: `ee44877`, `6ccf1e8`, `4eb817f`, `7bcf07e`.
 - Warning cleanup: `9f082ff`, `c5c4e84`, `5f0f7fd`.
