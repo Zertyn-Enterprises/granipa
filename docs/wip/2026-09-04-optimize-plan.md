@@ -175,6 +175,27 @@ are planned before any source edit; every other new finding remains a proposal.
 - Reset `meetingAppActive` in `stop()`, after a lifecycle regression test.
 - Reuse or reduce language-probe analysis only after a real long-audio profile.
 
+## Third execution loop
+
+The property/type closure pass at `d987597` found the last two additional 🟢
+surfaces. The exhaustive lexical sweep found no further safe zero-caller item.
+
+### 13. Remove the unread battery power-source field
+
+- Finding: `BatterySnapshot.isPluggedIn` is only declared and initialized.
+- Change: remove the field, its two initializer arguments, and the IOPS state
+  locals used only to populate it.
+- Risk: 🟢.
+- Proof: whole-repo member/string/selector/reflection grep, build, and all tests.
+
+### 14. Remove unread stderr from successful LLM results
+
+- Finding: every successful-result consumer reads only `.stdout`; stderr is
+  still drained and still included in non-zero-exit errors.
+- Change: remove only `Output.stderr` and its constructor argument.
+- Risk: 🟢.
+- Proof: whole-repo consumer grep, existing process tests, build, and full suite.
+
 ## Proposals only — not executed
 
 These are 🔴 or lack a test/profile that can prove behavior preservation:

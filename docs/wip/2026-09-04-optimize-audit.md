@@ -426,3 +426,35 @@ the findings below were independently rechecked before being added here.
 Second-pass negative sweep: zero `TODO`, `FIXME`, `HACK`, `XXX`, `print`,
 `debugPrint`, `dump`, or `NSLog` occurrences in `Sources`, `Tests`, `Scripts`,
 `Package.swift`, and `Resources` — Verificado with `rg`.
+
+## Property and type closure pass
+
+Audited commit: `chore/optimize-2026-09-04@d987597`. The prior zero-caller
+scan covered functions; this read-only closure pass checked stored/computed
+properties and type declarations as a separate category.
+
+- [dead field] `Sources/Granipa/System/BatteryIO.swift:8,13,44-45,52`
+  Qué: `BatterySnapshot.isPluggedIn` is declared and initialized but never read;
+  its two IOPS parsing locals exist only to initialize that field.
+  Acción: eliminar the field, both memberwise arguments, and both parsing locals.
+  Impacto: bajo (one less dictionary lookup and smaller snapshot state every 5 s).
+  Riesgo: 🟢 sin comportamiento observable.
+  Evidencia: `rg -n -w 'isPluggedIn' Sources Tests Resources Package.swift`
+  returns only declaration/initialization, while searches for `.isPluggedIn`,
+  strings, reflection, selectors, and `Codable` return zero readers — Verificado.
+
+- [dead field] `Sources/Granipa/LLM/LLMRunner.swift:44-46,138-148`
+  Qué: `LLMRunner.Output.stderr` is initialized but never read; the local
+  `stderr` must remain to drain the pipe and construct non-zero-exit errors.
+  Acción: eliminar only the output field and constructor argument.
+  Impacto: bajo (smaller result contract; pipe/error behavior unchanged).
+  Riesgo: 🟢 sin comportamiento observable.
+  Evidencia: `rg -n 'LLMRunner\.run|\.stdout\b|\.stderr\b|Output\(' Sources Tests`
+  finds all output consumers reading only `.stdout`; string/selector/reflection
+  searches find no dynamic field use — Verificado.
+
+Closure sweep result: 405 function names and 228 type declarations were
+checked. After excluding three `NSApplicationDelegate` callbacks and synthesized
+`CodingKeys`, no further zero-caller function, property, or type was verified as
+safe to remove. This is a lexical/caller audit, not a claim that profiling can
+find no further runtime optimization.
