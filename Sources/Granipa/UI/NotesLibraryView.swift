@@ -2,14 +2,14 @@ import SwiftUI
 
 struct NotesLibraryView: View {
     @Environment(AppState.self) private var app
-
-    private var shown: [Meeting] {
-        MeetingLibrary.matching(
-            MeetingLibrary.notes(in: app.meetings), query: app.searchQuery)
-    }
+    @State private var searchResults: [Meeting] = []
 
     private var isSearching: Bool {
         !app.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var shown: [Meeting] {
+        isSearching ? searchResults : MeetingLibrary.notes(in: app.meetings)
     }
 
     var body: some View {
@@ -58,6 +58,20 @@ struct NotesLibraryView: View {
             .padding(.top, 24)
             .padding(.bottom, 32)
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .task(id: app.searchQuery) {
+            let query = app.searchQuery
+            guard isSearching, let db = app.database else {
+                searchResults = []
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(200))
+            guard !Task.isCancelled else { return }
+            let results = await Task.detached(priority: .userInitiated) {
+                MeetingLibrary.searchNotes(query: query, database: db)
+            }.value
+            guard !Task.isCancelled else { return }
+            searchResults = results
         }
     }
 }

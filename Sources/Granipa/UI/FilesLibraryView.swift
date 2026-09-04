@@ -3,14 +3,14 @@ import SwiftUI
 struct FilesLibraryView: View {
     @Environment(AppState.self) private var app
     @State private var fileStatuses: [String: RecordingFileStatus] = [:]
-
-    private var shown: [Meeting] {
-        MeetingLibrary.matching(
-            MeetingLibrary.recordings(in: app.meetings), query: app.searchQuery)
-    }
+    @State private var searchResults: [Meeting] = []
 
     private var isSearching: Bool {
         !app.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var shown: [Meeting] {
+        isSearching ? searchResults : MeetingLibrary.recordings(in: app.meetings)
     }
 
     private var recordingPaths: [String] {
@@ -86,6 +86,20 @@ struct FilesLibraryView: View {
             }.value
             guard !Task.isCancelled else { return }
             fileStatuses = resolved
+        }
+        .task(id: app.searchQuery) {
+            let query = app.searchQuery
+            guard isSearching, let db = app.database else {
+                searchResults = []
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(200))
+            guard !Task.isCancelled else { return }
+            let results = await Task.detached(priority: .userInitiated) {
+                MeetingLibrary.searchRecordings(query: query, database: db)
+            }.value
+            guard !Task.isCancelled else { return }
+            searchResults = results
         }
     }
 }

@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import GRDB
 import Testing
 
 @testable import Granipa
@@ -85,13 +86,34 @@ import Testing
         #expect(MeetingLibrary.folderCounts(from: [a, b, c, loose]) == ["eng": 2, "prod": 1])
     }
 
-    @Test func sidebarSearchFiltersTitleAndNotes() {
-        var alpha = Meeting.new(title: "Standup", language: "auto")
-        alpha.notesMarkdown = "ship notes"
-        let beta = Meeting.new(title: "Retro", language: "auto")
-        let hits = MeetingLibrary.matching([alpha, beta], query: "SHIP")
-        #expect(hits.map(\.title) == ["Standup"])
-        #expect(MeetingLibrary.matching([alpha, beta], query: "  ").map(\.title) == ["Standup", "Retro"])
+    @Test func notesAndFilesSearchUseDatabaseSemanticsIncludingTranscript() throws {
+        let db = try AppDatabase(writer: DatabaseQueue())
+        var noted = Meeting.new(title: "Untitled note", language: "en-US")
+        noted.notesMarkdown = "ship the shell"
+        try db.save(noted)
+        try db.save(
+            TranscriptSegment.new(
+                meetingID: noted.id, channel: .system, speaker: "Them",
+                text: "alpha-unique-token", startSeconds: 0, endSeconds: 2, isFinal: true))
+
+        var recordingOnly = Meeting.new(title: "Recorded", language: "en-US")
+        recordingOnly.audioMicPath = "/tmp/mic.m4a"
+        try db.save(recordingOnly)
+        try db.save(
+            TranscriptSegment.new(
+                meetingID: recordingOnly.id, channel: .mic, speaker: "Me",
+                text: "alpha-unique-token", startSeconds: 0, endSeconds: 2, isFinal: true))
+
+        var titled = Meeting.new(title: "Standup", language: "auto")
+        titled.notesMarkdown = "ship notes"
+        try db.save(titled)
+
+        #expect(MeetingLibrary.searchNotes(query: "alpha-unique-token", database: db).map(\.id) == [noted.id])
+        #expect(
+            MeetingLibrary.searchRecordings(query: "alpha-unique-token", database: db).map(\.id)
+                == [recordingOnly.id])
+        #expect(MeetingLibrary.searchNotes(query: "SHIP notes", database: db).map(\.title) == ["Standup"])
+        #expect(MeetingLibrary.searchNotes(query: "  ", database: db).isEmpty)
     }
 
     @Test func selectedMeetingHasNoInspectorOccupant() {

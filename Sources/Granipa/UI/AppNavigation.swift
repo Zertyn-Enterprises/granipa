@@ -113,13 +113,16 @@ enum MeetingLibrary {
         return counts
     }
 
-    static func matching(_ meetings: [Meeting], query: String) -> [Meeting] {
+    static func searchNotes(query: String, database: AppDatabase) -> [Meeting] {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !needle.isEmpty else { return meetings }
-        return meetings.filter {
-            $0.title.localizedCaseInsensitiveContains(needle)
-                || $0.notesMarkdown.localizedCaseInsensitiveContains(needle)
-        }
+        guard !needle.isEmpty else { return [] }
+        return notes(in: (try? database.searchMeetings(query: needle)) ?? [])
+    }
+
+    static func searchRecordings(query: String, database: AppDatabase) -> [Meeting] {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else { return [] }
+        return recordings(in: (try? database.searchMeetings(query: needle)) ?? [])
     }
 
     static func dayGroups(from meetings: [Meeting]) -> [(day: Date, meetings: [Meeting])] {
