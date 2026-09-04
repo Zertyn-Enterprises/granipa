@@ -4,7 +4,7 @@ import Testing
 @testable import Granipa
 
 @Suite struct ThemeTests {
-    @Test func motionDurationsMatchTheContract() {
+    @Test @MainActor func motionDurationsMatchTheContract() {
         #expect(Theme.motionFast == 0.08)
         #expect(Theme.motionNormal == 0.15)
         #expect(PanelMotion.showDuration == 0.34)

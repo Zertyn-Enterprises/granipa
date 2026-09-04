@@ -3,7 +3,7 @@ import QuartzCore
 
 /// Shared open/close for every floating panel (dictation, clipboard, history,
 /// captions, toast). Superwhisper/Raycast-style: fade + 40pt rise, ease-out expo.
-enum PanelMotion {
+@MainActor enum PanelMotion {
     static let showDuration: TimeInterval = 0.34
     static let hideDuration: TimeInterval = 0.20
     static let rise: CGFloat = 40
@@ -43,7 +43,9 @@ enum PanelMotion {
         }
     }
 
-    static func disappear(_ panel: NSPanel, then: (() -> Void)? = nil) {
+    static func disappear(
+        _ panel: NSPanel, then: (@MainActor @Sendable () -> Void)? = nil
+    ) {
         if reduceMotion {
             panel.alphaValue = 0
             panel.orderOut(nil)
@@ -59,8 +61,10 @@ enum PanelMotion {
                 panel.animator().setFrameOrigin(dest)
             },
             completionHandler: {
-                panel.orderOut(nil)
-                then?()
+                Task { @MainActor in
+                    panel.orderOut(nil)
+                    then?()
+                }
             })
     }
 }
