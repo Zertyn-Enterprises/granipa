@@ -21,8 +21,8 @@ import Testing
         let helper = try String(
             contentsOf: repo.appendingPathComponent("Sources/BatteryHelper/main.swift"),
             encoding: .utf8)
-        #expect(helper.contains(#"identifier \"com.zertyn.granipa\""#))
-        #expect(helper.contains(BatteryHelperSecurity.teamIdentifier))
+        let parsed = try #require(helperClientRequirement(from: helper))
+        #expect(parsed == BatteryHelperSecurity.clientRequirement)
     }
 
     @Test func bundledDaemonRunsOnlyOnDemand() throws {
@@ -106,4 +106,48 @@ import Testing
         result.resolve(false)
         #expect(result.wait(timeout: 0))
     }
+}
+
+/// Concatenated string literals from `private let clientRequirement` in the
+/// helper source. Does not import or expose helper internals.
+private func helperClientRequirement(from source: String) -> String? {
+    guard let start = source.range(of: "private let clientRequirement") else {
+        return nil
+    }
+    let rest = source[start.upperBound...]
+    guard let end = rest.range(of: "\nprivate let ") else { return nil }
+    return concatenatedSwiftStringLiterals(in: String(rest[..<end.lowerBound]))
+}
+
+private func concatenatedSwiftStringLiterals(in assignment: String) -> String? {
+    var result = ""
+    var i = assignment.startIndex
+    var found = false
+    while i < assignment.endIndex {
+        if assignment[i] == "\"" {
+            i = assignment.index(after: i)
+            var lit = ""
+            while i < assignment.endIndex {
+                let c = assignment[i]
+                if c == "\\" {
+                    let next = assignment.index(after: i)
+                    guard next < assignment.endIndex else { return nil }
+                    lit.append(assignment[next])
+                    i = assignment.index(after: next)
+                    continue
+                }
+                if c == "\"" {
+                    i = assignment.index(after: i)
+                    found = true
+                    break
+                }
+                lit.append(c)
+                i = assignment.index(after: i)
+            }
+            result.append(lit)
+        } else {
+            i = assignment.index(after: i)
+        }
+    }
+    return found ? result : nil
 }
