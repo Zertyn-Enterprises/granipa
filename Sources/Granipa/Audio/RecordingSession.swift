@@ -3,9 +3,13 @@ import CoreAudio
 import Synchronization
 import os
 
-// Mutable state is queue-confined: mic* fields are touched only from the mic tap
-// callback thread, system* fields only from the tap IO queue. Capture lifecycle
-// operations are serialized on controlQueue.
+// File-writing state is queue-confined: micFile, micFramesWritten,
+// micConverter and micPadSeconds (mic), systemFile and systemFramesWritten
+// (system) are touched only on the writer queue. The recorders themselves
+// keep their pre-existing, not fully queue-confined ownership: started from
+// the caller's thread, restarted and stopped on controlQueue, and never
+// touched from their tap callback threads. Capture lifecycle operations are
+// serialized on controlQueue.
 final class RecordingSession: @unchecked Sendable {
     private static let log = Logger(subsystem: "com.zertyn.granipa", category: "session")
     let meetingID: String
@@ -30,6 +34,10 @@ final class RecordingSession: @unchecked Sendable {
     private let controlState = Mutex(ControlState())
 
     private var micFile: AVAudioFile?
+    private var micFramesWritten: AVAudioFramePosition = 0
+    // Writer-queue-confined: converts buffers whose format differs from the
+    // mic file after the input device changed mid-meeting.
+    private var micConverter = BufferConverter()
     private var micPadSeconds: Double = 0
     private var systemFile: AVAudioFile?
     private var systemFramesWritten: AVAudioFramePosition = 0
@@ -126,12 +134,26 @@ final class RecordingSession: @unchecked Sendable {
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain)
         let inputBlock: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            self?.restartMic(recreateFile: true)
+            self?.restartMicForDefaultInputChange()
         }
         inputDeviceChangeListener = inputBlock
         AudioObjectAddPropertyListenerBlock(
             AudioObjectID(kAudioObjectSystemObject), &inputAddress, DispatchQueue.main, inputBlock)
     }
+
+    // A default-input switch must keep appending to the same mic file:
+    // recreating it replaced everything recorded so far with silence.
+    private func restartMicForDefaultInputChange() {
+        restartMic(recreateFile: false)
+    }
+
+#if DEBUG
+    // Test seam: injects a mic chunk into the writer path without audio
+    // hardware. startSeconds is meeting-relative, like handleMic's clock.
+    func ingestMicBufferForTesting(_ buffer: AVAudioPCMBuffer, startSeconds: Double?) {
+        writer.sync { writeMic(buffer, startSeconds: startSeconds) }
+    }
+#endif
 
     private func removeDeviceChangeListener() {
         if let block = deviceChangeListener {
@@ -217,6 +239,7 @@ final class RecordingSession: @unchecked Sendable {
                 AVAudioTime.seconds(forHostTime: mach_absolute_time()) - sessionStartHostSeconds
             writer.async { [weak self] in
                 self?.micFile = nil
+                self?.micFramesWritten = 0
                 self?.micPadSeconds = pad
             }
         }
@@ -266,20 +289,33 @@ final class RecordingSession: @unchecked Sendable {
             micContinuation.yield(chunk)
         }
         writer.async { [weak self] in
-            self?.writeMic(chunk.buffer)
+            self?.writeMic(chunk.buffer, startSeconds: chunk.startSeconds)
         }
     }
 
-    private func appendSilence(to file: AVAudioFile, seconds: Double, format: AVAudioFormat) {
+    // Only frames that were actually written are counted (and reported), so a
+    // failed write leaves the gap owed and the next buffer pads it again.
+    @discardableResult
+    private func appendSilence(
+        to file: AVAudioFile, seconds: Double, format: AVAudioFormat
+    ) -> AVAudioFramePosition {
         var remaining = AVAudioFramePosition((seconds * format.sampleRate).rounded())
+        var appended: AVAudioFramePosition = 0
         while remaining > 0 {
             let chunkFrames = AVAudioFrameCount(min(remaining, 16_384))
             guard let silence = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunkFrames)
             else { break }
             silence.frameLength = chunkFrames
-            try? file.write(from: silence)
+            do {
+                try file.write(from: silence)
+            } catch {
+                Self.log.error("mic silence write failed: \(String(describing: error))")
+                break
+            }
             remaining -= AVAudioFramePosition(chunkFrames)
+            appended += AVAudioFramePosition(chunkFrames)
         }
+        return appended
     }
 
     private func handleSystem(_ buffer: AVAudioPCMBuffer, timestamp: AudioTimeStamp) {
@@ -310,15 +346,49 @@ final class RecordingSession: @unchecked Sendable {
         }
     }
 
-    private func writeMic(_ buffer: AVAudioPCMBuffer) {
+    // The mic file keeps the format of its first buffer for the whole meeting;
+    // after the input device switches mid-meeting, later buffers may arrive at
+    // a different sample rate or channel count and are converted into the
+    // file's processing format instead of being dropped. Gaps (restart,
+    // stalled route) are padded with silence so file time == meeting time,
+    // mirroring writeSystem.
+    private func writeMic(_ buffer: AVAudioPCMBuffer, startSeconds: Double?) {
         if micFile == nil {
             micFile = Self.openAudioFile(url: micURL, format: buffer.format, bitRate: 96_000)
             if let file = micFile, micPadSeconds > 0 {
-                appendSilence(to: file, seconds: micPadSeconds, format: buffer.format)
+                micFramesWritten += appendSilence(
+                    to: file, seconds: micPadSeconds, format: buffer.format)
             }
             micPadSeconds = 0
         }
-        try? micFile?.write(from: buffer)
+        guard let file = micFile else { return }
+        let fileFormat = file.processingFormat
+        if let start = startSeconds, start > 0 {
+            let expectedFrame = AVAudioFramePosition((start * fileFormat.sampleRate).rounded())
+            let gap = expectedFrame - micFramesWritten
+            if gap > AVAudioFramePosition(fileFormat.sampleRate * 0.25) {
+                micFramesWritten += appendSilence(
+                    to: file, seconds: Double(gap) / fileFormat.sampleRate, format: fileFormat)
+            }
+        }
+        let toWrite: AVAudioPCMBuffer
+        if buffer.format == fileFormat {
+            toWrite = buffer
+        } else {
+            do {
+                toWrite = try micConverter.convert(buffer, to: fileFormat)
+            } catch {
+                Self.log.error(
+                    "mic buffer dropped: conversion \(buffer.format.sampleRate)Hz/\(buffer.format.channelCount)ch -> \(fileFormat.sampleRate)Hz/\(fileFormat.channelCount)ch failed: \(String(describing: error))")
+                return
+            }
+        }
+        do {
+            try file.write(from: toWrite)
+            micFramesWritten += AVAudioFramePosition(toWrite.frameLength)
+        } catch {
+            Self.log.error("mic write failed: \(String(describing: error))")
+        }
     }
 
     private func writeSystem(_ buffer: AVAudioPCMBuffer, startSeconds: Double?) {
