@@ -22,7 +22,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct GranipaApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var appState = AppState()
+    @State private var appState: AppState
+
+    init() {
+        #if DEBUG
+        switch V2FixtureRuntime.resolve(
+            arguments: CommandLine.arguments,
+            environment: ProcessInfo.processInfo.environment)
+        {
+        case .off:
+            appState = AppState()
+        case .run(let fixture):
+            appState = AppState(fixture: fixture)
+        case .refuse(let message):
+            // Fail closed before any production database is opened.
+            FileHandle.standardError.write(Data(("ERROR: \(message)\n").utf8))
+            exit(1)
+        }
+        #else
+        appState = AppState()
+        #endif
+    }
 
     var body: some Scene {
         WindowGroup("Grañipa", id: "main") {

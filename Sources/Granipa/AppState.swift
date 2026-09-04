@@ -68,6 +68,29 @@ final class AppState {
         _ = UpdaterManager.shared
     }
 
+    #if DEBUG
+    /// `--v2-fixture` launch: the runtime gate has already verified
+    /// CFFIXED_USER_HOME points into a throwaway temp home, so AppDatabase and
+    /// AppPaths land there naturally. Seeds deterministic rows and starts no
+    /// background service, permission probe, or network loop.
+    init(fixture: V2Fixture) {
+        do {
+            let db = try AppDatabase.open()
+            database = db
+            try V2FixtureSeeder.seed(
+                fixture, into: db,
+                audioDirectory: { try AppPaths.audioDirectory(meetingID: $0) })
+            meetings = try db.fetchMeetings()
+            templates = try db.fetchTemplates()
+            webhooks = try db.fetchWebhooks()
+            folders = try db.fetchFolders()
+        } catch {
+            loadError = error.localizedDescription
+        }
+        V2FixtureSeeder.markOnboardingComplete(in: UserDefaults.standard)
+    }
+    #endif
+
     private func setupProductivity() {
         if let db = database {
             let monitor = ClipboardMonitor(database: db)
