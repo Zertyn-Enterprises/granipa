@@ -97,6 +97,7 @@ private struct GeneralSettings: View {
     @Environment(AppState.self) private var app
     @AppStorage("defaultLocale") private var defaultLocale = "auto"
     @AppStorage("echoCancellation") private var echoCancellation = true
+    @AppStorage("liveMeetingASR") private var liveMeetingASR = false
     @AppStorage("meetingCaptionsEnabled") private var meetingCaptions = true
     @AppStorage("meetingSystemEngine") private var meetingSystemEngine = "local"
     @AppStorage("meetingDetectionEnabled") private var meetingDetection = true
@@ -152,19 +153,25 @@ private struct GeneralSettings: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            Toggle("Live captions during meetings", isOn: $meetingCaptions)
-            Text("Floating overlay of what's being said. Stays on this Mac.")
+            Toggle("Live transcription during meetings", isOn: $liveMeetingASR)
+            Text("Streams speech while you record. Off by default — meetings still transcribe after you stop.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            Toggle("Live captions during meetings", isOn: $meetingCaptions)
+                .disabled(!liveMeetingASR)
+            Text(
+                liveMeetingASR
+                    ? "Floating overlay of what's being said. Stays on this Mac."
+                    : "Needs live transcription. The overlay has nothing to show until then."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
             Picker("Them (computer audio)", selection: $meetingSystemEngine) {
                 Text("On-device (Apple)").tag("local")
                 Text("Muse (computer audio only)").tag("muse")
             }
-            Text(
-                meetingSystemEngine == "muse"
-                    ? "Only the other participants' audio is sent to Meta. Your microphone stays on this Mac. Needs a Muse API key in Settings → Dictation."
-                    : "Both channels transcribe on this Mac."
-            )
+            .disabled(!liveMeetingASR)
+            Text(computerAudioHelp)
             .font(.caption)
             .foregroundStyle(.secondary)
             Toggle("Detect meetings automatically", isOn: $meetingDetection)
@@ -205,6 +212,15 @@ private struct GeneralSettings: View {
                 languageName($0.identifier(.bcp47)) < languageName($1.identifier(.bcp47))
             }
         }
+    }
+
+    private var computerAudioHelp: String {
+        if !liveMeetingASR {
+            return "Computer-audio engine applies only while live transcription is on. After Stop, both channels transcribe on this Mac."
+        }
+        return meetingSystemEngine == "muse"
+            ? "Only the other participants' audio is sent to Meta. Your microphone stays on this Mac. Needs a Muse API key in Settings → Dictation."
+            : "Both channels transcribe on this Mac."
     }
 
     // One entry per language; regional variants are an implementation detail.

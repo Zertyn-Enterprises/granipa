@@ -32,14 +32,16 @@ struct MenuBarView: View {
                 Button("Show Recording HUD") {
                     openWindow(id: "recording-hud")
                 }
-                if CaptionsOverlayController.shared.dismissedThisRecording {
-                    Button("Show Captions") {
-                        CaptionsOverlayController.shared.resetDismissed()
-                        CaptionsOverlayController.shared.setVisible(true)
-                    }
-                } else {
-                    Button("Hide Captions") {
-                        CaptionsOverlayController.shared.hideTemporarily()
+                if MeetingASRPolicy.usesLiveCaptions() {
+                    if CaptionsOverlayController.shared.dismissedThisRecording {
+                        Button("Show Captions") {
+                            CaptionsOverlayController.shared.resetDismissed()
+                            CaptionsOverlayController.shared.setVisible(true)
+                        }
+                    } else {
+                        Button("Hide Captions") {
+                            CaptionsOverlayController.shared.hideTemporarily()
+                        }
                     }
                 }
             }

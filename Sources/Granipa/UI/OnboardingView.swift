@@ -41,7 +41,7 @@ struct OnboardingView: View {
                 .foregroundStyle(Theme.textPrimary)
             VStack(spacing: 10) {
                 bullet("waveform", "Records meetings without a bot — your mic and the other participants, straight from system audio.")
-                bullet("cpu", "Transcribes live on this Mac by default. Audio never leaves unless you opt into a cloud engine.")
+                bullet("cpu", "Records on this Mac and transcribes after you stop. Live transcription is off until you turn it on in Settings. Audio never leaves unless you opt into a cloud engine.")
                 bullet("mic", "Hold \(DictationController.shortcutLabel) to dictate into any app — same feel as Superwhisper.")
                 bullet("wand.and.stars", "Turns your rough notes into polished reports using the AI CLI you already pay for.")
                 bullet("lock", "Local by default: no accounts, no telemetry. Cloud engines are off until you turn them on.")
@@ -132,7 +132,7 @@ struct OnboardingView: View {
                 .padding(.top, 4)
             VStack(spacing: 6) {
                 shortcutRow("\(DictationController.shortcutLabel) hold", "Dictate into the front app")
-                shortcutRow("During a call", "Live captions overlay (Settings → General)")
+                shortcutRow("During a call", "Live captions if live transcription is on (Settings → General)")
                 shortcutRow("⌥⇧V", "Clipboard history")
                 shortcutRow("⌥⇧T", "Capture screen text (OCR)")
                 shortcutRow("⌥⇧E", "Emoji & Symbols")

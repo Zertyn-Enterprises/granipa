@@ -15,4 +15,13 @@ enum MeetingASRPolicy {
     ) -> Bool {
         flag ?? false
     }
+
+    /// Captions overlay is empty without live ASR, and setVisible no-ops when
+    /// the captions pref is off. Captions default ON; live ASR default OFF.
+    static func usesLiveCaptions(
+        live: Bool? = UserDefaults.standard.object(forKey: "liveMeetingASR") as? Bool,
+        captions: Bool? = UserDefaults.standard.object(forKey: "meetingCaptionsEnabled") as? Bool
+    ) -> Bool {
+        usesLiveASR(flag: live) && (captions ?? true)
+    }
 }
