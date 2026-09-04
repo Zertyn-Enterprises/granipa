@@ -25,7 +25,9 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate {
 
     func show() {
         guard let appState else { return }
-        let content = ClipboardHistoryView(onClose: { [weak self] in self?.hide() })
+        let content = ClipboardHistoryView(onClose: { [weak self] completion in
+            self?.hide(then: completion)
+        })
             .environment(appState)
         let host = NSHostingView(rootView: AnyView(content))
 
@@ -61,9 +63,12 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate {
         }
     }
 
-    func hide() {
-        guard let panel else { return }
-        PanelMotion.disappear(panel)
+    func hide(then completion: (@MainActor @Sendable () -> Void)? = nil) {
+        guard let panel else {
+            completion?()
+            return
+        }
+        PanelMotion.disappear(panel, then: completion)
     }
 
     nonisolated func windowDidResignKey(_ notification: Notification) {

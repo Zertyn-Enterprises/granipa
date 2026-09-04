@@ -3,7 +3,7 @@ import SwiftUI
 
 struct ClipboardHistoryView: View {
     @Environment(AppState.self) private var app
-    let onClose: () -> Void
+    let onClose: (@escaping @MainActor @Sendable () -> Void) -> Void
 
     @State private var items: [ClipboardItem] = []
     @State private var groups: [(day: Date, items: [ClipboardItem])] = []
@@ -49,7 +49,7 @@ struct ClipboardHistoryView: View {
                 frontmost?.bundleIdentifier == Bundle.main.bundleIdentifier
                 ? nil : frontmost?.localizedName
         }
-        .onExitCommand { onClose() }
+        .onExitCommand { onClose({}) }
     }
 
     private var header: some View {
@@ -292,13 +292,9 @@ struct ClipboardHistoryView: View {
         case .text, .link:
             pasteboard.setString(item.textContent ?? "", forType: .string)
         }
-        onClose()
-
         if autoPasteEnabled {
             let appName = targetApp
-            Task { @MainActor in
-                // Give the panel a beat to order out so key events land in the target app.
-                try? await Task.sleep(for: .milliseconds(140))
+            onClose {
                 if PasteService.pasteToFrontmostApp() {
                     ToastController.shared.show(appName.map { "Pasted to \($0)" } ?? "Pasted")
                 } else {
@@ -307,7 +303,9 @@ struct ClipboardHistoryView: View {
                 }
             }
         } else {
-            ToastController.shared.show("Copied to clipboard")
+            onClose {
+                ToastController.shared.show("Copied to clipboard")
+            }
         }
     }
 
