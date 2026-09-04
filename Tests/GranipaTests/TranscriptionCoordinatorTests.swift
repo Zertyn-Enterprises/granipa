@@ -111,7 +111,7 @@ import Testing
 
     @Test @MainActor func retryRequiresFailedPhase() async throws {
         let db = try AppDatabase(writer: DatabaseQueue())
-        var meeting = Meeting.new(title: "T", language: "en-US")
+        let meeting = Meeting.new(title: "T", language: "en-US")
         try db.save(meeting)
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("coordinator-tests-\(UUID().uuidString)", isDirectory: true)
