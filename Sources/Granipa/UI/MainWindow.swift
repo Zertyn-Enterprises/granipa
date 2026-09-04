@@ -34,13 +34,27 @@ struct MainWindow: View {
                                 : .move(edge: .top).combined(with: .opacity))
                 }
                 Group {
-                    if app.showsDictationHistory {
+                    if app.sidebarDestination == .dictation {
                         DictationHistoryView()
                     } else if let meeting = app.selectedMeeting {
-                        MeetingDetailView(meeting: meeting)
-                            .id(meeting.id)
+                        MeetingDetailView(
+                            meeting: meeting,
+                            preferNotes: app.sidebarDestination == .notes
+                        )
+                        .id(meeting.id)
                     } else {
-                        HomeView()
+                        switch app.sidebarDestination {
+                        case .home:
+                            HomeView(mode: app.selectedFolderID == nil ? .inbox : .library)
+                        case .meetings:
+                            HomeView(mode: .library)
+                        case .notes:
+                            NotesLibraryView()
+                        case .files:
+                            FilesLibraryView()
+                        case .dictation:
+                            DictationHistoryView()
+                        }
                     }
                 }
             }

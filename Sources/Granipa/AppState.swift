@@ -28,7 +28,7 @@ final class AppState {
     var selectedFolderID: String?
     var searchQuery = ""
     var selectedMeetingID: String?
-    var showsDictationHistory = false
+    var sidebarDestination: SidebarDestination = .home
     var loadError: String?
 
     var selectedMeeting: Meeting? {
@@ -551,15 +551,27 @@ final class AppState {
         meeting.folderID.flatMap { id in folders.first { $0.id == id } }
     }
 
+    func reveal(_ destination: SidebarDestination) {
+        sidebarDestination = destination
+        selectedFolderID = nil
+        selectedMeetingID = nil
+        searchQuery = ""
+    }
+
+    func revealFolder(id: String) {
+        sidebarDestination = .meetings
+        selectedFolderID = id
+        selectedMeetingID = nil
+        searchQuery = ""
+    }
+
     func createFolder(name: String, team: String?) {
         guard let db = database, !name.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         do {
             let folder = Folder.new(name: name, team: team)
             try db.save(folder)
             folders = try db.fetchFolders()
-            selectedFolderID = folder.id
-            selectedMeetingID = nil
-            showsDictationHistory = false
+            revealFolder(id: folder.id)
         } catch {
             loadError = error.localizedDescription
         }

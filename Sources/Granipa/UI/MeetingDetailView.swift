@@ -19,10 +19,12 @@ struct MeetingDetailView: View {
         case transcript = "Transcript"
     }
 
-    init(meeting: Meeting) {
+    init(meeting: Meeting, preferNotes: Bool = false) {
         _meeting = State(initialValue: meeting)
-        // A recorded meeting centers the transcript; a quick note centers the editor.
-        if meeting.audioMicPath != nil || meeting.status == .recording {
+        if preferNotes {
+            _tab = State(initialValue: .notes)
+        } else if meeting.audioMicPath != nil || meeting.status == .recording {
+            // A recorded meeting centers the transcript; a quick note centers the editor.
             _tab = State(initialValue: .transcript)
         }
     }
@@ -75,6 +77,8 @@ struct MeetingDetailView: View {
                 }
                 .buttonStyle(.plain)
                 .hoverHighlight(cornerRadius: 6)
+                .accessibilityLabel(
+                    app.sidebarDestination == .home ? "Back to Home" : "Back")
 
                 Text(meeting.createdAt, format: .dateTime.weekday(.wide).month().day().hour().minute())
                     .font(.system(size: 12))

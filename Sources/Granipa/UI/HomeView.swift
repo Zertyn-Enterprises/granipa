@@ -1,7 +1,13 @@
 import SwiftUI
 
 struct HomeView: View {
+    enum Mode {
+        case inbox
+        case library
+    }
+
     @Environment(AppState.self) private var app
+    var mode: Mode = .inbox
     @State private var searchResults: [Meeting] = []
     @State private var searchDebounce: Task<Void, Never>?
 
@@ -20,7 +26,10 @@ struct HomeView: View {
     private var headerTitle: String {
         if isSearching { return "Search" }
         if let folder = activeFolder { return folder.name }
-        return nextEvent != nil ? "Coming up" : "Notes"
+        switch mode {
+        case .inbox: return nextEvent != nil ? "Coming up" : "Notes"
+        case .library: return "Meetings"
+        }
     }
 
     private var nextEvent: CalendarMeeting? {
@@ -28,50 +37,17 @@ struct HomeView: View {
     }
 
     private var dayGroups: [(day: Date, meetings: [Meeting])] {
-        let grouped = Dictionary(grouping: shownMeetings) {
-            Calendar.current.startOfDay(for: $0.createdAt)
-        }
-        return grouped
-            .sorted { $0.key > $1.key }
-            .map { (day: $0.key, meetings: $0.value.sorted { $0.createdAt > $1.createdAt }) }
+        MeetingLibrary.dayGroups(from: shownMeetings)
     }
+
+    private var usesInboxLayout: Bool { mode == .inbox && activeFolder == nil }
 
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 24) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(headerTitle)
-                        .font(Theme.titleFont)
-                        .foregroundStyle(Theme.textPrimary)
-                    Spacer()
-                    Button {
-                        app.createMeeting()
-                    } label: {
-                        Label("Quick note", systemImage: "plus")
-                            .font(.system(size: 14, weight: .medium))
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-                    .tint(.white)
-                    .accessibilityLabel("Quick note")
-                    Button {
-                        app.startRecording()
-                    } label: {
-                        Label(
-                            app.recorder.isBusy ? "Recording…" : "Record",
-                            systemImage: "record.circle"
-                        )
-                        .font(.system(size: 15, weight: .semibold))
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .tint(Theme.accent)
-                    .recordGlow()
-                    .disabled(app.recorder.isBusy)
-                    .accessibilityLabel("Record")
-                }
+                DestinationHeader(title: headerTitle)
 
-                if !isSearching, activeFolder == nil, let event = nextEvent {
+                if usesInboxLayout, !isSearching, let event = nextEvent {
                     HeroEventCard(event: event)
                 }
 
@@ -94,10 +70,10 @@ struct HomeView: View {
                     }
                 }
             }
-            .padding(.horizontal, 32)
+            .padding(.horizontal, usesInboxLayout ? 32 : 28)
             .padding(.top, 24)
             .padding(.bottom, 32)
-            .frame(maxWidth: 780, alignment: .leading)
+            .frame(maxWidth: usesInboxLayout ? 780 : .infinity, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
         .onChange(of: app.searchQuery) {
@@ -225,7 +201,6 @@ private struct HomeMeetingRow: View {
 
     var body: some View {
         Button {
-            app.showsDictationHistory = false
             app.selectedMeetingID = meeting.id
         } label: {
             HStack(spacing: 14) {

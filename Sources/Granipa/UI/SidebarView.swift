@@ -2,14 +2,21 @@ import SwiftUI
 
 struct SidebarView: View {
     @Environment(AppState.self) private var app
+    @FocusState private var searchFocused: Bool
     @State private var showNewFolder = false
     @State private var newFolderName = ""
     @State private var newFolderTeam = ""
     @State private var renamingFolder: Folder?
     @State private var renameText = ""
 
-    private var isHomeActive: Bool {
-        !app.showsDictationHistory && app.selectedFolderID == nil
+    private var highlight: SidebarHighlight {
+        AppNavigation.highlight(
+            destination: app.sidebarDestination,
+            selectedFolderID: app.selectedFolderID)
+    }
+
+    private var folderCounts: [String: Int] {
+        MeetingLibrary.folderCounts(from: app.meetings)
     }
 
     var body: some View {
@@ -20,26 +27,19 @@ struct SidebarView: View {
             searchField
                 .padding(.bottom, 10)
 
-            SideItem(title: "Home", icon: "house.fill", isActive: isHomeActive) {
-                app.selectedMeetingID = nil
-                app.selectedFolderID = nil
-                app.searchQuery = ""
-                app.showsDictationHistory = false
-            }
-
-            SideItem(
-                title: "Dictation",
-                icon: "mic.fill",
-                isActive: app.showsDictationHistory
-            ) {
-                app.selectedMeetingID = nil
-                app.selectedFolderID = nil
-                app.searchQuery = ""
-                app.showsDictationHistory = true
+            ForEach(SidebarDestination.allCases, id: \.self) { destination in
+                SideItem(
+                    title: destination.title,
+                    icon: destination.icon,
+                    isActive: highlight == .destination(destination)
+                ) {
+                    app.reveal(destination)
+                }
+                .accessibilityLabel(destination.title)
             }
 
             if !app.folders.isEmpty {
-                Text("SPACES")
+                Text("COLLECTIONS")
                     .font(.system(size: 10.5, weight: .semibold))
                     .foregroundStyle(Theme.textTertiary)
                     .tracking(0.8)
@@ -66,15 +66,14 @@ struct SidebarView: View {
                             SideItem(
                                 title: folder.name,
                                 icon: "folder",
-                                isActive: app.selectedFolderID == folder.id,
+                                isActive: highlight == .folder(folder.id),
                                 indented: group.team != nil,
-                                quiet: true
+                                quiet: true,
+                                accessory: "\(folderCounts[folder.id, default: 0])"
                             ) {
-                                app.selectedFolderID = folder.id
-                                app.selectedMeetingID = nil
-                                app.showsDictationHistory = false
-                                app.searchQuery = ""
+                                app.revealFolder(id: folder.id)
                             }
+                            .accessibilityLabel(folder.name)
                             .contextMenu {
                                 Button("Rename") {
                                     renameText = folder.name
@@ -89,6 +88,7 @@ struct SidebarView: View {
                     SideItem(title: "Add folder", icon: "folder.badge.plus", isActive: false, dimmed: true) {
                         showNewFolder = true
                     }
+                    .accessibilityLabel("Add folder")
                     .padding(.top, 4)
                 }
             }
@@ -118,6 +118,7 @@ struct SidebarView: View {
             }
             .buttonStyle(.plain)
             .hoverHighlight()
+            .accessibilityLabel("Settings")
         }
         .padding(.horizontal, 10)
         .padding(.bottom, 10)
@@ -155,6 +156,8 @@ struct SidebarView: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.textPrimary)
+                .focused($searchFocused)
+                .accessibilityLabel("Search Grañipa")
             if !app.searchQuery.isEmpty {
                 Button {
                     app.searchQuery = ""
@@ -164,6 +167,12 @@ struct SidebarView: View {
                         .foregroundStyle(Theme.textTertiary)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            } else if !searchFocused {
+                Text("⌘K")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.textTertiary)
+                    .accessibilityHidden(true)
             }
         }
         .padding(.vertical, 8)
@@ -172,6 +181,13 @@ struct SidebarView: View {
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(Theme.border, lineWidth: 1))
+        .background {
+            Button("Search Grañipa") { searchFocused = true }
+                .keyboardShortcut("k", modifiers: .command)
+                .frame(width: 0, height: 0)
+                .opacity(0)
+                .accessibilityHidden(true)
+        }
     }
 
     private var groupedFolders: [(team: String?, folders: [Folder])] {
@@ -190,6 +206,7 @@ private struct SideItem: View {
     var dimmed = false
     var quiet = false
     var iconTint: Color?
+    var accessory: String? = nil
     let action: () -> Void
 
     var body: some View {
@@ -204,6 +221,12 @@ private struct SideItem: View {
                     .foregroundStyle(textColor)
                     .lineLimit(1)
                 Spacer(minLength: 0)
+                if let accessory {
+                    Text(accessory)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.textTertiary)
+                        .monospacedDigit()
+                }
             }
             .padding(.vertical, 8)
             .padding(.horizontal, 10)
