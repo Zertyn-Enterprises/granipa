@@ -70,7 +70,12 @@ struct OnboardingView: View {
     // MARK: - Step 2
 
     private var toolsAndShortcuts: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let installedProviderIDs = Set(
+            LLMProviders.all.compactMap { spec in
+                LLMProviders.resolveExecutable(named: spec.executableName) == nil
+                    ? nil : spec.id
+            })
+        return VStack(alignment: .leading, spacing: 10) {
             Text("Your AI & shortcuts")
                 .font(.system(size: 24, weight: .semibold, design: .serif))
                 .foregroundStyle(Theme.textPrimary)
@@ -82,10 +87,10 @@ struct OnboardingView: View {
                 ForEach(LLMProviders.all) { spec in
                     HStack {
                         Image(
-                            systemName: LLMProviders.resolveExecutable(named: spec.executableName)
-                                != nil ? "checkmark.circle.fill" : "circle")
+                            systemName: installedProviderIDs.contains(spec.id)
+                                ? "checkmark.circle.fill" : "circle")
                             .foregroundStyle(
-                                LLMProviders.resolveExecutable(named: spec.executableName) != nil
+                                installedProviderIDs.contains(spec.id)
                                     ? Theme.statusDone : Theme.textTertiary)
                         Text(spec.displayName)
                             .font(Theme.fontBody)
@@ -97,9 +102,7 @@ struct OnboardingView: View {
             .padding(12)
             .card(cornerRadius: Theme.radiusOverlay)
 
-            if LLMProviders.all.allSatisfy({
-                LLMProviders.resolveExecutable(named: $0.executableName) == nil
-            }) {
+            if installedProviderIDs.isEmpty {
                 HStack(spacing: 6) {
                     Text("None yet? Paste in Terminal:")
                         .font(Theme.fontCaption)

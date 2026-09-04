@@ -470,11 +470,8 @@ private struct ProviderRow: View {
         case failed(String)
     }
 
-    private var installedPath: String? {
-        LLMProviders.resolveExecutable(named: spec.executableName)?.path
-    }
-
     var body: some View {
+        let installedPath = LLMProviders.resolveExecutable(named: spec.executableName)?.path
         VStack(alignment: .leading, spacing: 5) {
             HStack {
                 Image(systemName: installedPath != nil ? "checkmark.circle.fill" : "circle")
