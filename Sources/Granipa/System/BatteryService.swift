@@ -77,7 +77,6 @@ final class BatteryService {
     private let tempKeys = ["TB0T", "TB1T", "TW0P", "B0Te"]
 
     func start() {
-        snapshot = BatteryIO.snapshot()
         probeControl()
         tick()
         loop?.cancel()
@@ -116,10 +115,16 @@ final class BatteryService {
     }
 
     func tick() {
-        snapshot = BatteryIO.snapshot()
-        temperatureC = readTemperature()
+        let nextSnapshot = BatteryIO.snapshot()
+        if nextSnapshot != snapshot {
+            snapshot = nextSnapshot
+        }
+        let nextTemperature = nextSnapshot.isPresent ? readTemperature() : nil
+        if nextTemperature != temperatureC {
+            temperatureC = nextTemperature
+        }
         applyMagSafeLED()
-        guard snapshot.isPresent, canControl else { return }
+        guard nextSnapshot.isPresent, canControl else { return }
 
         if let step = calibrationStep {
             runCalibration(step)
