@@ -168,7 +168,7 @@ final class DictationController {
             let gate = waveformGate
             try recorder.start(echoCancellation: echo) { [weak self] buffer, _ in
                 let level = buffer.rmsLevel
-                if gate.shouldPublish(.mic, level) {
+                if gate.shouldPublish(.mic) {
                     Task { @MainActor [weak self] in
                         self?.pushLevel(level)
                     }

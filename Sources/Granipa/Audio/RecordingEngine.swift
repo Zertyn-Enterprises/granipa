@@ -45,7 +45,7 @@ final class RecordingEngine {
             fanOutChunks: MeetingASRPolicy.usesLiveASR()
         ) {
             [weak self] channel, level in
-            guard gate.shouldPublish(channel, level) else { return }
+            guard gate.shouldPublish(channel) else { return }
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 switch channel {

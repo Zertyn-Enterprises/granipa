@@ -10,7 +10,7 @@ final class LevelGate: @unchecked Sendable {
         self.minInterval = minInterval
     }
 
-    func shouldPublish(_ channel: AudioChannel, _ level: Float) -> Bool {
+    func shouldPublish(_ channel: AudioChannel) -> Bool {
         lock.lock()
         defer { lock.unlock() }
         let now = Date()
