@@ -43,7 +43,6 @@ private final class DataBox: @unchecked Sendable {
 enum LLMRunner {
     struct Output: Sendable {
         let stdout: String
-        let stderr: String
     }
 
     static func run(
@@ -145,6 +144,6 @@ enum LLMRunner {
                 process.terminationStatus,
                 String(stderr.suffix(500)).trimmingCharacters(in: .whitespacesAndNewlines))
         }
-        return Output(stdout: stdout, stderr: stderr)
+        return Output(stdout: stdout)
     }
 }
