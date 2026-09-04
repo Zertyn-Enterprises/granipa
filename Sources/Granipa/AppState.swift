@@ -7,6 +7,7 @@ import os
 @MainActor
 @Observable
 final class AppState {
+    private static let log = Logger(subsystem: "com.zertyn.granipa", category: "transcription")
     private(set) var database: AppDatabase?
     let recorder = RecordingEngine()
     let calendar = CalendarService()
@@ -404,7 +405,7 @@ final class AppState {
         } else {
             transcription = nil
             let language = meeting.language
-            await Task.detached {
+            let outcome = await Task.detached {
                 await FileMeetingTranscriber.transcribe(
                     micURL: urls.micURL,
                     systemURL: urls.systemURL,
@@ -412,16 +413,33 @@ final class AppState {
                     language: language,
                     database: db)
             }.value
-            await postProcess(meetingID: id, skipLocalDiarize: false)
+            await postProcess(
+                meetingID: id,
+                skipLocalDiarize: false,
+                fileTranscription: outcome)
         }
     }
 
-    func postProcess(meetingID: String, skipLocalDiarize: Bool = false) async {
+    func postProcess(
+        meetingID: String,
+        skipLocalDiarize: Bool = false,
+        fileTranscription: FileMeetingTranscriber.Outcome? = nil
+    ) async {
         guard let db = database else { return }
         let defaults = UserDefaults.standard
         let diarizationEnabled = defaults.object(forKey: "diarizationEnabled") as? Bool ?? true
         let inferNames = defaults.object(forKey: "inferSpeakerNames") as? Bool ?? true
         let providerID = defaults.string(forKey: "llmProvider") ?? "claude"
+
+        if case .failed(let failure) = fileTranscription {
+            // Generic toast for the user; the underlying error is logged at
+            // the catch site in FileMeetingTranscriber.
+            Self.log.error(
+                "post-meeting transcription failed for \(meetingID, privacy: .public): \(failure.logDescription, privacy: .public)"
+            )
+            ToastController.shared.show(
+                "Transcription failed — your audio was saved", style: .warning)
+        }
 
         if skipLocalDiarize {
             if inferNames {
@@ -429,16 +447,26 @@ final class AppState {
                     meetingID: meetingID, database: db, providerID: providerID)
             }
         } else if diarizationEnabled, let meeting = try? db.fetchMeeting(id: meetingID) {
-            do {
-                try await DiarizationService.diarize(
-                    meetingID: meetingID,
-                    audioSystemPath: meeting.audioSystemPath,
-                    database: db,
-                    nameInferenceProviderID: inferNames ? providerID : nil)
-            } catch {
-                // Best-effort: segments keep their "Them" label, but leave evidence.
-                Logger(subsystem: "com.zertyn.granipa", category: "diarization")
-                    .error("diarization failed: \(error.localizedDescription, privacy: .public)")
+            let finalSegments =
+                (try? db.fetchSegments(meetingID: meetingID, finalOnly: true)) ?? []
+            if fileTranscription?.isFailure == true, finalSegments.isEmpty {
+                // Zero segments because ASR failed — FluidAudio would load
+                // models for nothing. A silent meeting reports .completed,
+                // so its behavior is unchanged.
+                Self.log.info(
+                    "skipping diarization for \(meetingID, privacy: .public): transcription failed with no segments")
+            } else {
+                do {
+                    try await DiarizationService.diarize(
+                        meetingID: meetingID,
+                        audioSystemPath: meeting.audioSystemPath,
+                        database: db,
+                        nameInferenceProviderID: inferNames ? providerID : nil)
+                } catch {
+                    // Best-effort: segments keep their "Them" label, but leave evidence.
+                    Logger(subsystem: "com.zertyn.granipa", category: "diarization")
+                        .error("diarization failed: \(error.localizedDescription, privacy: .public)")
+                }
             }
         }
 
