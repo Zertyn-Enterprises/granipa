@@ -33,23 +33,28 @@ if [ -n "$SPARKLE_SRC" ]; then
     "$APP/Contents/MacOS/Granipa" 2>/dev/null || true
 fi
 
-# Hardened runtime + entitlements: required for notarization, harmless in dev.
+# Hardened runtime + entitlements are required for notarization. Ad-hoc
+# signatures have no Team ID, so library validation rejects embedded Sparkle.
 # Sparkle's nested executables must be signed before the framework and the app.
 # Secure timestamps need a real certificate, so ad-hoc skips them.
 sign_bundle() {
   local id="$1"; shift
+  local options=(--force)
+  if [ "$id" != "-" ]; then
+    options+=(--options runtime)
+  fi
   local fw="$APP/Contents/Frameworks/Sparkle.framework"
   if [ -d "$fw" ]; then
     find "$fw" \( -name "*.xpc" -o -name "Autoupdate" -o -name "Updater.app" \) -print0 \
       | while IFS= read -r -d '' item; do
-        codesign --force --options runtime "$@" --sign "$id" "$item"
+        codesign "${options[@]}" "$@" --sign "$id" "$item"
       done
-    codesign --force --options runtime "$@" --sign "$id" "$fw"
+    codesign "${options[@]}" "$@" --sign "$id" "$fw"
   fi
-  codesign --force --options runtime --identifier com.zertyn.granipa.batteryhelper \
+  codesign "${options[@]}" --identifier com.zertyn.granipa.batteryhelper \
     "$@" --sign "$id" \
     "$APP/Contents/MacOS/GranipaBatteryHelper"
-  codesign --force --options runtime --entitlements Resources/Granipa.entitlements \
+  codesign "${options[@]}" --entitlements Resources/Granipa.entitlements \
     "$@" --sign "$id" "$APP"
 }
 
