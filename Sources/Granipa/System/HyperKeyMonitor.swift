@@ -18,12 +18,6 @@ final class HyperKeyMonitor: @unchecked Sendable {
     private var hyperDown = false
     private var onAction: (@MainActor (UInt32) -> Void)?
 
-    var isRunning: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return tap != nil
-    }
-
     func start(
         hyperKeyCode: UInt32,
         bindings: [UInt32: UInt32],
