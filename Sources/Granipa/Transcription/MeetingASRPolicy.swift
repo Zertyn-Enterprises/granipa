@@ -24,4 +24,17 @@ enum MeetingASRPolicy {
     ) -> Bool {
         usesLiveASR(flag: live) && (captions ?? true)
     }
+
+    /// Overlay visibility: prefs plus a live coordinator. A mid-recording
+    /// preference flip cannot raise captions when this recording never started ASR.
+    static func shouldShowCaptionsOverlay(
+        requested: Bool,
+        dismissed: Bool,
+        hasLiveCoordinator: Bool,
+        live: Bool? = UserDefaults.standard.object(forKey: "liveMeetingASR") as? Bool,
+        captions: Bool? = UserDefaults.standard.object(forKey: "meetingCaptionsEnabled") as? Bool
+    ) -> Bool {
+        requested && !dismissed && hasLiveCoordinator
+            && usesLiveCaptions(live: live, captions: captions)
+    }
 }

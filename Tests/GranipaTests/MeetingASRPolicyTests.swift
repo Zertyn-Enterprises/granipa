@@ -33,6 +33,47 @@ import Testing
         #expect(MeetingASRPolicy.usesLiveCaptions(live: true, captions: nil))
     }
 
+    @Test func dictationRestoreDoesNotShowEmptyCaptionsWhenLiveASRIsOff() {
+        #expect(
+            !MeetingASRPolicy.shouldShowCaptionsOverlay(
+                requested: true, dismissed: false, hasLiveCoordinator: true,
+                live: false, captions: true))
+        #expect(
+            !MeetingASRPolicy.shouldShowCaptionsOverlay(
+                requested: true, dismissed: false, hasLiveCoordinator: true,
+                live: nil, captions: true))
+    }
+
+    @Test func captionsStayHiddenWithoutALiveCoordinator() {
+        #expect(
+            !MeetingASRPolicy.shouldShowCaptionsOverlay(
+                requested: true, dismissed: false, hasLiveCoordinator: false,
+                live: true, captions: true))
+    }
+
+    @Test func captionsShowOnlyWithLiveASRCoordinatorAndPref() {
+        #expect(
+            MeetingASRPolicy.shouldShowCaptionsOverlay(
+                requested: true, dismissed: false, hasLiveCoordinator: true,
+                live: true, captions: true))
+        #expect(
+            MeetingASRPolicy.shouldShowCaptionsOverlay(
+                requested: true, dismissed: false, hasLiveCoordinator: true,
+                live: true, captions: nil))
+        #expect(
+            !MeetingASRPolicy.shouldShowCaptionsOverlay(
+                requested: false, dismissed: false, hasLiveCoordinator: true,
+                live: true, captions: true))
+        #expect(
+            !MeetingASRPolicy.shouldShowCaptionsOverlay(
+                requested: true, dismissed: true, hasLiveCoordinator: true,
+                live: true, captions: true))
+        #expect(
+            !MeetingASRPolicy.shouldShowCaptionsOverlay(
+                requested: true, dismissed: false, hasLiveCoordinator: true,
+                live: true, captions: false))
+    }
+
     /// SettingsView is a private SwiftUI form; `@AppStorage` only writes when a
     /// rendered binding mutates, and this suite has no view host. Same
     /// source-contract pattern as BatteryHelperTests (read the repo file).
@@ -53,6 +94,42 @@ import Testing
         {
             #expect(gate.lowerBound < show.lowerBound)
             #expect(gate.lowerBound < hide.lowerBound)
+        }
+    }
+
+    /// Overlay setVisible used to honor only meetingCaptionsEnabled, so
+    /// dictation restore could raise an empty panel while live ASR was off.
+    /// Menu advertised Show/Hide Captions from prefs even when this recording
+    /// never started a coordinator.
+    @Test func overlayAndMenuKeepLiveCaptionsCoherent() throws {
+        let overlay = try granipaSource("Sources/Granipa/UI/CaptionsOverlayController.swift")
+        let menu = try granipaSource("Sources/Granipa/UI/MenuBarView.swift")
+        let dictation = try granipaSource("Sources/Granipa/Dictation/DictationController.swift")
+        let settings = try granipaSource("Sources/Granipa/UI/SettingsView.swift")
+
+        #expect(overlay.contains("MeetingASRPolicy.shouldShowCaptionsOverlay"))
+        #expect(overlay.contains("appState?.transcription"))
+        #expect(!overlay.contains(#"forKey: "meetingCaptionsEnabled""#))
+
+        #expect(menu.contains("app.transcription"))
+        if let coordinator = menu.range(of: "app.transcription"),
+            let show = menu.range(of: "Show Captions"),
+            let hide = menu.range(of: "Hide Captions")
+        {
+            #expect(coordinator.lowerBound < show.lowerBound)
+            #expect(coordinator.lowerBound < hide.lowerBound)
+        }
+
+        #expect(dictation.contains("setVisible(meetingIsRecording)"))
+        #expect(settings.contains("onChange(of: liveMeetingASR)"))
+        #expect(settings.contains("onChange(of: meetingCaptions)"))
+        #expect(settings.contains("CaptionsOverlayController.shared.setVisible"))
+        if let liveToggle = settings.range(of: #"@AppStorage("liveMeetingASR")"#),
+            let captionsToggle = settings.range(of: #"@AppStorage("meetingCaptionsEnabled")"#),
+            let sync = settings.range(of: "CaptionsOverlayController.shared.setVisible")
+        {
+            #expect(liveToggle.lowerBound < sync.lowerBound)
+            #expect(captionsToggle.lowerBound < sync.lowerBound)
         }
     }
 }

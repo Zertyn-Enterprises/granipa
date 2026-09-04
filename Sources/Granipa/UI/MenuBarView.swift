@@ -32,7 +32,7 @@ struct MenuBarView: View {
                 Button("Show Recording HUD") {
                     openWindow(id: "recording-hud")
                 }
-                if MeetingASRPolicy.usesLiveCaptions() {
+                if app.transcription != nil, MeetingASRPolicy.usesLiveCaptions() {
                     if CaptionsOverlayController.shared.dismissedThisRecording {
                         Button("Show Captions") {
                             CaptionsOverlayController.shared.resetDismissed()

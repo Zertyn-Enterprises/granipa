@@ -154,11 +154,13 @@ private struct GeneralSettings: View {
                 }
             }
             Toggle("Live transcription during meetings", isOn: $liveMeetingASR)
+                .onChange(of: liveMeetingASR) { syncLiveCaptionsOverlay() }
             Text("Streams speech while you record. Off by default — meetings still transcribe after you stop.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Toggle("Live captions during meetings", isOn: $meetingCaptions)
                 .disabled(!liveMeetingASR)
+                .onChange(of: meetingCaptions) { syncLiveCaptionsOverlay() }
             Text(
                 liveMeetingASR
                     ? "Floating overlay of what's being said. Stays on this Mac."
@@ -221,6 +223,10 @@ private struct GeneralSettings: View {
         return meetingSystemEngine == "muse"
             ? "Only the other participants' audio is sent to Meta. Your microphone stays on this Mac. Needs a Muse API key in Settings → Dictation."
             : "Both channels transcribe on this Mac."
+    }
+
+    private func syncLiveCaptionsOverlay() {
+        CaptionsOverlayController.shared.setVisible(app.recorder.isRecording)
     }
 
     // One entry per language; regional variants are an implementation detail.

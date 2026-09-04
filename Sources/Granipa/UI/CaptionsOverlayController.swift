@@ -10,9 +10,11 @@ final class CaptionsOverlayController {
     // fittingSize layout pass runs while captions update.
     private static let panelSize = NSSize(width: 656, height: 176)
     private var panel: NSPanel?
+    private weak var appState: AppState?
     private(set) var dismissedThisRecording = false
 
     func attach(appState: AppState) {
+        self.appState = appState
         if panel != nil { return }
         let host = NSHostingView(
             rootView: AnyView(CaptionsOverlayView().environment(appState)))
@@ -43,10 +45,12 @@ final class CaptionsOverlayController {
     }
 
     func setVisible(_ visible: Bool) {
-        let enabled =
-            UserDefaults.standard.object(forKey: "meetingCaptionsEnabled") as? Bool ?? true
+        let show = MeetingASRPolicy.shouldShowCaptionsOverlay(
+            requested: visible,
+            dismissed: dismissedThisRecording,
+            hasLiveCoordinator: appState?.transcription != nil)
         guard let panel else { return }
-        if visible && enabled && !dismissedThisRecording {
+        if show {
             PanelMotion.appear(panel, at: origin(for: panel))
         } else if panel.isVisible {
             PanelMotion.disappear(panel)
