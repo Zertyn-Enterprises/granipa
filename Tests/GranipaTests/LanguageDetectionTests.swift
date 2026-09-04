@@ -109,6 +109,22 @@ import Testing
                 == ["en-US"])
     }
 
+    @Test func fileProbeLocalesTryEachDistinctConfiguredLanguage() {
+        let probes = ["en-US", "es-ES", "es-MX"]
+        #expect(
+            LanguageDetection.fileProbeLocales(
+                requested: "fr-FR", last: "en-US", probes: probes)
+                == ["fr-FR"])
+        #expect(
+            LanguageDetection.fileProbeLocales(
+                requested: "auto", last: "en-US", probes: probes)
+                == ["en-US", "es-ES"])
+        #expect(
+            LanguageDetection.fileProbeLocales(
+                requested: "auto", last: "es-ES", probes: probes)
+                == ["es-ES", "en-US"])
+    }
+
     @Test func parseProbeLocalesDedupesAndCaps() {
         #expect(LanguageDetection.parseProbeLocales(nil) == ["en-US", "es-ES"])
         #expect(LanguageDetection.parseProbeLocales("") == ["en-US", "es-ES"])

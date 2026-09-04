@@ -54,6 +54,27 @@ enum LanguageDetection {
         return [list[0]]
     }
 
+    static func fileProbeLocales(requested: String, last: String?, probes: [String]? = nil)
+        -> [String]
+    {
+        if requested != "auto" { return [requested] }
+        var ordered =
+            probes
+            ?? parseProbeLocales(UserDefaults.standard.string(forKey: "probeLocales"))
+        if let last,
+            let index = ordered.firstIndex(where: {
+                String($0.prefix(2)).lowercased() == String(last.prefix(2)).lowercased()
+            })
+        {
+            ordered.insert(ordered.remove(at: index), at: 0)
+        }
+
+        var seenLanguages = Set<String>()
+        return ordered.filter {
+            seenLanguages.insert(String($0.prefix(2)).lowercased()).inserted
+        }
+    }
+
     static func dominantLanguage(of text: String) -> NLLanguage? {
         guard text.count >= 10 else { return nil }
         let recognizer = NLLanguageRecognizer()
