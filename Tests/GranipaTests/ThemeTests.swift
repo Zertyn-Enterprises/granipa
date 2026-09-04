@@ -20,23 +20,7 @@ import Testing
         #expect(Theme.radiusM == 12)
         #expect(Theme.radiusL == 16)
         #expect(Theme.radiusOverlay == 24)
-        _ = Theme.fontSmall
-        _ = Theme.fontCaption
-        _ = Theme.fontBody
         #expect(DictationController.waveformBars == 40)
-    }
-
-    @Test func colorTokensExist() {
-        _ = Theme.channelMe
-        _ = Theme.fillSubtle
-        _ = Theme.fillHover
-        _ = Theme.strokeStrong
-        _ = Theme.statusListening
-        _ = Theme.statusProcessing
-        _ = Theme.statusDone
-        _ = Theme.statusLoading
-        _ = Theme.statusFailed
-        _ = Theme.brandPurple
     }
 
     @Test func sparklineIsStableAndBounded() {

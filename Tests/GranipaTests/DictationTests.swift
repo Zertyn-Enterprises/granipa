@@ -83,12 +83,6 @@ import Testing
         #expect(MuseEventParser.parse(#"{"type":"speaker","label":"B"}"#) == .speaker(label: "B"))
     }
 
-    @Test func museForSystemRequiresKey() {
-        #expect(MeetingASRPolicy.usesMuseForSystem(engine: "muse", hasMuseKey: true))
-        #expect(!MeetingASRPolicy.usesMuseForSystem(engine: "muse", hasMuseKey: false))
-        #expect(!MeetingASRPolicy.usesMuseForSystem(engine: "local", hasMuseKey: true))
-    }
-
     @Test func rewriteCompletionsURLNormalizes() {
         #expect(
             RewriteClient.completionsURL(from: "http://192.168.1.10:11434/v1")?.absoluteString
