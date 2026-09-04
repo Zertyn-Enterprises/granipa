@@ -121,7 +121,7 @@ private actor Session {
         do {
             try await connectFresh()
         } catch {
-            await markDead()
+            markDead()
             throw error
         }
     }
@@ -152,7 +152,7 @@ private actor Session {
         do {
             try await connectFresh()
         } catch {
-            await markDead()
+            markDead()
         }
     }
 
@@ -161,7 +161,7 @@ private actor Session {
         do {
             try await socket.send(.data(data))
         } catch {
-            await markDead()
+            markDead()
         }
     }
 
@@ -250,7 +250,7 @@ private actor Session {
                 case .speechComplete(let text):
                     emit(text: text, isFinal: true, at: now)
                 case .error:
-                    await markDead()
+                    markDead()
                     return
                 case .handshake, .ignored:
                     break
