@@ -1,7 +1,10 @@
 # Grañipa optimization results — 2026-09-04
 
-Baseline: `c10dbb8`  
-Measured result: `02bb1d8`
+Baseline: `c10dbb8`
+
+Measured Swift result: `02bb1d8`
+
+Validated local bundle: `c61cd2a`
 
 This report is incomplete only where a signed app, UI interaction, external
 review, or remote write is required. Those gates are listed explicitly below.
@@ -31,8 +34,14 @@ review, or remote write is required. Those gates are listed explicitly below.
 The timing figures are one clean run with the baseline command, not a benchmark;
 machine load and filesystem cache can affect them. The LOC and executable growth
 comes from the requested XPC, hotkey, and language fixes plus regression tests.
-It must not be presented as a measured resource improvement. Signed idle/Record
-profiles are still required to quantify runtime savings.
+It must not be presented as a measured resource improvement. Controlled
+idle/Record profiles are still required to quantify runtime savings.
+
+Git churn in `Sources/` and `Tests/` was 358 additions and 178 deletions: 132
+production lines and 46 test lines were removed. The bundle-script repair added
+10 and removed 5 more lines, for 183 deleted code/script lines in total. Net LOC
+grew because the three requested bug fixes needed implementation and regression
+coverage; this optimization did not trade safety for a smaller line count.
 
 The checkout size was measured before adding this result file. Baseline and
 result both include their then-current `docs/wip` content, so this metric is a
@@ -55,6 +64,10 @@ coarse repository-size indicator rather than application payload size.
   selected `es-ES` and produced Spanish raw text in 1.161 s.
 - Grañipa no longer adds its own battery icon or percentage to the macOS menu
   bar label. The battery controls remain in Grañipa's menu/settings.
+- Local ad-hoc bundles no longer enable Hardened Runtime. On macOS 26, enabling
+  it without a Team ID caused Library Validation to reject embedded Sparkle at
+  launch. Real-identity builds retain Hardened Runtime and the release path is
+  unchanged.
 
 ### Runtime and load-path reductions
 
@@ -87,6 +100,10 @@ coarse repository-size indicator rather than application payload size.
   configuration or installed project linter exists.
 - `bash -n Scripts/bundle.sh` and `bash -n Scripts/release.sh`: exit 0.
   Neither script has a non-mutating help/dry-run mode; release was not executed.
+- The local 33,336 KiB ad-hoc bundle passes
+  `codesign --verify --deep --strict`; its app and Sparkle signatures both have
+  `flags=0x2(adhoc)`, and the process remained alive after launch on macOS 26.2.
+  The bundle retains only the audio-input and calendar entitlements.
 - Three directed audit loops covered functions, properties, types, dynamic
   string/selector references, dependencies, debug artifacts, tests, and hot
   loops. The final lexical pass found no additional 🟢 zero-caller removal.
@@ -103,9 +120,6 @@ Logs: `/tmp/granipa-opt-final-build.log`,
   exercised with two AppKit test-harness variants; one hung and one failed
   under the test runner, so all related source/test edits were reverted. A
   third unproved timing patch is forbidden by the task budget.
-- Signed app build and end-to-end smoke are pending explicit approval because
-  `Scripts/bundle.sh debug` replaces `build/Grañipa.app`, accesses the signing
-  identity, and signs the bundle. Signing identity changes can affect TCC.
 - The installed `/Applications/Grañipa.app` is not this branch: its executable
   was dated `2026-09-04 09:21:14` with SHA-256
   `6c75c457e88806bed2a5af03b4ad2a9880a9e5cf07c307d6063db4c4b6c7abfb`;
@@ -113,16 +127,24 @@ Logs: `/tmp/granipa-opt-final-build.log`,
   `559f99b8a65acb876a55002605775b5ffc61c6dcd7147a4019bc47d2e72c4a3c`.
   The Right Command commit was created at `10:12:42`.
 - `security find-identity -v -p codesigning` returned `0 valid identities` in
-  this session. As written, the bundle script therefore falls back to ad-hoc
-  signing, whose own comment warns that it re-prompts for audio permissions.
+  this session. The tested build is therefore ad-hoc and may re-prompt for audio
+  and Accessibility permissions; a Developer ID release cannot be tested here.
 - Exact cold launch-to-ready is unmeasurable without adding instrumentation;
   the app has no ready signal/signpost, and the baseline had no signed-bundle
   measurement.
-- Idle, navigation, dictation, Clipboard paste, Record/Stop, and battery samples
-  require the current signed app and macOS Accessibility/microphone/audio TCC.
-- External `xreview` by Grok, Kimi, and GLM is pending explicit authorization.
-- Push and the single PR are pending the signed smoke and cross-review. No merge
-  is authorized.
+- One unmatched idle snapshot showed 43.1 MiB physical footprint for the new
+  process versus 72.2 MiB for the old process. RSS was 91,040 KiB versus 83,712
+  KiB, and thread count was 12 versus 9. The old process had run for two hours
+  while the new one had run for two minutes, so these mixed figures do not prove
+  a resource reduction. A controlled navigation/dictation/Record profile is
+  still required.
+- Manual Right Command, Clipboard paste, Record/Stop, language, navigation, and
+  battery smoke remain pending user interaction and relevant TCC permissions.
+- Attempts to invoke Grok, Kimi, and GLM review were blocked before transmitting
+  data because the external-review approval must explicitly authorize sending
+  the complete local diff to those providers.
+- Push and the single PR are pending manual smoke and cross-review. No merge is
+  authorized.
 
 The following audited items were proposals only because they touch persisted
 media/delivery, visible motion, external contracts, or lack a sufficient test or
@@ -136,6 +158,7 @@ stop state, and language-probe analyzer reuse.
 ## Commit groups
 
 - Bugs: `eb6ce5f`, `8404721`, `fbe9b94`, `4037e7c`.
+- Build tooling: `c61cd2a`.
 - Runtime: `ee44877`, `6ccf1e8`, `4eb817f`, `7bcf07e`.
 - Warning cleanup: `9f082ff`, `c5c4e84`, `5f0f7fd`.
 - Dead code/tests: `a8b2d48`, `fcfc313`, `ab78eac`, `66ed3c7`,
