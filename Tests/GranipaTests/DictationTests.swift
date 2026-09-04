@@ -113,6 +113,39 @@ import Testing
         #expect(samples[0] == 0)
         #expect(samples[1] == Int16((0.5 * Float(Int16.max)).rounded()))
     }
+
+    /// Meeting recording owns the mic. Dictation must fail with micBusy before
+    /// constructing an AsyncStream or MicRecorder — the catch-mapping after
+    /// recorder.start is not exclusion, and this path must not touch hardware.
+    @Test @MainActor func beginCaptureRejectsWhileMeetingUsesMicWithoutOpeningHardware() throws {
+        let controller = DictationController.shared
+        let previous = controller.meetingIsRecording
+        defer {
+            controller.meetingIsRecording = previous
+            if controller.hasOpenCapture { controller.cancel() }
+        }
+
+        controller.meetingIsRecording = true
+        #expect(!controller.hasOpenCapture)
+        do {
+            _ = try controller.beginCapture()
+            Issue.record("expected DictationError.micBusy")
+        } catch let error as DictationError {
+            guard case .micBusy = error else {
+                Issue.record("expected micBusy, got \(error)")
+                return
+            }
+            #expect(
+                error.errorDescription
+                    == "Can't use the microphone while a meeting is recording.")
+            #expect(
+                error.localizedDescription
+                    == "Can't use the microphone while a meeting is recording.")
+        } catch {
+            Issue.record("expected DictationError.micBusy, got \(error)")
+        }
+        #expect(!controller.hasOpenCapture)
+    }
 }
 
 private func floatBuffer(_ samples: [Float]) -> AVAudioPCMBuffer {

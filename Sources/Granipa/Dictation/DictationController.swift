@@ -155,7 +155,10 @@ final class DictationController {
         }
     }
 
-    private func beginCapture() throws -> AsyncStream<AudioChunk> {
+    var hasOpenCapture: Bool { chunkContinuation != nil || mic != nil }
+
+    func beginCapture() throws -> AsyncStream<AudioChunk> {
+        if meetingIsRecording { throw DictationError.micBusy }
         let (stream, continuation) = AsyncStream.makeStream(
             of: AudioChunk.self,
             bufferingPolicy: .unbounded)
