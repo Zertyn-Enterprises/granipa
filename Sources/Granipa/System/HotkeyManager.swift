@@ -1,6 +1,5 @@
 import AppKit
 import Carbon.HIToolbox
-import CoreGraphics
 import Foundation
 import os
 
@@ -19,6 +18,24 @@ enum HotkeyBinding {
 
     static func isModifierOnly(keyCode: UInt32, modifiers: UInt32) -> Bool {
         modifiers == 0 && modifierFlag(forKeyCode: keyCode) != nil
+    }
+
+    static func eventReportsModifierDown(
+        keyCode: UInt32, flags: NSEvent.ModifierFlags
+    ) -> Bool {
+        let mask: UInt
+        switch Int(keyCode) {
+        case Int(kVK_RightOption): mask = UInt(NX_DEVICERALTKEYMASK)
+        case Int(kVK_Option): mask = UInt(NX_DEVICELALTKEYMASK)
+        case Int(kVK_RightCommand): mask = UInt(NX_DEVICERCMDKEYMASK)
+        case Int(kVK_Command): mask = UInt(NX_DEVICELCMDKEYMASK)
+        case Int(kVK_RightControl): mask = UInt(NX_DEVICERCTLKEYMASK)
+        case Int(kVK_Control): mask = UInt(NX_DEVICELCTLKEYMASK)
+        case Int(kVK_RightShift): mask = UInt(NX_DEVICERSHIFTKEYMASK)
+        case Int(kVK_Shift): mask = UInt(NX_DEVICELSHIFTKEYMASK)
+        default: return false
+        }
+        return flags.rawValue & mask != 0
     }
 
     static func carbonModifiers(from flags: NSEvent.ModifierFlags) -> UInt32 {
@@ -135,17 +152,16 @@ final class HotkeyManager: @unchecked Sendable {
 
     private func handleFlagsChanged(_ event: NSEvent) {
         let code = UInt32(event.keyCode)
+        let down = HotkeyBinding.eventReportsModifierDown(
+            keyCode: code, flags: event.modifierFlags)
         Task { @MainActor in
-            self.dispatchModifier(code: code)
+            self.dispatchModifier(code: code, down: down)
         }
     }
 
     @MainActor
-    private func dispatchModifier(code: UInt32) {
+    private func dispatchModifier(code: UInt32, down: Bool) {
         for (id, spec) in modifierSpecs where spec.keyCode == code {
-            let down = CGEventSource.keyState(
-                .combinedSessionState,
-                key: CGKeyCode(code))
             let was = modifierDown[id] ?? false
             guard down != was else { continue }
             modifierDown[id] = down

@@ -23,4 +23,18 @@ import Testing
         #expect(HotkeyBinding.modifierGlyph(UInt32(cmdKey)) == "⌘")
         #expect(HotkeyBinding.modifierGlyph(UInt32(controlKey | optionKey)) == "⌃⌥")
     }
+
+    @Test func rightCommandEdgesComeFromTheEventDeviceBit() {
+        let rightDown = NSEvent.ModifierFlags(
+            rawValue: NSEvent.ModifierFlags.command.rawValue | UInt(NX_DEVICERCMDKEYMASK))
+        #expect(
+            HotkeyBinding.eventReportsModifierDown(
+                keyCode: UInt32(kVK_RightCommand), flags: rightDown))
+        #expect(
+            !HotkeyBinding.eventReportsModifierDown(
+                keyCode: UInt32(kVK_RightCommand), flags: .command))
+        #expect(
+            !HotkeyBinding.eventReportsModifierDown(
+                keyCode: UInt32(kVK_RightCommand), flags: []))
+    }
 }
