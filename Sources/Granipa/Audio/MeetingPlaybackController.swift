@@ -114,6 +114,7 @@ final class MeetingPlaybackController {
         availableChannels = Self.channels(micPath: micPath, systemPath: systemPath)
         guard !availableChannels.isEmpty else {
             state = .idle
+            releaseEngine()
             return
         }
         let chosen: AudioChannel
@@ -139,16 +140,26 @@ final class MeetingPlaybackController {
         }
         let restartsFromStart = state == .ended
         let appliedRate = rate
+        let current = generation
         state = .playing
-        startTick()
         enqueue { engine in
             if restartsFromStart {
                 await engine.seek(to: 0)
             }
             let started = await engine.play(rate: appliedRate)
-            if !started, self.state == .playing {
-                self.state = .failed(.loadFailed("Could not start playback"))
+            // The button already showed .playing; ticking may only start
+            // once the engine is actually playing for this generation and
+            // the intent is still to play. Earlier, a tick's first
+            // isPlaying read could run before engine.play and read as EOF.
+            guard started, current == self.generation, self.state == .playing else {
+                if started {
+                    await engine.pause()
+                } else if self.state == .playing {
+                    self.state = .failed(.loadFailed("Could not start playback"))
+                }
+                return
             }
+            self.startTick()
         }
     }
 
@@ -208,11 +219,7 @@ final class MeetingPlaybackController {
         currentTime = 0
         duration = 0
         state = .idle
-        delegateBox?.controller = nil
-        delegateBox = nil
-        enqueue { engine in
-            await engine.reset()
-        }
+        releaseEngine()
     }
 
     // MARK: - Preparation
@@ -225,6 +232,7 @@ final class MeetingPlaybackController {
         }
         guard let path else {
             state = .idle
+            releaseEngine()
             return
         }
         var isDirectory: ObjCBool = false
@@ -232,9 +240,12 @@ final class MeetingPlaybackController {
             !isDirectory.boolValue
         else {
             state = .failed(.missingFile)
+            releaseEngine()
             return
         }
-        generation += 1
+        // Also covers selectChannel: anything that abandons the current
+        // player must stop its tick before preparing the replacement.
+        cancelOpen()
         let current = generation
         let url = URL(fileURLWithPath: path)
         state = .preparing
@@ -273,6 +284,19 @@ final class MeetingPlaybackController {
         }
     }
 
+    /// Abandons the current player on every path that will not replace it:
+    /// detaches the delegate on the main actor, then stops and releases the
+    /// engine's player through the command chain. Without this, loading
+    /// nil/nil or a missing path left a playing file audible under an
+    /// idle/failed facade.
+    private func releaseEngine() {
+        delegateBox?.controller = nil
+        delegateBox = nil
+        enqueue { engine in
+            await engine.reset()
+        }
+    }
+
     private func cancelOpen() {
         generation += 1
         tickTask?.cancel()
@@ -306,16 +330,25 @@ final class MeetingPlaybackController {
 
     private func startTick() {
         tickTask?.cancel()
+        let current = generation
         tickTask = Task { @MainActor [weak self] in
-            while let self, !Task.isCancelled, self.state == .playing {
+            while let self, !Task.isCancelled, current == self.generation,
+                self.state == .playing
+            {
                 let time = await self.engine.currentTime()
                 let playerDuration = await self.engine.duration()
                 let stillPlaying = await self.engine.isPlaying()
+                // The awaits free the main actor: a load, stop or pause can
+                // have advanced the state in between, so nothing may be
+                // published — and EOF declared — without re-validating.
+                guard !Task.isCancelled, current == self.generation,
+                    self.state == .playing
+                else { break }
                 self.currentTime = time
                 if playerDuration > 0 {
                     self.duration = playerDuration
                 }
-                if !stillPlaying, self.state == .playing {
+                if !stillPlaying {
                     self.handleFinished(successfully: true)
                     break
                 }

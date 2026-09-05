@@ -233,4 +233,100 @@ enum TestMeetingAudio {
         player.seek(to: 4)
         #expect(player.currentTime == 0)
     }
+
+    @Test @MainActor func loadWithoutPathsReleasesUnderlyingPlayback() async throws {
+        let url = tempURL("release-nil")
+        defer { try? FileManager.default.removeItem(at: url) }
+        // Short enough that an unreleased player finishes on its own inside
+        // the wait window: a real EOF callback then flips the state past
+        // .idle, which is how an unreleased player is observable here.
+        try TestMeetingAudio.writeTone(to: url, seconds: 0.2)
+
+        let player = MeetingPlaybackController()
+        player.load(micPath: url.path, systemPath: nil)
+        try await waitUntil(player) { $0 == .ready }
+        player.play()
+        #expect(player.state == .playing)
+
+        player.load(micPath: nil, systemPath: nil)
+        #expect(player.state == .idle)
+        try await Task.sleep(for: .milliseconds(700))
+        #expect(player.state == .idle)
+        #expect(player.currentTime == 0)
+        #expect(player.duration == 0)
+        #expect(player.loadedURL == nil)
+    }
+
+    @Test @MainActor
+    func loadMissingPathReleasesUnderlyingPlaybackAndKeepsDiagnostic() async throws {
+        let url = tempURL("release-missing")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try TestMeetingAudio.writeTone(to: url, seconds: 0.2)
+
+        let player = MeetingPlaybackController()
+        player.load(micPath: url.path, systemPath: nil)
+        try await waitUntil(player) { $0 == .ready }
+        player.play()
+        #expect(player.state == .playing)
+
+        let missing = "/tmp/granipa-missing-\(UUID().uuidString).caf"
+        player.load(micPath: missing, systemPath: nil)
+        #expect(player.state == .failed(.missingFile))
+        try await Task.sleep(for: .milliseconds(700))
+        #expect(player.state == .failed(.missingFile))
+    }
+
+    @Test @MainActor func rapidPlayPauseSeekChannelAndStopChurnStaysCoherent() async throws {
+        let mic = tempURL("churn-mic")
+        let system = tempURL("churn-system")
+        defer {
+            try? FileManager.default.removeItem(at: mic)
+            try? FileManager.default.removeItem(at: system)
+        }
+        try TestMeetingAudio.writeTone(to: mic, seconds: 1.2, frequency: 440)
+        try TestMeetingAudio.writeTone(to: system, seconds: 1.2, frequency: 660)
+
+        let player = MeetingPlaybackController()
+        for _ in 0..<3 {
+            player.load(micPath: mic.path, systemPath: system.path)
+            try await waitUntil(player) { $0 == .ready }
+            #expect(player.channel == .system)
+
+            player.play()
+            #expect(player.state == .playing)
+            for _ in 0..<100 {
+                if player.currentTime > 0 { break }
+                try await Task.sleep(for: .milliseconds(25))
+            }
+            #expect(player.currentTime > 0)
+
+            player.seek(to: 0.4)
+            #expect(abs(player.currentTime - 0.4) < 0.03)
+            player.pause()
+            #expect(player.state == .paused)
+            player.play()
+            #expect(player.state == .playing)
+
+            player.selectChannel(.mic)
+            #expect(player.channel == .mic)
+            #expect(!player.isPlaying)
+            try await waitUntil(player) { $0 == .ready }
+            player.play()
+            #expect(player.state == .playing)
+            player.seek(to: 0.9)
+
+            player.selectChannel(.system)
+            #expect(!player.isPlaying)
+            try await waitUntil(player) { $0 == .ready }
+            #expect(player.channel == .system)
+
+            player.stopAndRelease()
+            #expect(player.state == .idle)
+            try await Task.sleep(for: .milliseconds(150))
+            #expect(player.state == .idle)
+            #expect(player.currentTime == 0)
+            #expect(player.duration == 0)
+            #expect(player.loadedURL == nil)
+        }
+    }
 }
