@@ -42,3 +42,24 @@ service reported weekly quota exhaustion earlier in this run.
 
 The prior goal remains blocked in the goal service. `create_goal` rejected a new goal
 because the thread has an unfinished goal. No goal was falsely marked complete.
+
+## Update at 8640ea3 (10:31)
+
+- Integrated GLM's Dictation screen: database-backed search/app filters/paging,
+  four real statistics, session clock and live inspector sharing the controller.
+- Integrated Grok's Permissions health screen and pure-state/action tests.
+- GLM found the fixture's UserDefaults write was not isolated by CFFIXED_USER_HOME.
+  Commit 90f3bbc removes that write and gates onboarding presentation in process.
+  The fixture now explicitly documents that Settings preference changes are not sandboxed.
+- Fresh signed bundle and integrated suite succeeded: 266 tests / 44 suites.
+- Normal bundle process 91062 was alive at 52 seconds (0.0% CPU, rss 103360 KB
+  in a single ps sample). No claim of visual or end-to-end speech verification.
+- Complete-screen reviews of Dictation and Permissions are running; Live Recording
+  is being implemented separately.
+
+Permissions complete-screen review by GLM returned OK. It verified real state/action
+mappings, passive rescan versus explicit system-audio probe, onboarding reuse and
+the fixture-defaults fix. Existing limitations remain: system-audio Denied state
+needs app recreation after a grant, and binary preflight APIs cannot distinguish
+never-asked from denied for accessibility/screen recording. Visual verification
+is still pending; a DEBUG self-view snapshot hook is being prepared.
