@@ -84,3 +84,28 @@ is still pending; a DEBUG self-view snapshot hook is being prepared.
 - Grok's one full-screen review of Live Recording is running. Speech/clipboard E2E
   and final visual/performance checks remain unverified. V2 is not complete.
 - Remote `feat/granipa-v2` was backed up through 183cdbc; no merge performed.
+
+## Update at 7335e58 (11:30)
+
+- Recorded-meeting screen integrated: AVFoundation file playback, channel selection,
+  seek/rate/transport, bounded real waveform decode, transcript search/speaker filter,
+  segment navigation, talk-time, overview/actions and contextual inspector.
+- GLM complete-screen review found waveform cancellation and repeated talk-time
+  calculation issues; Grok is fixing these and the stale renamed-speaker filter.
+- Settings now uses the seven-section left sidebar with existing controls retained.
+  Grok complete-screen review is running.
+- Latest integrated suite: 313 tests in 54 suites passed in 0.627 seconds.
+  Release build passed in 22.81 seconds. Tests include real AVFoundation audio files.
+- Fixed the nondeterministic session-clock test by passing explicit times, retaining
+  the reset assertion. Query paging now preserves the selected filters and frozen cutoff.
+- Reverted the unsuccessful self-view capture experiment in d436dec, including only
+  that removed hook's tests. The original isolated fixture remains.
+- Normal signed bundle process 24204 remained running. Thirteen idle samples showed
+  CPU 0.0% (tool precision), memory 51M initially then 37M. This is not a visible-screen,
+  navigation or recording resource measurement.
+- Runtime verification found direct Accessibility trusted, Screen Capture access false,
+  and `CGSessionCopyCurrentDictionary` reported `CGSSessionScreenIsLocked = 1`.
+  AXPress on Open Grañipa returned success, but the window content/geometry was not
+  verified. A locked desktop is not evidence of a successful visual smoke test.
+- New local data shapes and external integrations still need the requested user choices;
+  paused/resumed recording and live AI are not implemented. V2 is not complete.
