@@ -78,9 +78,18 @@ import Testing
     @Test func twoColumnThreshold() {
         #expect(!LiveStageLayout.isTwoColumn(width: 712))
         #expect(!LiveStageLayout.isTwoColumn(width: 732))
-        #expect(!LiveStageLayout.isTwoColumn(width: 879))
+        #expect(!LiveStageLayout.isTwoColumn(width: 863))
+        #expect(LiveStageLayout.isTwoColumn(width: 864))
+        #expect(LiveStageLayout.isTwoColumn(width: 872))
         #expect(LiveStageLayout.isTwoColumn(width: 880))
         #expect(LiveStageLayout.isTwoColumn(width: 964))
+    }
+
+    /// The shipping window's content column must earn the two-column layout —
+    /// a threshold above it buried the notes card under the stage.
+    @Test func defaultWindowColumnEarnsTwoColumns() {
+        let column = ShellLayout.defaultWindowWidth - ShellLayout.sidebarWidth
+        #expect(LiveStageLayout.isTwoColumn(width: column))
     }
 }
 

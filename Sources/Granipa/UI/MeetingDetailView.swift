@@ -9,6 +9,7 @@ struct MeetingDetailView: View {
     @State private var renamingSpeaker: String?
     @State private var renameSpeakerTo = ""
     @FocusState private var notesFocused: Bool
+    @State private var quickNoteScrolls = 0
 
     private var isEnhancing: Bool {
         app.enhancingMeetingIDs.contains(meeting.id)
@@ -220,29 +221,46 @@ struct MeetingDetailView: View {
 
     // MARK: - Live stage
 
+    /// Scroll anchor for Quick note: in the stacked layout the notes card
+    /// sits under the stage, so focusing the editor must also bring it onscreen.
+    private static let liveNotesCardID = "live-notes-card"
+
     private var liveContent: some View {
         GeometryReader { proxy in
-            ScrollView {
-                Group {
-                    if LiveStageLayout.isTwoColumn(width: proxy.size.width) {
-                        HStack(alignment: .top, spacing: Theme.spaceL) {
-                            LiveRecordingView(meeting: meeting) { notesFocused = true }
-                                .frame(maxWidth: 460)
-                            liveNotesCard
-                                .frame(maxWidth: .infinity)
-                        }
-                    } else {
-                        VStack(alignment: .leading, spacing: Theme.spaceL) {
-                            LiveRecordingView(meeting: meeting) { notesFocused = true }
-                                .frame(maxWidth: .infinity)
-                            liveNotesCard
+            ScrollViewReader { scrollProxy in
+                ScrollView {
+                    Group {
+                        if LiveStageLayout.isTwoColumn(width: proxy.size.width) {
+                            HStack(alignment: .top, spacing: Theme.spaceL) {
+                                LiveRecordingView(meeting: meeting, quickNote: focusQuickNote)
+                                    .frame(maxWidth: 460)
+                                liveNotesCard
+                                    .frame(maxWidth: .infinity)
+                            }
+                        } else {
+                            VStack(alignment: .leading, spacing: Theme.spaceL) {
+                                LiveRecordingView(meeting: meeting, quickNote: focusQuickNote)
+                                    .frame(maxWidth: .infinity)
+                                liveNotesCard
+                            }
                         }
                     }
+                    .padding(Theme.spaceXL)
+                    .frame(maxWidth: .infinity)
                 }
-                .padding(Theme.spaceXL)
-                .frame(maxWidth: .infinity)
+                .onChange(of: quickNoteScrolls) { _, _ in
+                    // Deliberately unanimated so Reduce Motion gets a step
+                    // change instead of a scroll.
+                    scrollProxy.scrollTo(Self.liveNotesCardID, anchor: .top)
+                }
             }
         }
+    }
+
+    private func focusQuickNote() {
+        notesFocused = true
+        // Counter, not the focus flag: ⌘N while already focused must re-scroll.
+        quickNoteScrolls += 1
     }
 
     private var liveNotesCard: some View {
@@ -259,6 +277,7 @@ struct MeetingDetailView: View {
                 .frame(height: 260)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .id(Self.liveNotesCardID)
         .background(
             Theme.card, in: RoundedRectangle(cornerRadius: Theme.radiusL, style: .continuous))
         .overlay(

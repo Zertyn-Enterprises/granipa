@@ -43,10 +43,12 @@ enum LiveStageFormat {
 }
 
 enum LiveStageLayout {
-    /// The stage column caps at 460 pt; the notes editor needs 340 pt beside it
-    /// (plus spacing and page padding) to earn a two-column layout.
+    /// The stage column caps at 460 pt; the notes editor needs 340 pt beside
+    /// it, plus the HStack spacing (16) and the page padding (2×24) inside
+    /// the measured width. The default window's column (1120 − 248 = 872)
+    /// clears this; anything narrower stacks the stage above the notes.
     static func isTwoColumn(width: CGFloat) -> Bool {
-        width >= 880
+        width >= 864
     }
 }
 
