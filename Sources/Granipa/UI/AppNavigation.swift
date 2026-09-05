@@ -89,15 +89,6 @@ enum AppNavigation {
     }
 }
 
-enum MeetingDetailLayout {
-    /// Content column at `ShellLayout.minWidth` with the sidebar and no inspector.
-    static let minContentWidth: CGFloat = ShellLayout.minWidth - ShellLayout.sidebarWidth - 1
-
-    static func compactPlayback(_ contentWidth: CGFloat) -> Bool {
-        contentWidth < 620
-    }
-}
-
 enum MeetingLibrary {
     static func notes(in meetings: [Meeting]) -> [Meeting] {
         meetings.filter { meeting in
