@@ -4,93 +4,16 @@ struct MenuBarView: View {
     @Environment(AppState.self) private var app
     @Environment(\.openWindow) private var openWindow
 
-    private var livePipeline: MeetingPipelinePhase? {
-        app.meetings.lazy.map { app.pipelinePhase(for: $0) }
-            .first { $0.isLive && $0 != .recording }
-    }
-
     var body: some View {
+        captureSection
+        Divider()
+        toolsSection
+        Divider()
+        appSection
         if BatteryService.shared.snapshot.isPresent {
-            BatteryMenuSection()
             Divider()
-        }
-        // Capture
-        if app.dictation.phase.isActive {
-            Button("Stop Dictation") {
-                app.dictation.toggleFromMenu()
-            }
-        } else {
-            Button("Dictate") {
-                app.dictation.toggleFromMenu()
-            }
-        }
-        if app.recorder.isBusy {
-            Button(app.recorder.isStarting ? "Cancel Recording Start" : "Stop Recording") {
-                Task { await app.stopRecording() }
-            }
-            if app.recorder.isRecording {
-                Button("Show Recording HUD") {
-                    openWindow(id: "recording-hud")
-                }
-                if app.transcription != nil, MeetingASRPolicy.usesLiveCaptions() {
-                    if CaptionsOverlayController.shared.dismissedThisRecording {
-                        Button("Show Captions") {
-                            CaptionsOverlayController.shared.resetDismissed()
-                            CaptionsOverlayController.shared.setVisible(true)
-                        }
-                    } else {
-                        Button("Hide Captions") {
-                            CaptionsOverlayController.shared.hideTemporarily()
-                        }
-                    }
-                }
-            }
-        } else {
-            Button("Record New Meeting") {
-                app.startRecording()
-                NSApp.activate(ignoringOtherApps: true)
-            }
-            .disabled(app.recorder.isStarting)
-        }
-        if let phase = livePipeline {
-            Button("\(phase.label) notes…") {}
-                .disabled(true)
-        }
-        Button("New Meeting") {
-            app.createMeeting()
-            NSApp.activate(ignoringOtherApps: true)
-        }
-        Divider()
-        // Tools
-        Button("Clipboard History") {
-            ClipboardPanelController.shared.toggle()
-        }
-        .keyboardShortcut("v", modifiers: [.option, .shift])
-        Button("Capture Text (OCR)") {
-            Task { await OCRService.captureAndCopy() }
-        }
-        .keyboardShortcut("t", modifiers: [.option, .shift])
-        Button("Emoji & Symbols") {
-            EmojiPalette.show()
-        }
-        .keyboardShortcut("e", modifiers: [.option, .shift])
-        Button("Dictation History") {
-            DictationHistoryPanelController.shared.toggle()
-        }
-        .keyboardShortcut("h", modifiers: [.option, .shift])
-        Divider()
-        // App
-        Button("Open Grañipa") {
-            openWindow(id: "main")
-            NSApp.activate(ignoringOtherApps: true)
-        }
-        Button("Setup Guide…") {
-            openWindow(id: "onboarding")
-            NSApp.activate(ignoringOtherApps: true)
-        }
-        if UpdaterManager.shared.isAvailable {
-            Button("Check for Updates…") {
-                UpdaterManager.shared.checkForUpdates()
+            Menu("Battery") {
+                BatteryMenuSection()
             }
         }
         Divider()
@@ -98,13 +21,156 @@ struct MenuBarView: View {
             NSApp.terminate(nil)
         }
     }
+
+    @ViewBuilder
+    private var captureSection: some View {
+        switch app.dictation.phase {
+        case .preparing, .listening:
+            Button {
+                app.dictation.toggleFromMenu()
+            } label: {
+                Label("Stop Dictation", systemImage: "mic.fill")
+            }
+        case .processing:
+            Text("Transcribing…")
+        default:
+            Button {
+                app.dictation.toggleFromMenu()
+            } label: {
+                Label("Dictate", systemImage: "mic")
+            }
+            .disabled(app.recorder.isBusy)
+        }
+
+        if app.recorder.isBusy {
+            Button {
+                Task { await app.stopRecording() }
+            } label: {
+                Label(
+                    app.recorder.isStarting ? "Cancel Recording Start" : "Stop Recording",
+                    systemImage: app.recorder.isStarting ? "xmark.circle" : "stop.circle")
+            }
+            if app.recorder.isRecording {
+                Button {
+                    openWindow(id: "recording-hud")
+                } label: {
+                    Label("Show Recording HUD", systemImage: "rectangle.inset.filled")
+                }
+                if app.transcription != nil, MeetingASRPolicy.usesLiveCaptions() {
+                    if CaptionsOverlayController.shared.dismissedThisRecording {
+                        Button {
+                            CaptionsOverlayController.shared.resetDismissed()
+                            CaptionsOverlayController.shared.setVisible(true)
+                        } label: {
+                            Label("Show Captions", systemImage: "captions.bubble")
+                        }
+                    } else {
+                        Button {
+                            CaptionsOverlayController.shared.hideTemporarily()
+                        } label: {
+                            Label("Hide Captions", systemImage: "captions.bubble.fill")
+                        }
+                    }
+                }
+                if case .failed = app.transcription?.phase {
+                    Text("Transcription failed")
+                }
+            }
+        } else {
+            Button {
+                app.startRecording()
+                NSApp.activate(ignoringOtherApps: true)
+            } label: {
+                Label("Record New Meeting", systemImage: "record.circle")
+            }
+        }
+
+        if !app.recorder.isBusy,
+            app.processingMeetingID != nil || !app.enhancingMeetingIDs.isEmpty
+        {
+            Text("Processing notes…")
+        }
+
+        Button {
+            app.createMeeting()
+            NSApp.activate(ignoringOtherApps: true)
+        } label: {
+            Label("Quick note", systemImage: "plus")
+        }
+    }
+
+    @ViewBuilder
+    private var toolsSection: some View {
+        Button {
+            ClipboardPanelController.shared.toggle()
+        } label: {
+            Label("Clipboard History", systemImage: "doc.on.clipboard")
+        }
+        .keyboardShortcut("v", modifiers: [.option, .shift])
+        Button {
+            Task { await OCRService.captureAndCopy() }
+        } label: {
+            Label("Capture Text (OCR)", systemImage: "text.viewfinder")
+        }
+        .keyboardShortcut("t", modifiers: [.option, .shift])
+        Button {
+            EmojiPalette.show()
+        } label: {
+            Label("Emoji & Symbols", systemImage: "face.smiling")
+        }
+        .keyboardShortcut("e", modifiers: [.option, .shift])
+        Button {
+            DictationHistoryPanelController.shared.toggle()
+        } label: {
+            Label("Dictation History", systemImage: "clock")
+        }
+        .keyboardShortcut("h", modifiers: [.option, .shift])
+    }
+
+    @ViewBuilder
+    private var appSection: some View {
+        Button {
+            openWindow(id: "main")
+            NSApp.activate(ignoringOtherApps: true)
+        } label: {
+            Label("Open Grañipa", systemImage: "macwindow")
+        }
+        SettingsLink {
+            Label("Settings", systemImage: "gearshape")
+        }
+        Button {
+            openWindow(id: "onboarding")
+            NSApp.activate(ignoringOtherApps: true)
+        } label: {
+            Label("Setup Guide…", systemImage: "questionmark.circle")
+        }
+        if UpdaterManager.shared.isAvailable {
+            Button {
+                UpdaterManager.shared.checkForUpdates()
+            } label: {
+                Label("Check for Updates…", systemImage: "arrow.triangle.2.circlepath")
+            }
+        }
+    }
+}
+
+enum BatteryMenuHeadline {
+    static func text(for snap: BatterySnapshot) -> String {
+        if let minutes = snap.minutesToEmpty, minutes > 0, !snap.isCharging {
+            return "\(snap.percent)% · \(snap.menuBarText)"
+        }
+        if snap.isCharging {
+            return "\(snap.percent)% charging"
+        }
+        return "\(snap.percent)%"
+    }
 }
 
 private struct BatteryMenuSection: View {
     var body: some View {
         @Bindable var battery = BatteryService.shared
         let snap = battery.snapshot
-        Text("\(snap.percent)% · \(snap.menuBarText)")
+        Text(BatteryMenuHeadline.text(for: snap))
             .foregroundStyle(.secondary)
         Toggle("Charge limit", isOn: $battery.limiterEnabled)
         if battery.limiterEnabled {

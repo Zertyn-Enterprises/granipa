@@ -79,6 +79,7 @@ struct GranipaApp: App {
                 MenuBarLabel(app: appState)
             }
         }
+        .menuBarExtraStyle(.menu)
         #else
         MenuBarExtra {
             MenuBarView()
@@ -86,6 +87,7 @@ struct GranipaApp: App {
         } label: {
             MenuBarLabel(app: appState)
         }
+        .menuBarExtraStyle(.menu)
         #endif
 
         Window("Welcome to Grañipa", id: "onboarding") {
@@ -115,19 +117,53 @@ struct GranipaApp: App {
 
 }
 
+enum MenuBarStatus: Equatable, Sendable {
+    case idle
+    case dictating
+    case recording
+    case processing
+
+    var symbolName: String {
+        switch self {
+        case .idle: "waveform"
+        case .dictating: "mic.fill"
+        case .recording: "record.circle.fill"
+        case .processing: "ellipsis.circle.fill"
+        }
+    }
+
+    var accessibilityLabel: String {
+        switch self {
+        case .idle: "Grañipa"
+        case .dictating: "Dictating"
+        case .recording: "Recording"
+        case .processing: "Processing notes"
+        }
+    }
+
+    static func resolve(
+        recorderBusy: Bool,
+        dictationActive: Bool,
+        processingNotes: Bool
+    ) -> MenuBarStatus {
+        if recorderBusy { return .recording }
+        if dictationActive { return .dictating }
+        if processingNotes { return .processing }
+        return .idle
+    }
+}
+
 private struct MenuBarLabel: View {
     var app: AppState
 
     var body: some View {
-        Image(systemName: symbol)
-    }
-
-    private var symbol: String {
-        if app.recorder.isRecording { return "record.circle.fill" }
-        if app.dictation.phase.isActive { return "mic.fill" }
-        if app.meetings.contains(where: { $0.status == .processing }) {
-            return "ellipsis.circle.fill"
-        }
-        return "waveform"
+        let status = MenuBarStatus.resolve(
+            recorderBusy: app.recorder.isBusy,
+            dictationActive: app.dictation.phase.isActive,
+            processingNotes: app.processingMeetingID != nil
+                || !app.enhancingMeetingIDs.isEmpty)
+        Image(systemName: status.symbolName)
+            .accessibilityLabel(status.accessibilityLabel)
+            .help(status.accessibilityLabel)
     }
 }
