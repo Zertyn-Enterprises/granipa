@@ -62,12 +62,12 @@ struct DictationHistoryView: View {
             if isPanel {
                 VStack(spacing: 0) {
                     VStack(alignment: .leading, spacing: 12) {
-                        statsCard
-                        toolbar
+                        filterRow
+                        DictationStatsGrid(stats: stats)
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 16)
-                    .padding(.bottom, 10)
+                    .padding(.bottom, 12)
                     Rectangle().fill(Theme.border).frame(height: 1)
                     listScrollView
                 }
@@ -75,8 +75,8 @@ struct DictationHistoryView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 22) {
                         DictationDestinationHeader(dictation: app.dictation)
-                        statsCard
-                        toolbar
+                        filterRow
+                        DictationStatsGrid(stats: stats)
                         listContent
                     }
                     .padding(.horizontal, 28)
@@ -164,21 +164,31 @@ struct DictationHistoryView: View {
         }
     }
 
-    private var statsCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                Picker("Period", selection: $period) {
-                    ForEach(DictationPeriod.allCases) { item in
-                        Text(item.title).tag(item)
-                    }
+    /// Period, search and source filters sit above the metrics, matching the
+    /// reference layout. The controls and their bindings are unchanged.
+    private var filterRow: some View {
+        HStack(spacing: 8) {
+            Picker("Period", selection: $period) {
+                ForEach(DictationPeriod.allCases) { item in
+                    Text(item.title).tag(item)
                 }
-                .pickerStyle(.menu)
-                .labelsHidden()
-                .fixedSize()
-                .accessibilityLabel("Period")
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .fixedSize()
+            .accessibilityLabel("Period")
 
-                Spacer(minLength: 8)
+            searchField
 
+            appFilterMenu
+
+            if isPanel {
+                Button("Done") { onClose?() }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.textSecondary)
+                    .font(.system(size: 13, weight: .medium))
+                    .accessibilityLabel("Close history")
+            } else {
                 HStack(spacing: 4) {
                     Image(systemName: "checkmark.shield")
                         .font(.system(size: 10.5))
@@ -189,61 +199,40 @@ struct DictationHistoryView: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("History is saved on device")
             }
-
-            Rectangle().fill(Theme.border).frame(height: 1)
-
-            DictationStatsRow(stats: stats)
         }
-        .padding(isPanel ? 12 : 14)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.radiusM, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.radiusM, style: .continuous)
-                .stroke(Theme.border, lineWidth: 1))
     }
 
-    private var toolbar: some View {
+    private var searchField: some View {
         HStack(spacing: 8) {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Theme.textTertiary)
-                TextField("Search history", text: $search)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13.5))
-                    .foregroundStyle(Theme.textPrimary)
-                    .focused($searchFocused)
-                    .accessibilityLabel("Search history")
-                if !search.isEmpty {
-                    Button {
-                        search = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(Theme.textTertiary)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Clear search")
-                    .accessibilityLabel("Clear search")
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 11.5))
+                .foregroundStyle(Theme.textTertiary)
+            TextField("Search dictations", text: $search)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13.5))
+                .foregroundStyle(Theme.textPrimary)
+                .focused($searchFocused)
+                .accessibilityLabel("Search dictations")
+            if !search.isEmpty {
+                Button {
+                    search = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Theme.textTertiary)
                 }
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(
-                Theme.card, in: RoundedRectangle(cornerRadius: Theme.radiusS, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.radiusS, style: .continuous)
-                    .stroke(Theme.border, lineWidth: 1))
-
-            appFilterMenu
-
-            if isPanel {
-                Button("Done") { onClose?() }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(Theme.textSecondary)
-                    .font(.system(size: 13, weight: .medium))
-                    .accessibilityLabel("Close history")
+                .buttonStyle(.plain)
+                .help("Clear search")
+                .accessibilityLabel("Clear search")
             }
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            Theme.card, in: RoundedRectangle(cornerRadius: Theme.radiusS, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.radiusS, style: .continuous)
+                .stroke(Theme.border, lineWidth: 1))
     }
 
     private var appFilterMenu: some View {

@@ -199,26 +199,37 @@ struct DictationLibraryQuery: Equatable, Sendable {
     }
 }
 
-struct DictationStatCell: View {
+struct DictationStatCard: View {
     let value: String
     let label: String
+    let systemImage: String
     var help: String?
 
     var body: some View {
-        VStack(spacing: 3) {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Theme.accent.opacity(0.9))
+                .frame(width: 22, height: 22)
+                .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
             Text(value)
-                .font(.system(size: 18, weight: .semibold, design: .rounded))
+                .font(.system(size: 17, weight: .semibold, design: .rounded))
                 .foregroundStyle(Theme.textPrimary)
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
             Text(label)
-                .font(.system(size: 11))
+                .font(.system(size: 10.5))
                 .foregroundStyle(Theme.textTertiary)
-                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 2)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 11)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.radiusM, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.radiusM, style: .continuous)
+                .stroke(Theme.border, lineWidth: 1))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(value), \(label)")
         .modifier(OptionalHelp(help: help))
@@ -237,34 +248,60 @@ private struct OptionalHelp: ViewModifier {
     }
 }
 
-struct DictationStatsRow: View {
+/// The four real history metrics as separate cards. The time-saved figure is
+/// an estimate — its label carries the qualifier and its help states the
+/// 40 wpm basis.
+struct DictationStatsGrid: View {
     let stats: DictationStats
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(spacing: 0) {
-                DictationStatCell(value: "\(stats.averageWPM)", label: "Words per minute")
-                DictationStatCell(value: stats.words.formatted(), label: "Words")
-                DictationStatCell(
-                    value: stats.savedLabel(),
-                    label: "Est. time saved",
-                    help: "Typing time for these words at 40 words per minute.")
-                DictationStatCell(value: "\(stats.apps)", label: "Apps used")
-            }
-            VStack(spacing: 14) {
-                HStack(spacing: 0) {
-                    DictationStatCell(value: "\(stats.averageWPM)", label: "Words per minute")
-                    DictationStatCell(value: stats.words.formatted(), label: "Words")
+            row
+            VStack(spacing: 10) {
+                HStack(spacing: 10) {
+                    card(
+                        value: "\(stats.averageWPM)", label: "Words per minute",
+                        systemImage: "gauge")
+                    card(
+                        value: stats.words.formatted(), label: "Words",
+                        systemImage: "text.word.spacing")
                 }
-                HStack(spacing: 0) {
-                    DictationStatCell(
-                        value: stats.savedLabel(),
-                        label: "Est. time saved",
+                HStack(spacing: 10) {
+                    card(
+                        value: stats.savedLabel(), label: "Est. time saved",
+                        systemImage: "clock",
                         help: "Typing time for these words at 40 words per minute.")
-                    DictationStatCell(value: "\(stats.apps)", label: "Apps used")
+                    card(
+                        value: "\(stats.apps)", label: "Apps used",
+                        systemImage: "app")
                 }
             }
         }
+    }
+
+    private var row: some View {
+        HStack(spacing: 10) {
+            card(
+                value: "\(stats.averageWPM)", label: "Words per minute",
+                systemImage: "gauge")
+            card(
+                value: stats.words.formatted(), label: "Words",
+                systemImage: "text.word.spacing")
+            card(
+                value: stats.savedLabel(), label: "Est. time saved",
+                systemImage: "clock",
+                help: "Typing time for these words at 40 words per minute.")
+            card(
+                value: "\(stats.apps)", label: "Apps used",
+                systemImage: "app")
+        }
+    }
+
+    private func card(value: String, label: String, systemImage: String, help: String? = nil)
+        -> some View
+    {
+        DictationStatCard(
+            value: value, label: label, systemImage: systemImage, help: help)
     }
 }
 
