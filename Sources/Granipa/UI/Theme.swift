@@ -40,7 +40,7 @@ enum Theme {
     static let statusLoading = Color(hex: 0xE6C35C)
     static let statusFailed = Color(hex: 0xE08A3C)
 
-    static let titleFont = Font.system(size: titleSize, weight: .semibold, design: .serif)
+    static let titleFont = Font.system(size: titleSize, weight: .semibold)
     static let meetingTitleFont = Font.system(size: 28, weight: .bold)
     static let sectionFont = Font.system(size: sectionSize, weight: .semibold)
 
@@ -118,6 +118,21 @@ extension View {
     func recordGlow() -> some View {
         shadow(color: Theme.accentGlow, radius: 10)
     }
+
+    func granipaPrimaryControl() -> some View {
+        self
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .tint(Theme.accent)
+            .recordGlow()
+    }
+
+    func granipaSecondaryControl() -> some View {
+        self
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .tint(.white)
+    }
 }
 
 struct AvatarView: View {
@@ -134,7 +149,7 @@ struct AvatarView: View {
             .overlay {
                 if let source = letterSource, let first = source.first {
                     Text(String(first).uppercased())
-                        .font(.system(size: size * 0.48, weight: .semibold, design: .serif))
+                        .font(.system(size: size * 0.48, weight: .semibold))
                         .foregroundStyle(Theme.textPrimary)
                 } else {
                     Image(systemName: fallbackIcon)

@@ -6,18 +6,28 @@ struct EmptyStateView: View {
     var message: String?
 
     var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: icon)
-                .font(.system(size: 30))
-                .foregroundStyle(Theme.textTertiary)
+        VStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Theme.fillSubtle)
+                    .frame(width: 56, height: 56)
+                    .overlay {
+                        Circle().stroke(Theme.border, lineWidth: 1)
+                    }
+                Image(systemName: icon)
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundStyle(Theme.textSecondary)
+            }
             Text(title)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(Theme.textSecondary)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .multilineTextAlignment(.center)
             if let message, !message.isEmpty {
                 Text(message)
                     .font(.system(size: 13))
-                    .foregroundStyle(Theme.textTertiary)
+                    .foregroundStyle(Theme.textSecondary)
                     .multilineTextAlignment(.center)
+                    .frame(maxWidth: 360)
             }
         }
         .frame(maxWidth: .infinity)

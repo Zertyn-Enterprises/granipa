@@ -24,6 +24,9 @@ struct SidebarView: View {
         VStack(alignment: .leading, spacing: 2) {
             Color.clear.frame(height: 34)
 
+            brand
+                .padding(.bottom, 12)
+
             searchField
                 .padding(.bottom, 10)
 
@@ -38,15 +41,9 @@ struct SidebarView: View {
                 .accessibilityLabel(destination.title)
             }
 
-            if !app.folders.isEmpty {
-                Text("COLLECTIONS")
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(Theme.textTertiary)
-                    .tracking(0.8)
-                    .padding(.top, 18)
-                    .padding(.bottom, 4)
-                    .padding(.leading, 8)
-            }
+            collectionsHeader
+                .padding(.top, 18)
+                .padding(.bottom, 4)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
@@ -108,16 +105,22 @@ struct SidebarView: View {
             }
 
             SettingsLink {
-                Label("Settings", systemImage: "gearshape")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.textSecondary)
-                    .padding(.vertical, 6)
-                    .padding(.horizontal, 8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
+                HStack(spacing: 8) {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 13))
+                        .frame(width: 16)
+                    Text("Settings")
+                        .font(.system(size: 13))
+                    Spacer()
+                }
+                .foregroundStyle(Theme.textSecondary)
+                .padding(.vertical, 8)
+                .padding(.horizontal, 10)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .hoverHighlight()
+            .hoverHighlight(cornerRadius: 10)
+            .help("Settings")
             .accessibilityLabel("Settings")
         }
         .padding(.horizontal, 10)
@@ -144,6 +147,43 @@ struct SidebarView: View {
             }
             Button("Cancel", role: .cancel) { renamingFolder = nil }
         }
+    }
+
+    private var brand: some View {
+        HStack(spacing: 8) {
+            GranipaBrandMark()
+            Text("Grañipa")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+        }
+        .padding(.horizontal, 8)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityLabel("Grañipa")
+    }
+
+    private var collectionsHeader: some View {
+        HStack(spacing: 8) {
+            Text("COLLECTIONS")
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(Theme.textTertiary)
+                .tracking(0.8)
+            Spacer(minLength: 0)
+            Button {
+                showNewFolder = true
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Add folder")
+            .accessibilityLabel("Add folder")
+        }
+        .padding(.leading, 8)
+        .padding(.trailing, 4)
     }
 
     private var searchField: some View {
@@ -198,6 +238,19 @@ struct SidebarView: View {
     }
 }
 
+private struct GranipaBrandMark: View {
+    var body: some View {
+        HStack(alignment: .center, spacing: 2) {
+            Capsule().fill(Theme.accent).frame(width: 2.5, height: 7)
+            Capsule().fill(Theme.accent).frame(width: 2.5, height: 13)
+            Capsule().fill(Theme.accent).frame(width: 2.5, height: 9)
+            Capsule().fill(Theme.accent).frame(width: 2.5, height: 15)
+        }
+        .frame(width: 20, height: 16)
+        .accessibilityHidden(true)
+    }
+}
+
 private struct SideItem: View {
     let title: String
     let icon: String
@@ -224,7 +277,7 @@ private struct SideItem: View {
                 if let accessory {
                     Text(accessory)
                         .font(.system(size: 12))
-                        .foregroundStyle(Theme.textTertiary)
+                        .foregroundStyle(isActive ? Theme.textSecondary : Theme.textTertiary)
                         .monospacedDigit()
                 }
             }
@@ -237,16 +290,26 @@ private struct SideItem: View {
         .background {
             if isActive {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Theme.fillSubtle)
+                    .fill(Theme.accent.opacity(0.14))
+            }
+        }
+        .overlay(alignment: .leading) {
+            if isActive {
+                Capsule()
+                    .fill(Theme.accent)
+                    .frame(width: 3)
+                    .padding(.vertical, 7)
+                    .padding(.leading, 1)
             }
         }
         .hoverHighlight(cornerRadius: 10)
+        .accessibilityAddTraits(isActive ? .isSelected : [])
     }
 
     private var iconColor: Color {
         if let iconTint { return iconTint }
         if dimmed || (quiet && !isActive) { return Theme.textTertiary }
-        return isActive ? Theme.textPrimary : Theme.textSecondary
+        return isActive ? Theme.accent : Theme.textSecondary
     }
 
     private var textColor: Color {

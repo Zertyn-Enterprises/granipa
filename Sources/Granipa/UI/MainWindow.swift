@@ -74,8 +74,11 @@ struct MainWindow: View {
             value: inspectorPresentation)
         .preferredColorScheme(.dark)
         .tint(Theme.accent)
-        .frame(minWidth: ShellLayout.minWidth, minHeight: 600)
-        .environment(\.granipaWindowWidth, windowWidth)
+        .frame(
+            minWidth: ShellLayout.minWidth,
+            idealWidth: ShellLayout.defaultWindowWidth,
+            minHeight: ShellLayout.minHeight,
+            idealHeight: ShellLayout.defaultWindowHeight)
         .background {
             GeometryReader { proxy in
                 Color.clear.preference(key: MainWindowWidthKey.self, value: proxy.size.width)
@@ -185,13 +188,11 @@ struct MainWindow: View {
             Button("Record") {
                 app.startRecordingFromDetection()
             }
-            .buttonStyle(.borderedProminent)
-            .tint(Theme.accent)
+            .granipaPrimaryControl()
             Button("Dismiss") {
                 app.detector.dismiss()
             }
-            .buttonStyle(.bordered)
-            .tint(.white)
+            .granipaSecondaryControl()
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)

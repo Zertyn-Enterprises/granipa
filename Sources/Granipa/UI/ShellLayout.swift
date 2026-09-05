@@ -1,5 +1,4 @@
 import CoreGraphics
-import SwiftUI
 
 enum InspectorPresentation: Equatable, Sendable {
     case hidden
@@ -9,11 +8,20 @@ enum InspectorPresentation: Equatable, Sendable {
 
 enum ShellLayout {
     static let minWidth: CGFloat = 960
+    static let minHeight: CGFloat = 600
     static let sidebarWidth: CGFloat = 248
     static let inspectorColumnWidth: CGFloat = 300
     static let inspectorOverlayMinWidth: CGFloat = 280
     static let inspectorBreakWidth: CGFloat = 1280
-    static let defaultWindowWidth: CGFloat = 1120
+    static let defaultWindowWidth: CGFloat = 1320
+    static let defaultWindowHeight: CGFloat = 820
+
+    static func clampedDefaultSize(visible: CGSize? = nil) -> CGSize {
+        let screen = visible ?? CGSize(width: defaultWindowWidth, height: defaultWindowHeight)
+        return CGSize(
+            width: min(defaultWindowWidth, max(minWidth, screen.width)),
+            height: min(defaultWindowHeight, max(minHeight, screen.height)))
+    }
 
     static func defaultInspectorExpanded(windowWidth: CGFloat) -> Bool {
         windowWidth >= inspectorBreakWidth
@@ -28,16 +36,5 @@ enum ShellLayout {
         let expanded = userExpanded ?? defaultInspectorExpanded(windowWidth: windowWidth)
         guard expanded else { return .hidden }
         return windowWidth >= inspectorBreakWidth ? .column : .overlay
-    }
-}
-
-private struct GranipaWindowWidthKey: EnvironmentKey {
-    static let defaultValue: CGFloat = ShellLayout.defaultWindowWidth
-}
-
-extension EnvironmentValues {
-    var granipaWindowWidth: CGFloat {
-        get { self[GranipaWindowWidthKey.self] }
-        set { self[GranipaWindowWidthKey.self] = newValue }
     }
 }

@@ -6,6 +6,56 @@ import Testing
 @testable import Granipa
 
 @Suite struct ShellNavigationTests {
+    @Test func homeTitleStaysHomeUnlessSearchingOrInAFolder() {
+        #expect(
+            LibraryCopy.homeTitle(isSearching: false, folderName: nil, mode: .inbox) == "Home")
+        #expect(
+            LibraryCopy.homeTitle(isSearching: false, folderName: nil, mode: .library)
+                == "Meetings")
+        #expect(
+            LibraryCopy.homeTitle(isSearching: true, folderName: nil, mode: .inbox) == "Search")
+        #expect(
+            LibraryCopy.homeTitle(isSearching: false, folderName: "Engineering", mode: .inbox)
+                == "Engineering")
+    }
+
+    @Test func libraryExcerptPrefersSummaryThenPlainNotesWithoutMarkdownMarkup() {
+        #expect(
+            LibraryCopy.excerpt(
+                summary: "  Launch is imminent.  ",
+                enhancedNotesMarkdown: "## Decisions\n- ignored because summary wins",
+                notesMarkdown: "raw notes") == "Launch is imminent.")
+        #expect(
+            LibraryCopy.excerpt(
+                summary: nil,
+                enhancedNotesMarkdown: "## Decisions\n- Launch moved to July",
+                notesMarkdown: "fallback") == "Decisions\nLaunch moved to July")
+        #expect(
+            LibraryCopy.excerpt(
+                summary: "   ",
+                enhancedNotesMarkdown: nil,
+                notesMarkdown: "- remember the budget\n\n# Next")
+                == "remember the budget\nNext")
+        #expect(
+            LibraryCopy.excerpt(summary: nil, enhancedNotesMarkdown: nil, notesMarkdown: "  \n")
+                == nil)
+    }
+
+    @Test func libraryMetaKeepsRealStatusFolderDurationAndDate() {
+        let date = Date(timeIntervalSince1970: 1_750_968_000)
+        let parts = LibraryCopy.metaParts(
+            status: "Recording",
+            folder: "Engineering",
+            duration: "1:15",
+            date: date)
+        #expect(Array(parts.prefix(3)) == ["Recording", "Engineering", "1:15"])
+        #expect(parts.count == 4)
+        #expect(parts.last == LibraryCopy.dateLabel(date))
+        #expect(
+            LibraryCopy.metaParts(status: nil, folder: nil, duration: nil, date: date)
+                == [LibraryCopy.dateLabel(date)])
+    }
+
     @Test func destinationChromeMatchesTheContract() {
         #expect(SidebarDestination.allCases.map(\.title) == [
             "Home", "Dictation", "Meetings", "Notes", "Files",

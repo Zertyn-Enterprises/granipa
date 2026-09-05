@@ -1,3 +1,4 @@
+import AppKit
 import os
 import SwiftUI
 
@@ -62,7 +63,7 @@ struct GranipaApp: App {
                 .environment(appState)
         }
         .windowStyle(.hiddenTitleBar)
-        .defaultSize(width: ShellLayout.defaultWindowWidth, height: 720)
+        .defaultSize(ShellLayout.clampedDefaultSize(visible: NSScreen.main?.visibleFrame.size))
 
         #if DEBUG
         MenuBarExtra(isInserted: .constant(!V2FixtureRuntime.isActive)) {

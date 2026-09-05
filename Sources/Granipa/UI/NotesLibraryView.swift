@@ -18,30 +18,32 @@ struct NotesLibraryView: View {
                 DestinationHeader(title: isSearching ? "Search" : "Notes")
 
                 if shown.isEmpty {
-                    VStack(spacing: 10) {
+                    VStack(spacing: 14) {
                         EmptyStateView(
                             icon: isSearching ? "magnifyingglass" : "note.text",
                             title: isSearching
                                 ? "No results for \"\(app.searchQuery)\""
-                                : "No notes yet")
+                                : "No notes yet",
+                            message: isSearching
+                                ? nil
+                                : "Quick notes and meeting notes show up here.")
                         if !isSearching {
                             Button {
                                 app.createMeeting()
                             } label: {
                                 Label("Quick note", systemImage: "plus")
-                                    .font(Theme.fontBody)
+                                    .font(.system(size: 14, weight: .medium))
                             }
-                            .buttonStyle(.borderless)
-                            .foregroundStyle(Theme.textSecondary)
+                            .granipaSecondaryControl()
                             .accessibilityLabel("Quick note")
-                            .padding(.top, 6)
+                            .padding(.top, 4)
                         }
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.top, 60)
+                    .padding(.top, 48)
                 } else {
                     ForEach(MeetingLibrary.dayGroups(from: shown), id: \.day) { group in
-                        LazyVStack(alignment: .leading, spacing: 6) {
+                        LazyVStack(alignment: .leading, spacing: 8) {
                             Text(Theme.dayHeader(group.day))
                                 .font(.system(size: 13, weight: .medium))
                                 .foregroundStyle(Theme.textSecondary)
@@ -80,38 +82,61 @@ private struct NotesLibraryRow: View {
     @Environment(AppState.self) private var app
     let meeting: Meeting
 
+    private var folder: Folder? { app.folder(for: meeting) }
+    private var phase: MeetingPipelinePhase { app.pipelinePhase(for: meeting) }
+    private var excerpt: String {
+        LibraryCopy.excerpt(
+            summary: meeting.summary,
+            enhancedNotesMarkdown: meeting.enhancedNotesMarkdown,
+            notesMarkdown: meeting.notesMarkdown)
+            ?? MeetingLibrary.notePreview(meeting)
+    }
+    private var meta: [String] {
+        LibraryCopy.metaParts(
+            status: phase.isLive ? phase.label : nil,
+            folder: folder?.name,
+            duration: MeetingLibrary.durationLabel(from: meeting.startedAt, to: meeting.endedAt),
+            date: meeting.createdAt)
+    }
+
     var body: some View {
         Button {
             app.selectedMeetingID = meeting.id
         } label: {
             HStack(alignment: .top, spacing: 14) {
                 AvatarView(letterSource: meeting.title, fallbackIcon: "note.text", size: 42)
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 5) {
                     Text(meeting.title)
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(Theme.textPrimary)
                         .lineLimit(1)
-                    Text(MeetingLibrary.notePreview(meeting))
-                        .font(Theme.fontCaption)
+                    Text(excerpt)
+                        .font(.system(size: 13))
                         .foregroundStyle(Theme.textSecondary)
                         .lineLimit(2)
+                    if !meta.isEmpty {
+                        Text(meta.joined(separator: " · "))
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.textTertiary)
+                            .lineLimit(1)
+                    }
                 }
                 Spacer(minLength: 8)
                 Text(meeting.createdAt, format: .dateTime.hour().minute())
-                    .font(Theme.fontCaption)
+                    .font(.system(size: 12))
                     .foregroundStyle(Theme.textTertiary)
                     .monospacedDigit()
             }
-            .padding(.vertical, 12)
-            .padding(.horizontal, 12)
+            .padding(.vertical, 14)
+            .padding(.horizontal, 14)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Theme.border, lineWidth: 1))
-        .hoverHighlight(cornerRadius: 14)
-        .accessibilityLabel("\(meeting.title), \(MeetingLibrary.notePreview(meeting))")
+        .card(cornerRadius: Theme.radiusM)
+        .hoverHighlight(cornerRadius: Theme.radiusM)
+        .contextMenu {
+            MeetingRowContextMenu(meeting: meeting)
+        }
+        .accessibilityLabel("\(meeting.title), \(excerpt)")
     }
 }
