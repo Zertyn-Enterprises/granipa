@@ -14,6 +14,71 @@ enum OverviewPreview {
     }
 }
 
+/// Observable overview chrome: full-screen progress only when nothing
+/// readable exists; otherwise keep summary/notes/actions mounted.
+enum OverviewPresentation {
+    enum Busy: Equatable {
+        case enhancing
+        case processing
+
+        var title: String {
+            switch self {
+            case .enhancing: "Writing notes…"
+            case .processing: "Processing this recording…"
+            }
+        }
+
+        var detail: String {
+            "The overview fills in when processing finishes."
+        }
+    }
+
+    enum Layout: Equatable {
+        case fullProgress(Busy)
+        case content(progress: Busy?)
+    }
+
+    static func busy(isEnhancing: Bool, isProcessing: Bool) -> Busy? {
+        if isEnhancing { return .enhancing }
+        if isProcessing { return .processing }
+        return nil
+    }
+
+    static func hasReadableContent(
+        summary: String?,
+        notesMarkdown: String?,
+        enhancedNotesMarkdown: String?,
+        actionItemsJSON: String?
+    ) -> Bool {
+        OverviewPreview.snippet(summary) != nil
+            || OverviewPreview.snippet(notesMarkdown) != nil
+            || OverviewPreview.snippet(enhancedNotesMarkdown) != nil
+            || !ActionItem.decodeList(from: actionItemsJSON).isEmpty
+    }
+
+    static func layout(
+        isEnhancing: Bool,
+        isProcessing: Bool,
+        hasReadableContent: Bool
+    ) -> Layout {
+        guard let busy = busy(isEnhancing: isEnhancing, isProcessing: isProcessing) else {
+            return .content(progress: nil)
+        }
+        if hasReadableContent {
+            return .content(progress: busy)
+        }
+        return .fullProgress(busy)
+    }
+
+    static func enhanceDisabled(
+        isEnhancing: Bool,
+        isProcessing: Bool,
+        isRecordingThisMeeting: Bool
+    ) -> Bool {
+        isEnhancing || isProcessing || isRecordingThisMeeting
+    }
+}
+
 enum TranscriptSource {
     static func label(_ channel: AudioChannel) -> String {
         switch channel {
@@ -95,35 +160,66 @@ struct MeetingOverviewView: View {
     }
 
     var body: some View {
-        Group {
-            if isEnhancing || isProcessing {
-                VStack(spacing: 10) {
-                    ProgressView()
-                    Text(isEnhancing ? "Writing notes…" : "Processing this recording…")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(Theme.textSecondary)
-                    Text("The overview fills in when processing finishes.")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Theme.textTertiary)
+        switch OverviewPresentation.layout(
+            isEnhancing: isEnhancing,
+            isProcessing: isProcessing,
+            hasReadableContent: OverviewPresentation.hasReadableContent(
+                summary: meeting.summary,
+                notesMarkdown: meeting.notesMarkdown,
+                enhancedNotesMarkdown: meeting.enhancedNotesMarkdown,
+                actionItemsJSON: meeting.actionItemsJSON)
+        ) {
+        case .fullProgress(let busy):
+            fullProgress(busy)
+        case .content(let progress):
+            populated(progress: progress)
+        }
+    }
+
+    private func fullProgress(_ busy: OverviewPresentation.Busy) -> some View {
+        VStack(spacing: 10) {
+            ProgressView()
+            Text(busy.title)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(Theme.textSecondary)
+            Text(busy.detail)
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.textTertiary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func populated(progress: OverviewPresentation.Busy?) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.spaceL) {
+                if let progress {
+                    compactProgress(progress)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: Theme.spaceL) {
-                        summaryCard
-                        secondaryCards
-                        if isBare {
-                            Button("Open notes", action: onOpenNotes)
-                                .buttonStyle(.bordered)
-                                .tint(.white)
-                        }
-                    }
-                    .padding(.horizontal, 28)
-                    .padding(.vertical, 22)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                summaryCard
+                secondaryCards
+                if isBare {
+                    Button("Open notes", action: onOpenNotes)
+                        .buttonStyle(.bordered)
+                        .tint(.white)
                 }
             }
+            .padding(.horizontal, 28)
+            .padding(.vertical, 22)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    private func compactProgress(_ busy: OverviewPresentation.Busy) -> some View {
+        HStack(alignment: .center, spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+            Text(busy.title)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.textSecondary)
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(busy.title)
     }
 
     @ViewBuilder
@@ -261,7 +357,13 @@ struct MeetingOverviewView: View {
         .buttonStyle(.bordered)
         .tint(.white)
         .controlSize(.small)
-        .disabled(isEnhancing || app.recorder.meetingID == meeting.id)
+        .disabled(
+            OverviewPresentation.enhanceDisabled(
+                isEnhancing: isEnhancing,
+                isProcessing: isProcessing,
+                isRecordingThisMeeting: app.recorder.meetingID == meeting.id
+            )
+        )
         .accessibilityLabel(title == "Re-enhance" ? "Regenerate summary" : "Enhance now")
     }
 }

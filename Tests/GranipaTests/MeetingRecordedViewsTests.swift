@@ -87,6 +87,115 @@ import Testing
     }
 }
 
+@Suite struct OverviewPresentationTests {
+    private let actionsJSON = ActionItem.encodeList([
+        ActionItem(text: "Ship Friday", owner: nil, done: false)
+    ])
+
+    @Test func emptyAndWhitespaceFieldsAreNotReadableContent() {
+        #expect(
+            !OverviewPresentation.hasReadableContent(
+                summary: nil,
+                notesMarkdown: "",
+                enhancedNotesMarkdown: nil,
+                actionItemsJSON: nil))
+        #expect(
+            !OverviewPresentation.hasReadableContent(
+                summary: "  \n  ",
+                notesMarkdown: "   ",
+                enhancedNotesMarkdown: "\n",
+                actionItemsJSON: "[]"))
+    }
+
+    @Test func summaryNotesActionsAndAINotesCountAsReadable() {
+        #expect(
+            OverviewPresentation.hasReadableContent(
+                summary: "Launch stays on track.",
+                notesMarkdown: "",
+                enhancedNotesMarkdown: nil,
+                actionItemsJSON: nil))
+        #expect(
+            OverviewPresentation.hasReadableContent(
+                summary: nil,
+                notesMarkdown: "raw scratch notes",
+                enhancedNotesMarkdown: nil,
+                actionItemsJSON: nil))
+        #expect(
+            OverviewPresentation.hasReadableContent(
+                summary: nil,
+                notesMarkdown: "",
+                enhancedNotesMarkdown: "## Decisions\n- keep the date",
+                actionItemsJSON: nil))
+        #expect(
+            OverviewPresentation.hasReadableContent(
+                summary: nil,
+                notesMarkdown: "",
+                enhancedNotesMarkdown: nil,
+                actionItemsJSON: actionsJSON))
+    }
+
+    @Test func idleAlwaysShowsContentWithoutProgress() {
+        #expect(
+            OverviewPresentation.layout(
+                isEnhancing: false, isProcessing: false, hasReadableContent: false)
+                == .content(progress: nil))
+        #expect(
+            OverviewPresentation.layout(
+                isEnhancing: false, isProcessing: false, hasReadableContent: true)
+                == .content(progress: nil))
+    }
+
+    @Test func emptyBusyUsesFullProgressAndNeverReady() {
+        #expect(
+            OverviewPresentation.layout(
+                isEnhancing: true, isProcessing: false, hasReadableContent: false)
+                == .fullProgress(.enhancing))
+        #expect(
+            OverviewPresentation.layout(
+                isEnhancing: false, isProcessing: true, hasReadableContent: false)
+                == .fullProgress(.processing))
+        #expect(OverviewPresentation.Busy.enhancing.title == "Writing notes…")
+        #expect(OverviewPresentation.Busy.processing.title == "Processing this recording…")
+        #expect(
+            !OverviewPresentation.Busy.enhancing.title.localizedCaseInsensitiveContains("ready"))
+        #expect(
+            !OverviewPresentation.Busy.processing.title.localizedCaseInsensitiveContains("ready"))
+        #expect(
+            !OverviewPresentation.Busy.enhancing.detail.localizedCaseInsensitiveContains("ready"))
+        #expect(
+            !OverviewPresentation.Busy.processing.detail.localizedCaseInsensitiveContains("ready"))
+    }
+
+    @Test func populatedReEnhanceKeepsContentWithEnhancingProgress() {
+        #expect(
+            OverviewPresentation.layout(
+                isEnhancing: true, isProcessing: true, hasReadableContent: true)
+                == .content(progress: .enhancing))
+    }
+
+    @Test func rawNotesDuringPostStopKeepContentWithProcessingProgress() {
+        #expect(
+            OverviewPresentation.layout(
+                isEnhancing: false, isProcessing: true, hasReadableContent: true)
+                == .content(progress: .processing))
+    }
+
+    @Test func enhanceStaysDisabledWhileBusy() {
+        #expect(
+            !OverviewPresentation.enhanceDisabled(
+                isEnhancing: false, isProcessing: false, isRecordingThisMeeting: false))
+        #expect(
+            OverviewPresentation.enhanceDisabled(
+                isEnhancing: true, isProcessing: false, isRecordingThisMeeting: false))
+        #expect(
+            OverviewPresentation.enhanceDisabled(
+                isEnhancing: false, isProcessing: true, isRecordingThisMeeting: false))
+        #expect(
+            OverviewPresentation.enhanceDisabled(
+                isEnhancing: false, isProcessing: false, isRecordingThisMeeting: true))
+    }
+}
+
 @Suite struct TranscriptSourceTests {
     @Test func channelLabelsAreMicAndSystem() {
         #expect(TranscriptSource.label(.mic) == "Mic")
