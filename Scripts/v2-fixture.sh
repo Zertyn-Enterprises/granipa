@@ -12,7 +12,7 @@ BIN="$APP/Contents/MacOS/Granipa"
 
 usage() {
   cat <<'EOF'
-Usage: Scripts/v2-fixture.sh [--build] <shell|many> [extra args]
+Usage: Scripts/v2-fixture.sh [--build] <shell|many>
 
 Runs the existing signed debug bundle with --v2-fixture under a fresh
 CFFIXED_USER_HOME created in /private/tmp. The fixture dataset (database
@@ -27,23 +27,21 @@ Opening Settings or otherwise mutating preferences is not sandboxed.
 Options:
   --build   rebuild the debug bundle first (Scripts/bundle.sh)
   -h, --help  show this help
-
-Extra args are forwarded to the binary, e.g. the debug snapshot hook:
-  --v2-snapshot [--v2-destination home|dictation|meetings|notes|files]
-               [--v2-width 960..2560]
-writes snapshot.png at the temp home root and keeps the app running.
 EOF
 }
 
 BUILD=0
 FIXTURE=""
-EXTRA=()
 for arg in "$@"; do
   case "$arg" in
     -h|--help) usage; exit 0 ;;
     --build) BUILD=1 ;;
     shell|many) FIXTURE="$arg" ;;
-    *) EXTRA+=("$arg") ;;
+    *)
+      echo "ERROR: unknown argument '$arg'." >&2
+      usage >&2
+      exit 2
+      ;;
   esac
 done
 
@@ -81,8 +79,4 @@ trap 'cleanup; exit 130' INT
 trap 'cleanup; exit 143' TERM
 
 echo "Fixture '$FIXTURE' home (deleted on exit): $ROOT"
-if [ "${#EXTRA[@]}" -gt 0 ]; then
-  CFFIXED_USER_HOME="$ROOT" "$BIN" --v2-fixture "$FIXTURE" "${EXTRA[@]}"
-else
-  CFFIXED_USER_HOME="$ROOT" "$BIN" --v2-fixture "$FIXTURE"
-fi
+CFFIXED_USER_HOME="$ROOT" "$BIN" --v2-fixture "$FIXTURE"
