@@ -135,6 +135,41 @@ import Testing
         }
     }
 
+    @Test func selectedMeetingOpensTheMeetingInspector() {
+        let destinations: [SidebarDestination] = [.home, .meetings, .notes, .files]
+        for destination in destinations {
+            for width: CGFloat in [960, 1120, 1280] {
+                #expect(
+                    AppNavigation.inspectorKind(
+                        destination: destination,
+                        dictationShowsInspector: false,
+                        windowWidth: width,
+                        meetingSelected: true) == .meeting)
+            }
+        }
+    }
+
+    @Test func dictationDestinationWinsOverASelectedMeeting() {
+        #expect(
+            AppNavigation.inspectorKind(
+                destination: .dictation,
+                dictationShowsInspector: false,
+                windowWidth: 1440,
+                meetingSelected: true) == .dictationIdle)
+        #expect(
+            AppNavigation.inspectorKind(
+                destination: .dictation,
+                dictationShowsInspector: true,
+                windowWidth: 1440,
+                meetingSelected: true) == .dictationLive)
+        #expect(
+            AppNavigation.inspectorKind(
+                destination: .dictation,
+                dictationShowsInspector: true,
+                windowWidth: 1120,
+                meetingSelected: true) == .none)
+    }
+
     @Test func idleDictationInspectorIsAvailableAtEveryWidth() {
         for width: CGFloat in [1120, 1279, 1280, 1440] {
             #expect(

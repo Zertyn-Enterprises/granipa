@@ -116,15 +116,12 @@ final class MeetingPlaybackController {
     func selectChannel(_ channel: AudioChannel) {
         guard channel != self.channel, availableChannels.contains(channel) else { return }
         let resumeTime = currentTime
-        let wasPlaying = isPlaying
         self.channel = channel
         tearDownPlayer()
         openCurrentChannel()
         if duration > 0 {
             seek(to: min(resumeTime, duration))
         }
-        // Channel changes never autoplay — even if the previous file was playing.
-        _ = wasPlaying
     }
 
     func stopAndRelease() {

@@ -3,11 +3,17 @@ import SwiftUI
 struct MeetingDetailView: View {
     @Environment(AppState.self) private var app
     @State private var meeting: Meeting
-    @State private var tab: Tab = .notes
+    @State private var tab: Tab
     @State private var segments: [TranscriptSegment] = []
     @State private var saveTask: Task<Void, Never>?
     @State private var renamingSpeaker: String?
     @State private var renameSpeakerTo = ""
+    @State private var playback = MeetingPlaybackController()
+    @State private var autoscroll = false
+    @State private var selectedSegmentID: String?
+    @State private var transcriptSearch = ""
+    @State private var speakerFilter: String?
+    @State private var confirmDelete = false
     @FocusState private var notesFocused: Bool
     @State private var quickNoteScrolls = 0
 
@@ -19,19 +25,32 @@ struct MeetingDetailView: View {
         app.recorder.isBusy && app.recorder.meetingID == meeting.id
     }
 
+    private var actionItemCount: Int {
+        ActionItem.decodeList(from: freshMeeting.actionItemsJSON).count
+    }
+
+    private var freshMeeting: Meeting {
+        app.meetings.first { $0.id == meeting.id } ?? meeting
+    }
+
     enum Tab: String, CaseIterable {
-        case notes = "Notes"
-        case enhanced = "Enhanced"
+        case overview = "Overview"
+        case enhanced = "AI Notes"
         case transcript = "Transcript"
+        case actionItems = "Action Items"
+        case notes = "Notes"
     }
 
     init(meeting: Meeting, preferNotes: Bool = false) {
         _meeting = State(initialValue: meeting)
         if preferNotes {
             _tab = State(initialValue: .notes)
-        } else if meeting.audioMicPath != nil || meeting.status == .recording {
-            // A recorded meeting centers the transcript; a quick note centers the editor.
+        } else if meeting.audioMicPath != nil || meeting.audioSystemPath != nil
+            || meeting.status == .recording
+        {
             _tab = State(initialValue: .transcript)
+        } else {
+            _tab = State(initialValue: .notes)
         }
     }
 
@@ -43,16 +62,47 @@ struct MeetingDetailView: View {
                 liveContent
             } else {
                 switch tab {
-                case .notes:
-                    notesEditor
+                case .overview:
+                    MeetingOverviewView(meeting: freshMeeting, isProcessing: isPostStopProcessing) {
+                        tab = .notes
+                    }
                 case .enhanced:
                     EnhancedNotesView(meetingID: meeting.id)
                 case .transcript:
-                    transcriptList
+                    MeetingTranscriptView(
+                        segments: segments,
+                        live: liveTranscription,
+                        isProcessing: isPostStopProcessing,
+                        playback: playback,
+                        autoscroll: $autoscroll,
+                        selectedID: $selectedSegmentID,
+                        search: $transcriptSearch,
+                        speakerFilter: $speakerFilter,
+                        onRename: { speaker in
+                            renameSpeakerTo = speaker
+                            renamingSpeaker = speaker
+                        })
+                case .actionItems:
+                    MeetingActionItemsView(meeting: freshMeeting)
+                case .notes:
+                    notesEditor
                 }
             }
         }
         .task(id: taskKey) { await loadSegments() }
+        .task(id: audioPathsKey) { reloadPlayback() }
+        .onChange(of: app.recorder.isBusy) { _, busy in
+            if busy { playback.stopAndRelease() }
+            else { reloadPlayback() }
+        }
+        .onChange(of: app.dictation.phase.isActive) { _, active in
+            if active {
+                playback.stopAndRelease()
+            } else if !isLiveStage {
+                reloadPlayback()
+            }
+        }
+        .onDisappear { playback.stopAndRelease() }
         .alert("Rename speaker", isPresented: .constant(renamingSpeaker != nil)) {
             TextField("Name", text: $renameSpeakerTo)
             Button("Rename") {
@@ -68,6 +118,12 @@ struct MeetingDetailView: View {
             Button("Cancel", role: .cancel) { renamingSpeaker = nil }
         } message: {
             Text("Applies to every line by this speaker in the meeting.")
+        }
+        .alert("Delete this meeting?", isPresented: $confirmDelete) {
+            Button("Delete", role: .destructive) { app.deleteMeeting(id: meeting.id) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The recording, transcript, and notes will be removed.")
         }
     }
 
@@ -90,29 +146,45 @@ struct MeetingDetailView: View {
                 .accessibilityLabel(
                     app.sidebarDestination == .home ? "Back to Home" : "Back")
 
-                Text(meeting.createdAt, format: .dateTime.weekday(.wide).month().day().hour().minute())
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(
+                        meeting.createdAt,
+                        format: .dateTime.weekday(.wide).month().day().hour().minute()
+                    )
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.textTertiary)
+                    .lineLimit(1)
 
-                if meeting.language != "auto" {
-                    Text(String(meeting.language.prefix(2)).uppercased())
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(Theme.textSecondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Theme.border, in: Capsule())
+                    HStack(spacing: 6) {
+                        if meeting.language != "auto" {
+                            Text(String(meeting.language.prefix(2)).uppercased())
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(Theme.textSecondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Theme.border, in: Capsule())
+                        }
+                        if let folder = app.folders.first(where: { $0.id == meeting.folderID }) {
+                            Label(folder.name, systemImage: "folder")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(Theme.textSecondary)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(Theme.fillSubtle, in: Capsule())
+                                .lineLimit(1)
+                        }
+                        statusChip
+                        if let duration = MeetingLibrary.durationLabel(
+                            from: freshMeeting.startedAt, to: freshMeeting.endedAt)
+                        {
+                            Text(duration)
+                                .font(.system(size: 11, weight: .medium).monospacedDigit())
+                                .foregroundStyle(Theme.textTertiary)
+                        }
+                    }
                 }
 
-                if let folder = app.folders.first(where: { $0.id == meeting.folderID }) {
-                    Label(folder.name, systemImage: "folder")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Theme.textSecondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Theme.fillSubtle, in: Capsule())
-                }
-
-                Spacer()
+                Spacer(minLength: 8)
 
                 actionsMenu
             }
@@ -121,10 +193,11 @@ struct MeetingDetailView: View {
                 .font(Theme.meetingTitleFont)
                 .foregroundStyle(Theme.textPrimary)
                 .textFieldStyle(.plain)
+                .accessibilityLabel("Meeting title")
                 .onChange(of: meeting.title) { scheduleSave() }
 
             if !isLiveStage {
-                RecordingBar(meeting: meeting)
+                MeetingPlaybackBar(playback: playback, meeting: freshMeeting)
 
                 tabBar
             }
@@ -132,6 +205,26 @@ struct MeetingDetailView: View {
         .padding(.horizontal, 28)
         .padding(.top, 14)
         .padding(.bottom, isLiveStage ? 14 : 0)
+    }
+
+    @ViewBuilder
+    private var statusChip: some View {
+        let phase = app.pipelinePhase(for: freshMeeting)
+        if phase.isLive {
+            Label(phase.label, systemImage: phase.systemImage)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(phase.color)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(phase.color.opacity(0.14), in: Capsule())
+        } else if freshMeeting.audioMicPath != nil || freshMeeting.audioSystemPath != nil {
+            Label("Recorded", systemImage: "checkmark.circle.fill")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Theme.statusDone)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Theme.statusDone.opacity(0.14), in: Capsule())
+        }
     }
 
     private var folderSection: some View {
@@ -172,14 +265,26 @@ struct MeetingDetailView: View {
             Button("Export as Markdown…") {
                 if let db = app.database {
                     MeetingExporter.exportViaSavePanel(
-                        meeting: meeting, database: db,
+                        meeting: freshMeeting, database: db,
                         folder: app.folders.first { $0.id == meeting.folderID })
                 }
             }
+            .accessibilityLabel("Export as Markdown")
             Button("Copy transcript") {
                 if let db = app.database {
-                    MeetingExporter.copyTranscript(meeting: meeting, database: db)
+                    MeetingExporter.copyTranscript(meeting: freshMeeting, database: db)
                 }
+            }
+            if let draft = freshMeeting.emailDraft, !draft.isEmpty {
+                Button("Copy email") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(draft, forType: .string)
+                    ToastController.shared.show("Email copied")
+                }
+            }
+            Divider()
+            Button("Delete meeting", role: .destructive) {
+                confirmDelete = true
             }
         } label: {
             Image(systemName: "ellipsis.circle")
@@ -187,36 +292,48 @@ struct MeetingDetailView: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
+        .accessibilityLabel("Meeting actions")
     }
 
     private var tabBar: some View {
-        HStack(spacing: 22) {
-            ForEach(Tab.allCases, id: \.self) { item in
-                Button {
-                    tab = item
-                } label: {
-                    VStack(spacing: 7) {
-                        HStack(spacing: 6) {
-                            Text(item.rawValue)
-                                .font(.system(size: 13, weight: tab == item ? .semibold : .regular))
-                                .foregroundStyle(tab == item ? Theme.textPrimary : Theme.textSecondary)
-                            if item == .enhanced, isEnhancing {
-                                Circle()
-                                    .fill(Theme.statusProcessing)
-                                    .frame(width: 5, height: 5)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 22) {
+                ForEach(Tab.allCases, id: \.self) { item in
+                    Button {
+                        tab = item
+                    } label: {
+                        VStack(spacing: 7) {
+                            HStack(spacing: 6) {
+                                Text(item.rawValue)
+                                    .font(.system(size: 13, weight: tab == item ? .semibold : .regular))
+                                    .foregroundStyle(
+                                        tab == item ? Theme.textPrimary : Theme.textSecondary)
+                                if item == .enhanced, isEnhancing {
+                                    Circle()
+                                        .fill(Theme.statusProcessing)
+                                        .frame(width: 5, height: 5)
+                                }
+                                if item == .actionItems, actionItemCount > 0 {
+                                    Text("\(actionItemCount)")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(Theme.textTertiary)
+                                        .accessibilityLabel("Action Items, \(actionItemCount)")
+                                }
                             }
+                            Rectangle()
+                                .fill(tab == item ? Theme.accent : .clear)
+                                .frame(height: 2)
                         }
-                        Rectangle()
-                            .fill(tab == item ? Theme.accent : .clear)
-                            .frame(height: 2)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .contentShape(Rectangle())
                     }
-                    .fixedSize(horizontal: true, vertical: false)
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(item.rawValue)
+                    .accessibilityAddTraits(tab == item ? .isSelected : [])
                 }
-                .buttonStyle(.plain)
             }
-            Spacer()
         }
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: - Live stage
@@ -313,7 +430,7 @@ struct MeetingDetailView: View {
             .padding(.vertical, 14)
     }
 
-    // MARK: - Transcript
+    // MARK: - Data
 
     private var liveTranscription: TranscriptionCoordinator? {
         guard let coordinator = app.transcription, coordinator.meetingID == meeting.id else {
@@ -322,90 +439,9 @@ struct MeetingDetailView: View {
         return coordinator
     }
 
-    private var transcriptList: some View {
-        let live = liveTranscription
-        let shown = live.map(\.liveSegments) ?? segments
-        return Group {
-            if let live, shown.isEmpty, case .failed(let message) = live.phase {
-                VStack(spacing: 10) {
-                    Image(systemName: "xmark.circle")
-                        .font(.system(size: 28))
-                        .foregroundStyle(Theme.statusFailed)
-                    Text("Transcription failed")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(Theme.textSecondary)
-                    Text(message)
-                        .font(.system(size: 13))
-                        .foregroundStyle(Theme.textTertiary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: 380)
-                    Button("Retry") { live.retryIfFailed() }
-                        .buttonStyle(.bordered)
-                        .tint(.white)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if shown.isEmpty, live == nil, isPostStopProcessing {
-                VStack(spacing: 10) {
-                    ProgressView()
-                    Text("Processing this recording…")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(Theme.textSecondary)
-                    Text("The transcript and AI notes appear when processing finishes.")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Theme.textTertiary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if shown.isEmpty && live == nil {
-                VStack(spacing: 10) {
-                    Image(systemName: "text.quote")
-                        .font(.system(size: 28))
-                        .foregroundStyle(Theme.textTertiary)
-                    Text("No transcript")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(Theme.textSecondary)
-                    Text("The transcript will appear here once a recording exists.")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Theme.textTertiary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 8) {
-                            ForEach(shown) { segment in
-                                SegmentRow(segment: segment)
-                                    .id(segment.id)
-                                    .contextMenu {
-                                        if live == nil {
-                                            Button("Rename \"\(segment.speaker)\"…") {
-                                                renameSpeakerTo = segment.speaker
-                                                renamingSpeaker = segment.speaker
-                                            }
-                                        }
-                                    }
-                            }
-                            // Volatile (in-flight) text stays in the HUD and captions
-                            // overlay; observing it here re-evaluated this whole list
-                            // at the volatile flush rate and stalled Record.
-                        }
-                        .padding(.horizontal, 28)
-                        .padding(.vertical, 18)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .onChange(of: shown.count) {
-                        if let last = shown.last {
-                            proxy.scrollTo(last.id, anchor: .bottom)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     private var isPostStopProcessing: Bool {
         guard !isLiveStage else { return false }
-        let fresh = app.meetings.first { $0.id == meeting.id } ?? meeting
-        switch app.pipelinePhase(for: fresh) {
+        switch app.pipelinePhase(for: freshMeeting) {
         case .finishing, .transcribing, .enhancing: return true
         default: return false
         }
@@ -419,6 +455,20 @@ struct MeetingDetailView: View {
 
     private var freshStatus: MeetingStatus {
         app.meetings.first { $0.id == meeting.id }?.status ?? meeting.status
+    }
+
+    private var audioPathsKey: String {
+        let fresh = freshMeeting
+        return "\(fresh.audioMicPath ?? "")|\(fresh.audioSystemPath ?? "")"
+    }
+
+    private func reloadPlayback() {
+        guard !isLiveStage else {
+            playback.stopAndRelease()
+            return
+        }
+        let fresh = freshMeeting
+        playback.load(micPath: fresh.audioMicPath, systemPath: fresh.audioSystemPath)
     }
 
     private func loadSegments() async {
@@ -459,47 +509,5 @@ extension Meeting {
         merged.folderID = edited.folderID
         merged.templateID = edited.templateID
         return merged
-    }
-}
-
-struct SegmentRow: View {
-    let segment: TranscriptSegment
-
-    private static let palette: [Color] = [.orange, .purple, .teal, .pink, .indigo, .mint]
-
-    private var speakerColor: Color {
-        if segment.channel == .mic { return Theme.channelMe }
-        if segment.speaker == "Them" { return Theme.accent }
-        let hash = segment.speaker.unicodeScalars.reduce(0) {
-            ($0 &* 31 &+ Int($1.value)) & 0x7FFF_FFFF
-        }
-        return Self.palette[hash % Self.palette.count]
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 8) {
-                Text(segment.speaker)
-                    .font(Theme.fontCaption.weight(.semibold))
-                    .foregroundStyle(speakerColor)
-                Text(Self.timestamp(segment.startSeconds))
-                    .font(Theme.fontSmall)
-                    .foregroundStyle(Theme.textTertiary)
-                    .monospacedDigit()
-            }
-            Text(segment.text)
-                .font(.system(size: 15))
-                .lineSpacing(7)
-                .foregroundStyle(Theme.textPrimary)
-                .textSelection(.enabled)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    static func timestamp(_ seconds: Double) -> String {
-        let total = Int(seconds)
-        return String(format: "%d:%02d", total / 60, total % 60)
     }
 }

@@ -38,6 +38,7 @@ enum InspectorContentKind: Equatable, Sendable {
     case none
     case dictationIdle
     case dictationLive
+    case meeting
 }
 
 enum RecordingFileStatus: Equatable, Sendable {
@@ -75,13 +76,25 @@ enum AppNavigation {
     static func inspectorKind(
         destination: SidebarDestination,
         dictationShowsInspector: Bool,
-        windowWidth: CGFloat
+        windowWidth: CGFloat,
+        meetingSelected: Bool = false
     ) -> InspectorContentKind {
-        guard destination == .dictation else { return .none }
-        if dictationShowsInspector {
-            return windowWidth >= ShellLayout.inspectorBreakWidth ? .dictationLive : .none
+        if destination == .dictation {
+            if dictationShowsInspector {
+                return windowWidth >= ShellLayout.inspectorBreakWidth ? .dictationLive : .none
+            }
+            return .dictationIdle
         }
-        return .dictationIdle
+        return meetingSelected ? .meeting : .none
+    }
+}
+
+enum MeetingDetailLayout {
+    /// Content column at `ShellLayout.minWidth` with the sidebar and no inspector.
+    static let minContentWidth: CGFloat = ShellLayout.minWidth - ShellLayout.sidebarWidth - 1
+
+    static func compactPlayback(_ contentWidth: CGFloat) -> Bool {
+        contentWidth < 620
     }
 }
 

@@ -14,6 +14,10 @@ struct InspectorPane: View {
                     DictationInspectorView(dictation: app.dictation, isLive: false)
                 case .dictationLive:
                     DictationInspectorView(dictation: app.dictation, isLive: true)
+                case .meeting:
+                    if let meeting = app.selectedMeeting {
+                        MeetingInspectorView(meeting: meeting)
+                    }
                 }
             }
             .padding(Theme.spaceL)
@@ -191,6 +195,183 @@ private struct DictationInspectorView: View {
         case .failed: Theme.statusFailed
         case .idle: Theme.textTertiary
         }
+    }
+}
+
+private struct MeetingInspectorView: View {
+    @Environment(AppState.self) private var app
+    let meeting: Meeting
+    @State private var segments: [TranscriptSegment] = []
+    @State private var confirmDelete = false
+
+    private var folder: Folder? { app.folder(for: meeting) }
+    private var calendarEvent: CalendarMeeting? {
+        guard let id = meeting.calendarEventID else { return nil }
+        return app.calendar.upcoming.first { $0.id == id }
+    }
+    private var talk: SpeakerTalkTime.Report {
+        SpeakerTalkTime.report(segments: segments)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.spaceL) {
+            details
+            if !talk.rows.isEmpty {
+                speakers
+            }
+            actions
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .task(id: meeting.id) {
+            guard let db = app.database else {
+                segments = []
+                return
+            }
+            let meetingID = meeting.id
+            segments = await Task.detached(priority: .utility) {
+                (try? db.fetchSegments(meetingID: meetingID, finalOnly: true)) ?? []
+            }.value
+        }
+        .alert("Delete this meeting?", isPresented: $confirmDelete) {
+            Button("Delete", role: .destructive) { app.deleteMeeting(id: meeting.id) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The recording, transcript, and notes will be removed.")
+        }
+    }
+
+    private var details: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Meeting details")
+                .font(Theme.sectionFont)
+                .foregroundStyle(Theme.textPrimary)
+            detailRow("Created", meeting.createdAt.formatted(date: .abbreviated, time: .shortened))
+            detailRow(
+                "Language",
+                meeting.language == "auto" ? "Auto" : meeting.language)
+            if let folder {
+                detailRow("Folder", folder.team.map { "\($0) / \(folder.name)" } ?? folder.name)
+            }
+            if let duration = MeetingLibrary.durationLabel(
+                from: meeting.startedAt, to: meeting.endedAt)
+            {
+                detailRow("Duration", duration)
+            }
+            if let event = calendarEvent {
+                detailRow("Calendar", event.title)
+                if let url = event.joinURL {
+                    detailRow("Join", url.absoluteString)
+                }
+            } else if let id = meeting.calendarEventID, !id.isEmpty {
+                detailRow("Calendar", id)
+            }
+            detailRow("ID", meeting.id)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Meeting details")
+    }
+
+    private var speakers: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Speakers")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+            ForEach(talk.rows, id: \.speaker) { row in
+                HStack(spacing: 8) {
+                    AvatarView(letterSource: row.speaker, size: 22)
+                    Text(row.speaker)
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(Theme.textPrimary)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    Text(percent(row.share))
+                        .font(.system(size: 11, weight: .medium).monospacedDigit())
+                        .foregroundStyle(Theme.textTertiary)
+                }
+                .accessibilityLabel("\(row.speaker) \(percent(row.share))")
+            }
+            stackedBar
+            if talk.hasOverlap {
+                Text("Overlapping speech is counted for each speaker.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var stackedBar: some View {
+        GeometryReader { geo in
+            HStack(spacing: 1) {
+                ForEach(talk.rows, id: \.speaker) { row in
+                    Rectangle()
+                        .fill(Theme.avatarColor(for: row.speaker))
+                        .frame(width: max(2, geo.size.width * row.share))
+                }
+            }
+        }
+        .frame(height: 6)
+        .clipShape(Capsule())
+        .accessibilityHidden(true)
+    }
+
+    private var actions: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Quick actions")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+            Button {
+                if let db = app.database {
+                    MeetingExporter.exportViaSavePanel(
+                        meeting: meeting, database: db, folder: folder)
+                }
+            } label: {
+                Label("Export notes", systemImage: "square.and.arrow.up")
+            }
+            .accessibilityLabel("Export as Markdown")
+            Button {
+                if let db = app.database {
+                    MeetingExporter.copyTranscript(meeting: meeting, database: db)
+                }
+            } label: {
+                Label("Copy transcript", systemImage: "doc.on.doc")
+            }
+            if let draft = meeting.emailDraft, !draft.isEmpty {
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(draft, forType: .string)
+                    ToastController.shared.show("Email copied")
+                } label: {
+                    Label("Copy email", systemImage: "envelope")
+                }
+            }
+            Button(role: .destructive) {
+                confirmDelete = true
+            } label: {
+                Label("Delete meeting", systemImage: "trash")
+            }
+        }
+        .buttonStyle(.plain)
+        .font(.system(size: 13))
+        .foregroundStyle(Theme.textSecondary)
+        .labelStyle(.titleAndIcon)
+    }
+
+    private func detailRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(label)
+                .foregroundStyle(Theme.textTertiary)
+            Spacer(minLength: 8)
+            Text(value)
+                .foregroundStyle(Theme.textSecondary)
+                .multilineTextAlignment(.trailing)
+                .textSelection(.enabled)
+        }
+        .font(.system(size: 12))
+    }
+
+    private func percent(_ share: Double) -> String {
+        "\(Int((share * 100).rounded()))%"
     }
 }
 

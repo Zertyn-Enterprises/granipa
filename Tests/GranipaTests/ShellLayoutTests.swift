@@ -52,4 +52,11 @@ import Testing
             ShellLayout.presentation(windowWidth: 1120, userExpanded: true, hasContent: false)
                 == .hidden)
     }
+
+    @Test func meetingContentFitsTheShellMinimumWithoutInspector() {
+        #expect(MeetingDetailLayout.minContentWidth == 711)
+        #expect(!MeetingDetailLayout.compactPlayback(711))
+        #expect(MeetingDetailLayout.compactPlayback(619))
+        #expect(!MeetingDetailLayout.compactPlayback(620))
+    }
 }

@@ -146,7 +146,7 @@ struct EnhancedNotesView: View {
     }
 }
 
-private struct ActionItemRow: View {
+struct ActionItemRow: View {
     let item: ActionItem
     let toggle: () -> Void
 
