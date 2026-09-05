@@ -15,14 +15,64 @@ enum LibraryListPhase: Equatable, Sendable {
 enum LibraryCopy {
     static func homeTitle(
         isSearching: Bool,
-        folderName: String?,
-        mode: HomeView.Mode
+        folderName: String?
     ) -> String {
         if isSearching { return "Search" }
         if let folderName { return folderName }
-        switch mode {
-        case .inbox: return "Home"
-        case .library: return "Meetings"
+        return "Home"
+    }
+
+    struct EmptyCopy: Equatable, Sendable {
+        var icon: String
+        var title: String
+        var message: String?
+        var showsQuickNote: Bool
+        var showsRecord: Bool
+    }
+
+    static func emptyCopy(
+        isSearching: Bool,
+        query: String,
+        filter: HomeLibraryFilter,
+        folderName: String?
+    ) -> EmptyCopy {
+        if isSearching {
+            return EmptyCopy(
+                icon: "magnifyingglass",
+                title: "No results for \"\(query)\"",
+                message: nil,
+                showsQuickNote: false,
+                showsRecord: false)
+        }
+        let inFolder = folderName != nil
+        switch filter {
+        case .all:
+            return EmptyCopy(
+                icon: "calendar.badge.plus",
+                title: inFolder ? "No meetings in this folder" : "No meetings yet",
+                message: inFolder
+                    ? "Move a meeting here from its row menu, or record a new one."
+                    : "Record a meeting or start a quick note. Transcripts and notes land here.",
+                showsQuickNote: true,
+                showsRecord: true)
+        case .notes:
+            return EmptyCopy(
+                icon: "square.and.pencil",
+                title: inFolder ? "No notes in this folder" : "No notes yet",
+                message: inFolder
+                    ? "Move a meeting here from its row menu, or start a quick note."
+                    : "Quick notes and meeting notes show up here.",
+                showsQuickNote: true,
+                showsRecord: false)
+        case .recordings:
+            return EmptyCopy(
+                icon: "waveform",
+                title: inFolder ? "No recordings in this folder" : "No recordings yet",
+                message: inFolder
+                    ? "Move a recording here from its row menu, or record a new one."
+                    : "Record a meeting to capture mic and system audio files here.",
+                showsQuickNote: false,
+                showsRecord: true)
         }
     }
 
@@ -124,34 +174,37 @@ struct LibraryMetaRow: View {
 }
 
 struct HomeView: View {
-    enum Mode {
-        case inbox
-        case library
-    }
-
     @Environment(AppState.self) private var app
-    var mode: Mode = .inbox
     @State private var searchResults: [Meeting] = []
-    @State private var searchDebounce: Task<Void, Never>?
     @State private var searchInFlight = false
+    @State private var fileStatuses: [String: RecordingFileStatus] = [:]
 
-    private var isSearching: Bool { !app.searchQuery.isEmpty }
+    private var isSearching: Bool { MeetingLibrary.isSearching(app.searchQuery) }
+
+    private var selectedFilter: HomeLibraryFilter {
+        AppNavigation.activeLibraryFilter(
+            destination: app.sidebarDestination,
+            stored: app.homeLibraryFilter)
+    }
 
     private var activeFolder: Folder? {
         app.selectedFolderID.flatMap { id in app.folders.first { $0.id == id } }
     }
 
     private var shownMeetings: [Meeting] {
-        let base = isSearching ? searchResults : app.meetings
-        guard let folderID = app.selectedFolderID else { return base }
-        return base.filter { $0.folderID == folderID }
+        MeetingLibrary.shown(
+            in: MeetingLibrary.libraryBase(
+                meetings: app.meetings,
+                searchResults: searchResults,
+                isSearching: isSearching),
+            filter: selectedFilter,
+            folderID: app.selectedFolderID)
     }
 
     private var headerTitle: String {
         LibraryCopy.homeTitle(
             isSearching: isSearching,
-            folderName: activeFolder?.name,
-            mode: mode)
+            folderName: activeFolder?.name)
     }
 
     private var nextEvent: CalendarMeeting? {
@@ -162,8 +215,6 @@ struct HomeView: View {
         MeetingLibrary.dayGroups(from: shownMeetings)
     }
 
-    private var usesInboxLayout: Bool { mode == .inbox && activeFolder == nil }
-
     private var listPhase: LibraryListPhase {
         LibraryListPhase.resolve(
             isEmpty: shownMeetings.isEmpty,
@@ -171,12 +222,33 @@ struct HomeView: View {
             searchInFlight: searchInFlight)
     }
 
+    private var empty: LibraryCopy.EmptyCopy {
+        LibraryCopy.emptyCopy(
+            isSearching: isSearching,
+            query: app.searchQuery,
+            filter: selectedFilter,
+            folderName: activeFolder?.name)
+    }
+
+    private var fileStatusTaskID: [String] {
+        selectedFilter == .recordings
+            ? MeetingLibrary.recordingPaths(in: shownMeetings) : []
+    }
+
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 24) {
-                DestinationHeader(title: headerTitle)
+                VStack(alignment: .leading, spacing: Theme.spaceM) {
+                    DestinationHeader(title: headerTitle)
+                    HomeLibraryFilterStrip(selection: selectedFilter, onSelect: selectFilter)
+                }
 
-                if usesInboxLayout, !isSearching, let event = nextEvent {
+                if AppNavigation.showsHomeCalendarCard(
+                    filter: selectedFilter,
+                    isSearching: isSearching,
+                    hasFolder: app.selectedFolderID != nil),
+                    let event = nextEvent
+                {
                     HeroEventCard(event: event)
                 }
 
@@ -195,7 +267,15 @@ struct HomeView: View {
                                 .foregroundStyle(Theme.textSecondary)
                                 .padding(.bottom, 2)
                             ForEach(group.meetings) { meeting in
-                                HomeMeetingRow(meeting: meeting)
+                                switch selectedFilter {
+                                case .all:
+                                    HomeMeetingRow(meeting: meeting)
+                                case .notes:
+                                    NotesLibraryRow(meeting: meeting)
+                                case .recordings:
+                                    FilesLibraryRow(
+                                        meeting: meeting, fileStatuses: fileStatuses)
+                                }
                             }
                         }
                         .padding(.bottom, 8)
@@ -207,63 +287,111 @@ struct HomeView: View {
             .padding(.bottom, 32)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .onChange(of: app.searchQuery) {
-            searchDebounce?.cancel()
-            guard isSearching, let db = app.database else {
+        .task(id: app.searchQuery) {
+            let query = app.searchQuery
+            guard MeetingLibrary.isSearching(query), let db = app.database else {
                 searchResults = []
                 searchInFlight = false
                 return
             }
-            let query = app.searchQuery
             searchInFlight = true
-            searchDebounce = Task {
-                try? await Task.sleep(for: .milliseconds(200))
-                guard !Task.isCancelled else { return }
-                let results = await Task.detached(priority: .userInitiated) {
-                    (try? db.searchMeetings(query: query)) ?? []
-                }.value
-                guard !Task.isCancelled, query == app.searchQuery else { return }
-                searchResults = results
-                searchInFlight = false
-            }
+            try? await Task.sleep(for: .milliseconds(200))
+            guard !Task.isCancelled else { return }
+            let results = await Task.detached(priority: .userInitiated) {
+                (try? db.searchMeetings(query: query)) ?? []
+            }.value
+            guard MeetingLibrary.acceptSearch(
+                finishedQuery: query,
+                currentQuery: app.searchQuery,
+                cancelled: Task.isCancelled)
+            else { return }
+            searchResults = results
+            searchInFlight = false
         }
+        .task(id: fileStatusTaskID) {
+            let paths = fileStatusTaskID
+            guard !paths.isEmpty else {
+                fileStatuses = [:]
+                return
+            }
+            let resolved = await Task.detached(priority: .utility) {
+                MeetingLibrary.fileStatuses(for: paths)
+            }.value
+            guard !Task.isCancelled else { return }
+            fileStatuses = resolved
+        }
+    }
+
+    private func selectFilter(_ filter: HomeLibraryFilter) {
+        let next = AppNavigation.selectingFilter(
+            filter, destination: app.sidebarDestination)
+        app.sidebarDestination = next.destination
+        app.homeLibraryFilter = next.filter
     }
 
     private var emptyState: some View {
         VStack(spacing: 14) {
-            EmptyStateView(
-                icon: isSearching ? "magnifyingglass" : "calendar.badge.plus",
-                title: isSearching
-                    ? "No results for \"\(app.searchQuery)\""
-                    : activeFolder != nil ? "No meetings in this folder" : "No meetings yet",
-                message: isSearching
-                    ? nil
-                    : activeFolder != nil
-                        ? "Move a meeting here from its row menu, or record a new one."
-                        : "Record a meeting or start a quick note. Transcripts and notes land here.")
-            if !isSearching {
+            EmptyStateView(icon: empty.icon, title: empty.title, message: empty.message)
+            if empty.showsQuickNote || empty.showsRecord {
                 HStack(spacing: 10) {
-                    Button {
-                        app.createMeeting()
-                    } label: {
-                        Label("Quick note", systemImage: "plus")
-                            .font(.system(size: 14, weight: .medium))
+                    if empty.showsQuickNote {
+                        Button {
+                            app.createMeeting()
+                        } label: {
+                            Label("Quick note", systemImage: "plus")
+                                .font(.system(size: 14, weight: .medium))
+                        }
+                        .granipaSecondaryControl()
+                        .accessibilityLabel("Quick note")
                     }
-                    .granipaSecondaryControl()
-                    .accessibilityLabel("Quick note")
-                    Button {
-                        app.startRecording()
-                    } label: {
-                        Label("Record", systemImage: "record.circle")
-                            .font(.system(size: 15, weight: .semibold))
+                    if empty.showsRecord {
+                        Button {
+                            app.startRecording()
+                        } label: {
+                            Label("Record", systemImage: "record.circle")
+                                .font(.system(size: 15, weight: .semibold))
+                        }
+                        .granipaPrimaryControl()
+                        .disabled(app.recorder.isBusy)
+                        .accessibilityLabel("Record")
                     }
-                    .granipaPrimaryControl()
-                    .disabled(app.recorder.isBusy)
-                    .accessibilityLabel("Record")
                 }
                 .padding(.top, 4)
             }
         }
+    }
+}
+
+private struct HomeLibraryFilterStrip: View {
+    let selection: HomeLibraryFilter
+    let onSelect: (HomeLibraryFilter) -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(HomeLibraryFilter.allCases) { item in
+                let isSelected = selection == item
+                Button {
+                    onSelect(item)
+                } label: {
+                    Text(item.title)
+                        .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+                        .foregroundStyle(isSelected ? Theme.textPrimary : Theme.textSecondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .frame(minHeight: 28)
+                        .background(
+                            isSelected ? Theme.accent.opacity(0.14) : Color.clear,
+                            in: Capsule(style: .continuous)
+                        )
+                }
+                .buttonStyle(PressFadeButtonStyle())
+                .accessibilityLabel(item.title)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+            }
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Library filter")
     }
 }
 

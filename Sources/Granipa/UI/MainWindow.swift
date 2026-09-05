@@ -115,7 +115,9 @@ struct MainWindow: View {
                 let snap = AppNavigation.SettingsReturn.snapshot(
                     destination: old,
                     selectedMeetingID: app.selectedMeetingID,
-                    selectedFolderID: app.selectedFolderID)
+                    selectedFolderID: app.selectedFolderID,
+                    libraryFilter: AppNavigation.activeLibraryFilter(
+                        destination: old, stored: app.homeLibraryFilter))
             {
                 settingsReturn = snap
             }
@@ -189,19 +191,15 @@ struct MainWindow: View {
                 } else if let meeting = app.selectedMeeting {
                     MeetingDetailView(
                         meeting: meeting,
-                        preferNotes: app.sidebarDestination == .notes
+                        preferNotes: AppNavigation.activeLibraryFilter(
+                            destination: app.sidebarDestination,
+                            stored: app.homeLibraryFilter) == .notes
                     )
                     .id(meeting.id)
                 } else {
                     switch app.sidebarDestination {
-                    case .home:
-                        HomeView(mode: app.selectedFolderID == nil ? .inbox : .library)
-                    case .meetings:
-                        HomeView(mode: .library)
-                    case .notes:
-                        NotesLibraryView()
-                    case .files:
-                        FilesLibraryView()
+                    case .home, .meetings, .notes, .files:
+                        HomeView()
                     case .dictation:
                         DictationHistoryView()
                     case .settings:
@@ -248,6 +246,7 @@ struct MainWindow: View {
         app.sidebarDestination = restored.destination
         app.selectedMeetingID = restored.selectedMeetingID
         app.selectedFolderID = restored.selectedFolderID
+        app.homeLibraryFilter = restored.libraryFilter
     }
 }
 

@@ -92,7 +92,7 @@ struct NotesLibraryView: View {
     }
 }
 
-private struct NotesLibraryRow: View {
+struct NotesLibraryRow: View {
     @Environment(AppState.self) private var app
     let meeting: Meeting
 

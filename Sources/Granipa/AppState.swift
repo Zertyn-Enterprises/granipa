@@ -29,6 +29,7 @@ final class AppState {
     var searchQuery = ""
     var selectedMeetingID: String?
     var sidebarDestination: SidebarDestination = .home
+    var homeLibraryFilter: HomeLibraryFilter = .all
     var loadError: String?
 
     var selectedMeeting: Meeting? {
@@ -578,14 +579,16 @@ final class AppState {
     }
 
     func reveal(_ destination: SidebarDestination) {
-        sidebarDestination = destination
+        let next = AppNavigation.reveal(destination, currentFilter: homeLibraryFilter)
+        sidebarDestination = next.destination
+        homeLibraryFilter = next.filter
         selectedFolderID = nil
         selectedMeetingID = nil
         searchQuery = ""
     }
 
     func revealFolder(id: String) {
-        sidebarDestination = .meetings
+        sidebarDestination = AppNavigation.folderRevealDestination
         selectedFolderID = id
         selectedMeetingID = nil
         searchQuery = ""

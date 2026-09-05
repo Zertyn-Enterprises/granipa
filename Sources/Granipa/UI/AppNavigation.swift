@@ -10,9 +10,10 @@ enum SidebarDestination: String, CaseIterable, Sendable, Hashable {
     /// Transient in-app Settings. Not persisted. Not a library destination.
     case settings
 
-    /// The five library destinations shown in the app sidebar.
+    /// App sidebar destinations. Meetings, Notes, and Files remain leftover
+    /// transient routes for fixtures; they are not sidebar entries.
     static var appDestinations: [SidebarDestination] {
-        allCases.filter { $0 != .settings }
+        [.home, .dictation]
     }
 
     var title: String {
@@ -34,6 +35,23 @@ enum SidebarDestination: String, CaseIterable, Sendable, Hashable {
         case .notes: "square.and.pencil"
         case .files: "folder.fill"
         case .settings: "gearshape"
+        }
+    }
+}
+
+/// Home list type filter. Transient; not a persisted contract.
+enum HomeLibraryFilter: String, CaseIterable, Sendable, Hashable, Identifiable {
+    case all
+    case notes
+    case recordings
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: "All"
+        case .notes: "Notes"
+        case .recordings: "Recordings"
         }
     }
 }
@@ -67,6 +85,14 @@ enum RecordingFileStatus: Equatable, Sendable {
 }
 
 enum AppNavigation {
+    /// Leftover Meetings/Notes/Files routes highlight Home, never a removed row.
+    static func resolvedAppDestination(_ destination: SidebarDestination) -> SidebarDestination {
+        switch destination {
+        case .meetings, .notes, .files: .home
+        case .home, .dictation, .settings: destination
+        }
+    }
+
     static func highlight(
         destination: SidebarDestination,
         selectedFolderID: String?
@@ -74,8 +100,54 @@ enum AppNavigation {
         if let selectedFolderID {
             return .folder(selectedFolderID)
         }
-        return .destination(destination)
+        return .destination(resolvedAppDestination(destination))
     }
+
+    static func activeLibraryFilter(
+        destination: SidebarDestination,
+        stored: HomeLibraryFilter
+    ) -> HomeLibraryFilter {
+        switch destination {
+        case .notes: .notes
+        case .files: .recordings
+        case .meetings: .all
+        case .home, .dictation, .settings: stored
+        }
+    }
+
+    static func showsHomeCalendarCard(
+        filter: HomeLibraryFilter,
+        isSearching: Bool,
+        hasFolder: Bool
+    ) -> Bool {
+        filter == .all && !isSearching && !hasFolder
+    }
+
+    /// Sidebar and leftover library reveals. Filter is kept on Home/Dictation.
+    static func reveal(
+        _ destination: SidebarDestination,
+        currentFilter: HomeLibraryFilter
+    ) -> (destination: SidebarDestination, filter: HomeLibraryFilter) {
+        switch destination {
+        case .notes: (.home, .notes)
+        case .files: (.home, .recordings)
+        case .meetings: (.home, .all)
+        case .home, .dictation, .settings: (destination, currentFilter)
+        }
+    }
+
+    static func selectingFilter(
+        _ filter: HomeLibraryFilter,
+        destination: SidebarDestination
+    ) -> (destination: SidebarDestination, filter: HomeLibraryFilter) {
+        switch destination {
+        case .meetings, .notes, .files: (.home, filter)
+        case .home, .dictation, .settings: (destination, filter)
+        }
+    }
+
+    /// Collections stay on Home so the header is never a Meetings page.
+    static let folderRevealDestination: SidebarDestination = .home
 
     static func isPrimaryActive(
         item: SidebarDestination,
@@ -124,27 +196,80 @@ enum AppNavigation {
         var destination: SidebarDestination
         var selectedMeetingID: String?
         var selectedFolderID: String?
+        var libraryFilter: HomeLibraryFilter = .all
 
         static func snapshot(
             destination: SidebarDestination,
             selectedMeetingID: String?,
-            selectedFolderID: String?
+            selectedFolderID: String?,
+            libraryFilter: HomeLibraryFilter = .all
         ) -> SettingsReturn? {
             guard destination != .settings else { return nil }
             return SettingsReturn(
                 destination: destination,
                 selectedMeetingID: selectedMeetingID,
-                selectedFolderID: selectedFolderID)
+                selectedFolderID: selectedFolderID,
+                libraryFilter: libraryFilter)
         }
     }
 
     static func leaveSettings(_ snapshot: SettingsReturn?) -> SettingsReturn {
         snapshot
-            ?? SettingsReturn(destination: .home, selectedMeetingID: nil, selectedFolderID: nil)
+            ?? SettingsReturn(
+                destination: .home, selectedMeetingID: nil, selectedFolderID: nil,
+                libraryFilter: .all)
     }
 }
 
 enum MeetingLibrary {
+    static func isSearching(_ query: String) -> Bool {
+        !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    static func libraryBase(
+        meetings: [Meeting],
+        searchResults: [Meeting],
+        isSearching: Bool
+    ) -> [Meeting] {
+        isSearching ? searchResults : meetings
+    }
+
+    static func acceptSearch(
+        finishedQuery: String,
+        currentQuery: String,
+        cancelled: Bool
+    ) -> Bool {
+        !cancelled && finishedQuery == currentQuery
+    }
+
+    static func shown(
+        in meetings: [Meeting],
+        filter: HomeLibraryFilter,
+        folderID: String?
+    ) -> [Meeting] {
+        let typed: [Meeting]
+        switch filter {
+        case .all: typed = meetings
+        case .notes: typed = notes(in: meetings)
+        case .recordings: typed = recordings(in: meetings)
+        }
+        guard let folderID else { return typed }
+        return typed.filter { $0.folderID == folderID }
+    }
+
+    static func recordingPaths(in meetings: [Meeting]) -> [String] {
+        var seen = Set<String>()
+        var paths: [String] = []
+        for meeting in recordings(in: meetings) {
+            for path in [meeting.audioMicPath, meeting.audioSystemPath].compactMap({ $0 }) {
+                if seen.insert(path).inserted {
+                    paths.append(path)
+                }
+            }
+        }
+        return paths
+    }
+
     static func notes(in meetings: [Meeting]) -> [Meeting] {
         meetings.filter { meeting in
             let trimmed = meeting.notesMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)

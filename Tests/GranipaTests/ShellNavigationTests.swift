@@ -6,17 +6,39 @@ import Testing
 @testable import Granipa
 
 @Suite struct ShellNavigationTests {
+    /// Human-approved Home unification (2026-09-05): header is Home, Search,
+    /// or the selected folder name. The old `.library` "Meetings" title is gone.
     @Test func homeTitleStaysHomeUnlessSearchingOrInAFolder() {
+        #expect(LibraryCopy.homeTitle(isSearching: false, folderName: nil) == "Home")
+        #expect(LibraryCopy.homeTitle(isSearching: true, folderName: nil) == "Search")
         #expect(
-            LibraryCopy.homeTitle(isSearching: false, folderName: nil, mode: .inbox) == "Home")
-        #expect(
-            LibraryCopy.homeTitle(isSearching: false, folderName: nil, mode: .library)
-                == "Meetings")
-        #expect(
-            LibraryCopy.homeTitle(isSearching: true, folderName: nil, mode: .inbox) == "Search")
-        #expect(
-            LibraryCopy.homeTitle(isSearching: false, folderName: "Engineering", mode: .inbox)
+            LibraryCopy.homeTitle(isSearching: false, folderName: "Engineering")
                 == "Engineering")
+    }
+
+    /// NEW: human-approved Home unification. Sidebar app destinations are
+    /// Home + Dictation only; Meetings/Notes/Files gather into Home filters.
+    /// Observed red against feat/granipa-v2 before the unification change:
+    /// appDestinations was ["Home", "Dictation", "Meetings", "Notes", "Files"].
+    @Test func appSidebarDestinationsAreHomeAndDictationOnly() {
+        #expect(SidebarDestination.appDestinations.map(\.title) == ["Home", "Dictation"])
+        #expect(SidebarDestination.appDestinations == [.home, .dictation])
+        #expect(!SidebarDestination.appDestinations.contains(.meetings))
+        #expect(!SidebarDestination.appDestinations.contains(.notes))
+        #expect(!SidebarDestination.appDestinations.contains(.files))
+        #expect(!SidebarDestination.appDestinations.contains(.settings))
+    }
+
+    /// NEW: Home header is never a duplicate Meetings page.
+    /// Observed red against feat/granipa-v2 (`mode: .library` returned "Meetings").
+    @Test func homeHeaderIsNeverAMeetingsPage() {
+        #expect(LibraryCopy.homeTitle(isSearching: false, folderName: nil) == "Home")
+        #expect(LibraryCopy.homeTitle(isSearching: false, folderName: nil) != "Meetings")
+        #expect(
+            LibraryCopy.homeTitle(isSearching: true, folderName: "Engineering") == "Search")
+        #expect(
+            LibraryCopy.homeTitle(isSearching: false, folderName: "Engineering")
+                != "Meetings")
     }
 
     @Test func libraryExcerptPrefersSummaryThenPlainNotesWithoutMarkdownMarkup() {
@@ -149,10 +171,13 @@ import Testing
     }
 
     @Test func destinationChromeMatchesTheContract() {
-        // Was five allCases. User added in-app Settings as a transient sixth
-        // destination; the five library destinations stay the app sidebar.
+        // Human-approved Home unification (2026-09-05): sidebar app destinations
+        // are Home + Dictation. Meetings/Notes/Files stay on allCases as leftover
+        // transient routes for fixtures; Settings stays out of the library list.
+        // Previous assertion expected five sidebar titles; that UI contract was
+        // replaced, not weakened — see appSidebarDestinationsAreHomeAndDictationOnly.
         #expect(SidebarDestination.appDestinations.map(\.title) == [
-            "Home", "Dictation", "Meetings", "Notes", "Files",
+            "Home", "Dictation",
         ])
         #expect(SidebarDestination.allCases.map(\.title) == [
             "Home", "Dictation", "Meetings", "Notes", "Files", "Settings",
@@ -191,6 +216,7 @@ import Testing
         #expect(snap?.destination == .meetings)
         #expect(snap?.selectedMeetingID == "m1")
         #expect(snap?.selectedFolderID == "eng")
+        #expect(snap?.libraryFilter == .all)
     }
 
     @Test func openingSettingsAgainDoesNotReplaceTheReturnSnapshot() {
@@ -209,6 +235,7 @@ import Testing
         #expect(restored.destination == .notes)
         #expect(restored.selectedMeetingID == "note-1")
         #expect(restored.selectedFolderID == nil)
+        #expect(restored.libraryFilter == .all)
         #expect(restored.destination != .settings)
     }
 
@@ -217,6 +244,7 @@ import Testing
         #expect(restored.destination == .home)
         #expect(restored.selectedMeetingID == nil)
         #expect(restored.selectedFolderID == nil)
+        #expect(restored.libraryFilter == .all)
     }
 
     @Test func openingAMeetingKeepsTheSourceDestinationHighlighted() {
@@ -224,17 +252,17 @@ import Testing
             AppNavigation.highlight(destination: .home, selectedFolderID: nil)
                 == .destination(.home))
         #expect(
-            AppNavigation.highlight(destination: .meetings, selectedFolderID: nil)
-                == .destination(.meetings))
+            AppNavigation.highlight(destination: .dictation, selectedFolderID: nil)
+                == .destination(.dictation))
         #expect(
             AppNavigation.isPrimaryActive(
                 item: .home, destination: .home, selectedFolderID: nil))
         #expect(
             !AppNavigation.isPrimaryActive(
-                item: .meetings, destination: .home, selectedFolderID: nil))
+                item: .dictation, destination: .home, selectedFolderID: nil))
         #expect(
             AppNavigation.isPrimaryActive(
-                item: .meetings, destination: .meetings, selectedFolderID: nil))
+                item: .dictation, destination: .dictation, selectedFolderID: nil))
     }
 
     @Test func aSelectedFolderWinsOverPrimaryDestinations() {
@@ -471,6 +499,273 @@ import Testing
         #expect(
             MeetingLibrary.fileLabel(path: path, channel: "Them", status: .present(byteCount: 3))
                 == "Them · mic.m4a · \(size)")
+    }
+
+    @Test func leftoverLibraryRoutesHighlightHomeNotRemovedSidebarRows() {
+        for leftover in [SidebarDestination.meetings, .notes, .files] {
+            #expect(
+                AppNavigation.resolvedAppDestination(leftover) == .home)
+            #expect(
+                AppNavigation.highlight(destination: leftover, selectedFolderID: nil)
+                    == .destination(.home))
+            #expect(
+                AppNavigation.isPrimaryActive(
+                    item: .home, destination: leftover, selectedFolderID: nil))
+            #expect(
+                !AppNavigation.isPrimaryActive(
+                    item: leftover, destination: leftover, selectedFolderID: nil))
+        }
+    }
+
+    @Test func homeFilterDefaultsToAllAndLeftoverRoutesMapToType() {
+        #expect(HomeLibraryFilter.allCases.map(\.title) == ["All", "Notes", "Recordings"])
+        #expect(
+            AppNavigation.activeLibraryFilter(destination: .home, stored: .all) == .all)
+        #expect(
+            AppNavigation.activeLibraryFilter(destination: .home, stored: .notes) == .notes)
+        #expect(
+            AppNavigation.activeLibraryFilter(destination: .notes, stored: .all) == .notes)
+        #expect(
+            AppNavigation.activeLibraryFilter(destination: .files, stored: .all)
+                == .recordings)
+        #expect(
+            AppNavigation.activeLibraryFilter(destination: .meetings, stored: .notes)
+                == .all)
+        #expect(
+            AppNavigation.activeLibraryFilter(destination: .dictation, stored: .notes)
+                == .notes)
+    }
+
+    @Test func revealHomeAndDictationKeepTheCurrentFilter() {
+        let home = AppNavigation.reveal(.home, currentFilter: .recordings)
+        #expect(home.destination == .home)
+        #expect(home.filter == .recordings)
+        let dictation = AppNavigation.reveal(.dictation, currentFilter: .notes)
+        #expect(dictation.destination == .dictation)
+        #expect(dictation.filter == .notes)
+    }
+
+    @Test func leftoverRevealsCanonicalizeOntoHomeFilters() {
+        let notes = AppNavigation.reveal(.notes, currentFilter: .all)
+        #expect(notes.destination == .home)
+        #expect(notes.filter == .notes)
+        let files = AppNavigation.reveal(.files, currentFilter: .notes)
+        #expect(files.destination == .home)
+        #expect(files.filter == .recordings)
+        let meetings = AppNavigation.reveal(.meetings, currentFilter: .notes)
+        #expect(meetings.destination == .home)
+        #expect(meetings.filter == .all)
+    }
+
+    @Test func selectingAFilterFromALeftoverRouteReturnsToHome() {
+        let next = AppNavigation.selectingFilter(.recordings, destination: .notes)
+        #expect(next.destination == .home)
+        #expect(next.filter == .recordings)
+        let alreadyHome = AppNavigation.selectingFilter(.notes, destination: .home)
+        #expect(alreadyHome.destination == .home)
+        #expect(alreadyHome.filter == .notes)
+    }
+
+    @Test func collectionsStayOnHomeAndKeepTheTypeFilter() {
+        #expect(AppNavigation.folderRevealDestination == .home)
+        #expect(AppNavigation.folderRevealDestination != .meetings)
+        let highlight = AppNavigation.highlight(
+            destination: .home, selectedFolderID: "eng")
+        #expect(highlight == .folder("eng"))
+        #expect(
+            !AppNavigation.isPrimaryActive(
+                item: .home, destination: .home, selectedFolderID: "eng"))
+        #expect(
+            AppNavigation.activeLibraryFilter(destination: .home, stored: .notes) == .notes)
+    }
+
+    @Test func settingsReturnRetainsLibraryFilterAcrossMeetingAndSettings() {
+        let snap = AppNavigation.SettingsReturn.snapshot(
+            destination: .home,
+            selectedMeetingID: "m-open",
+            selectedFolderID: "eng",
+            libraryFilter: .recordings)
+        #expect(snap?.libraryFilter == .recordings)
+        let restored = AppNavigation.leaveSettings(snap)
+        #expect(restored.destination == .home)
+        #expect(restored.selectedMeetingID == "m-open")
+        #expect(restored.selectedFolderID == "eng")
+        #expect(restored.libraryFilter == .recordings)
+    }
+
+    @Test func calendarCardStaysOnUnfilteredHomeAllOnly() {
+        #expect(
+            AppNavigation.showsHomeCalendarCard(
+                filter: .all, isSearching: false, hasFolder: false))
+        #expect(
+            !AppNavigation.showsHomeCalendarCard(
+                filter: .notes, isSearching: false, hasFolder: false))
+        #expect(
+            !AppNavigation.showsHomeCalendarCard(
+                filter: .recordings, isSearching: false, hasFolder: false))
+        #expect(
+            !AppNavigation.showsHomeCalendarCard(
+                filter: .all, isSearching: true, hasFolder: false))
+        #expect(
+            !AppNavigation.showsHomeCalendarCard(
+                filter: .all, isSearching: false, hasFolder: true))
+    }
+
+    @Test func shownMeetingsIntersectFolderAndTypeFilter() {
+        var noteInFolder = Meeting.new(title: "Note in folder", language: "auto")
+        noteInFolder.folderID = "eng"
+        noteInFolder.notesMarkdown = "ship"
+        var recordingInFolder = Meeting.new(title: "Rec in folder", language: "auto")
+        recordingInFolder.folderID = "eng"
+        recordingInFolder.audioMicPath = "/tmp/mic.m4a"
+        var noteLoose = Meeting.new(title: "Loose note", language: "auto")
+        noteLoose.notesMarkdown = "ship"
+        var recordingLoose = Meeting.new(title: "Loose rec", language: "auto")
+        recordingLoose.audioSystemPath = "/tmp/sys.m4a"
+        let all = [noteInFolder, recordingInFolder, noteLoose, recordingLoose]
+
+        #expect(
+            Set(MeetingLibrary.shown(in: all, filter: .all, folderID: nil).map(\.title))
+                == ["Note in folder", "Rec in folder", "Loose note", "Loose rec"])
+        #expect(
+            Set(MeetingLibrary.shown(in: all, filter: .notes, folderID: nil).map(\.title))
+                == ["Note in folder", "Loose note"])
+        #expect(
+            Set(
+                MeetingLibrary.shown(in: all, filter: .recordings, folderID: nil).map(\.title))
+                == ["Rec in folder", "Loose rec"])
+        #expect(
+            Set(MeetingLibrary.shown(in: all, filter: .all, folderID: "eng").map(\.title))
+                == ["Note in folder", "Rec in folder"])
+        #expect(
+            MeetingLibrary.shown(in: all, filter: .notes, folderID: "eng").map(\.title)
+                == ["Note in folder"])
+        #expect(
+            MeetingLibrary.shown(in: all, filter: .recordings, folderID: "eng").map(\.title)
+                == ["Rec in folder"])
+        #expect(MeetingLibrary.shown(in: all, filter: .notes, folderID: "prod").isEmpty)
+    }
+
+    @Test func searchUsesLiveResultsOnlyWhileSearchingAndDropsSupersededQueries() {
+        let live = Meeting.new(title: "Live library", language: "auto")
+        let stale = Meeting.new(title: "Stale search", language: "auto")
+        #expect(!MeetingLibrary.isSearching("  \n"))
+        #expect(MeetingLibrary.isSearching("ship"))
+        #expect(
+            MeetingLibrary.libraryBase(
+                meetings: [live], searchResults: [stale], isSearching: false)
+                == [live])
+        #expect(
+            MeetingLibrary.libraryBase(
+                meetings: [live], searchResults: [stale], isSearching: true)
+                == [stale])
+        #expect(
+            !MeetingLibrary.acceptSearch(
+                finishedQuery: "old", currentQuery: "new", cancelled: false))
+        #expect(
+            !MeetingLibrary.acceptSearch(
+                finishedQuery: "q", currentQuery: "q", cancelled: true))
+        #expect(
+            MeetingLibrary.acceptSearch(
+                finishedQuery: "q", currentQuery: "q", cancelled: false))
+    }
+
+    @Test func emptyCopyMatchesActiveFilterFolderAndSearch() {
+        let search = LibraryCopy.emptyCopy(
+            isSearching: true, query: "alpha", filter: .notes, folderName: "Eng")
+        #expect(search.icon == "magnifyingglass")
+        #expect(search.title == "No results for \"alpha\"")
+        #expect(search.message == nil)
+        #expect(!search.showsQuickNote && !search.showsRecord)
+
+        let notes = LibraryCopy.emptyCopy(
+            isSearching: false, query: "", filter: .notes, folderName: nil)
+        #expect(notes.title == "No notes yet")
+        #expect(notes.showsQuickNote && !notes.showsRecord)
+
+        let recordings = LibraryCopy.emptyCopy(
+            isSearching: false, query: "", filter: .recordings, folderName: nil)
+        #expect(recordings.title == "No recordings yet")
+        #expect(!recordings.showsQuickNote && recordings.showsRecord)
+
+        let folderNotes = LibraryCopy.emptyCopy(
+            isSearching: false, query: "", filter: .notes, folderName: "Eng")
+        #expect(folderNotes.title == "No notes in this folder")
+        #expect(folderNotes.showsQuickNote)
+
+        let allHome = LibraryCopy.emptyCopy(
+            isSearching: false, query: "", filter: .all, folderName: nil)
+        #expect(allHome.title == "No meetings yet")
+        #expect(allHome.showsQuickNote && allHome.showsRecord)
+    }
+
+    @Test func homeSearchFilterAndFolderIntersectOnRealGRDB() throws {
+        let db = try AppDatabase(writer: DatabaseQueue())
+        let folder = Folder.new(name: "Engineering", team: nil)
+        try db.save(folder)
+        let otherFolder = Folder.new(name: "Other", team: nil)
+        try db.save(otherFolder)
+
+        var noteInFolder = Meeting.new(title: "Untitled note", language: "en-US")
+        noteInFolder.folderID = folder.id
+        noteInFolder.notesMarkdown = "shell notes"
+        try db.save(noteInFolder)
+        try db.save(
+            TranscriptSegment.new(
+                meetingID: noteInFolder.id, channel: .system, speaker: "Them",
+                text: "home-unify-token", startSeconds: 0, endSeconds: 2, isFinal: true))
+
+        var noteOtherFolder = Meeting.new(title: "Other note", language: "en-US")
+        noteOtherFolder.folderID = otherFolder.id
+        noteOtherFolder.notesMarkdown = "shell notes"
+        try db.save(noteOtherFolder)
+        try db.save(
+            TranscriptSegment.new(
+                meetingID: noteOtherFolder.id, channel: .mic, speaker: "Me",
+                text: "home-unify-token", startSeconds: 0, endSeconds: 2, isFinal: true))
+
+        var recordingInFolder = Meeting.new(title: "Recorded", language: "en-US")
+        recordingInFolder.folderID = folder.id
+        recordingInFolder.audioMicPath = "/tmp/mic.m4a"
+        try db.save(recordingInFolder)
+        try db.save(
+            TranscriptSegment.new(
+                meetingID: recordingInFolder.id, channel: .mic, speaker: "Me",
+                text: "home-unify-token", startSeconds: 0, endSeconds: 2, isFinal: true))
+
+        let searched = try db.searchMeetings(query: "home-unify-token")
+        #expect(Set(searched.map(\.id)) == [
+            noteInFolder.id, noteOtherFolder.id, recordingInFolder.id,
+        ])
+        #expect(
+            MeetingLibrary.shown(in: searched, filter: .notes, folderID: folder.id).map(\.id)
+                == [noteInFolder.id])
+        #expect(
+            MeetingLibrary.shown(
+                in: searched, filter: .recordings, folderID: folder.id
+            ).map(\.id) == [recordingInFolder.id])
+        #expect(
+            Set(
+                MeetingLibrary.shown(in: searched, filter: .all, folderID: folder.id).map(\.id))
+                == [noteInFolder.id, recordingInFolder.id])
+    }
+
+    @Test func homeWiresExistingNoteAndRecordingRowsNotGenericReplacements() throws {
+        let home = try granipaSource("Sources/Granipa/UI/HomeView.swift")
+        let main = try granipaSource("Sources/Granipa/UI/MainWindow.swift")
+        let sidebar = try granipaSource("Sources/Granipa/UI/SidebarView.swift")
+        #expect(home.contains("HomeLibraryFilterStrip"))
+        #expect(home.contains("NotesLibraryRow"))
+        #expect(home.contains("FilesLibraryRow"))
+        #expect(home.contains("fileStatuses"))
+        #expect(home.contains("MeetingLibrary.fileStatuses"))
+        #expect(home.contains("accessibilityAddTraits(isSelected ? .isSelected : [])"))
+        #expect(!home.contains("return \"Meetings\""))
+        #expect(!main.contains("NotesLibraryView()"))
+        #expect(!main.contains("FilesLibraryView()"))
+        #expect(main.contains("HomeView()"))
+        #expect(sidebar.contains("SidebarDestination.appDestinations"))
+        #expect(!sidebar.contains("case .meetings"))
     }
 }
 

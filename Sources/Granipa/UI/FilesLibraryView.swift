@@ -22,16 +22,7 @@ struct FilesLibraryView: View {
     }
 
     private var recordingPaths: [String] {
-        var seen = Set<String>()
-        var paths: [String] = []
-        for meeting in MeetingLibrary.recordings(in: app.meetings) {
-            for path in [meeting.audioMicPath, meeting.audioSystemPath].compactMap({ $0 }) {
-                if seen.insert(path).inserted {
-                    paths.append(path)
-                }
-            }
-        }
-        return paths
+        MeetingLibrary.recordingPaths(in: app.meetings)
     }
 
     var body: some View {
@@ -119,7 +110,7 @@ struct FilesLibraryView: View {
     }
 }
 
-private struct FilesLibraryRow: View {
+struct FilesLibraryRow: View {
     @Environment(AppState.self) private var app
     let meeting: Meeting
     let fileStatuses: [String: RecordingFileStatus]

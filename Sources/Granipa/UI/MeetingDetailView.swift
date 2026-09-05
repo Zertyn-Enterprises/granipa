@@ -200,7 +200,8 @@ struct MeetingDetailView: View {
     // MARK: - Header
 
     private var backLabel: String {
-        app.sidebarDestination == .home ? "Back to Home" : "Back"
+        AppNavigation.resolvedAppDestination(app.sidebarDestination) == .home
+            ? "Back to Home" : "Back"
     }
 
     private var header: some View {
