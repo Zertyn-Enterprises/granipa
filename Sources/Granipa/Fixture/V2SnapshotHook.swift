@@ -87,10 +87,13 @@ enum V2SnapshotHook {
             window.setContentSize(NSSize(width: request.width, height: Self.captureHeight))
             try? await Task.sleep(for: .seconds(0.8))
             let rect = view.bounds
-            guard let rep = view.bitmapImageRepForCachingDisplay(in: rect),
-                let png = rep.representation(using: .png, properties: [:])
-            else {
-                Self.fail("could not render the fixture window content")
+            guard let rep = view.bitmapImageRepForCachingDisplay(in: rect) else {
+                Self.fail("could not allocate the fixture bitmap")
+                return
+            }
+            view.cacheDisplay(in: rect, to: rep)
+            guard let png = rep.representation(using: .png, properties: [:]) else {
+                Self.fail("could not encode the fixture window content")
                 return
             }
             let url = URL(fileURLWithPath: home, isDirectory: true)
