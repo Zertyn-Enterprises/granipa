@@ -1,5 +1,46 @@
 import SwiftUI
 
+enum LanguageChipStatus: Equatable {
+    case checking
+    case installed
+    case absent
+
+    var label: String {
+        switch self {
+        case .checking: "Checking"
+        case .installed: "Installed"
+        case .absent: "Not installed"
+        }
+    }
+
+    var accessibilityStatus: String {
+        switch self {
+        case .checking: "checking"
+        case .installed: "installed"
+        case .absent: "not installed"
+        }
+    }
+
+    static func resolve(knownInstalled: Set<String>?, localeID: String) -> LanguageChipStatus {
+        guard let knownInstalled else { return .checking }
+        return knownInstalled.contains(localeID) ? .installed : .absent
+    }
+}
+
+enum LanguageInstallProbe {
+    static func taskID(localeIDs: [String], refreshTick: Int) -> String {
+        "\(localeIDs.joined(separator: ","))#\(refreshTick)"
+    }
+
+    static func shouldClearKnown(checkedLocales: [String], visibleLocales: [String]) -> Bool {
+        checkedLocales != visibleLocales
+    }
+
+    static func isStale(requested: [String], visible: [String]) -> Bool {
+        requested != visible
+    }
+}
+
 struct PermissionsSettings: View {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -479,7 +520,9 @@ private struct PermissionLegend: View {
 
 private struct PermissionLanguagesCard: View {
     @AppStorage("probeLocales") private var probeLocalesRaw = "en-US,es-ES"
-    @State private var installedIDs: Set<String> = []
+    @State private var installedIDs: Set<String>?
+    @State private var checkedLocaleIDs: [String] = []
+    @State private var refreshTick = 0
 
     private var localeIDs: [String] {
         LanguageDetection.parseProbeLocales(probeLocalesRaw)
@@ -503,47 +546,75 @@ private struct PermissionLanguagesCard: View {
                 spacing: 8
             ) {
                 ForEach(localeIDs, id: \.self) { id in
+                    let status = LanguageChipStatus.resolve(
+                        knownInstalled: installedIDs, localeID: id)
+                    let name = languageName(id)
                     HStack(spacing: 6) {
-                        Text(languageName(id))
+                        Text(name)
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(Theme.textPrimary)
-                        if installedIDs.contains(id) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(Theme.statusDone)
-                                .help("\(languageName(id)) installed")
-                        } else {
-                            Text("Not installed")
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundStyle(Theme.textTertiary)
-                        }
+                        chipAccessory(status, name: name)
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .background(Theme.fillSubtle, in: Capsule())
                     .accessibilityElement(children: .combine)
-                    .accessibilityLabel(
-                        "\(languageName(id)) \(installedIDs.contains(id) ? "installed" : "not installed")"
-                    )
+                    .accessibilityLabel("\(name) \(status.accessibilityStatus)")
                 }
             }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .card(cornerRadius: Theme.radiusM)
-        .task { await refreshInstalled() }
-        .onChange(of: probeLocalesRaw) { _, _ in
-            Task { await refreshInstalled() }
+        .task(id: LanguageInstallProbe.taskID(localeIDs: localeIDs, refreshTick: refreshTick)) {
+            await refreshInstalled()
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+        ) { _ in
+            refreshTick += 1
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: NSLocale.currentLocaleDidChangeNotification)
+        ) { _ in
+            refreshTick += 1
+        }
+    }
+
+    @ViewBuilder
+    private func chipAccessory(_ status: LanguageChipStatus, name: String) -> some View {
+        switch status {
+        case .installed:
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(Theme.statusDone)
+                .help("\(name) installed")
+        case .checking, .absent:
+            Text(status.label)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(Theme.textTertiary)
         }
     }
 
     private func refreshInstalled() async {
+        let requested = localeIDs
+        if LanguageInstallProbe.shouldClearKnown(
+            checkedLocales: checkedLocaleIDs, visibleLocales: requested)
+        {
+            installedIDs = nil
+        }
         var installed: Set<String> = []
-        for id in localeIDs {
+        for id in requested {
+            if Task.isCancelled { return }
             if await SpeechModels.isInstalled(locale: Locale(identifier: id)) {
                 installed.insert(id)
             }
         }
+        if Task.isCancelled { return }
+        if LanguageInstallProbe.isStale(requested: requested, visible: localeIDs) {
+            return
+        }
         installedIDs = installed
+        checkedLocaleIDs = requested
     }
 
     private func languageName(_ id: String) -> String {
