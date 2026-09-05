@@ -1,6 +1,6 @@
 import SwiftUI
 
-enum MarkdownBlock: Equatable {
+enum MarkdownBlock: Equatable, Sendable {
     case heading(level: Int, text: String)
     case bullet(indent: Int, text: String)
     case numbered(indent: Int, marker: String, text: String)
@@ -85,12 +85,15 @@ enum MarkdownParser {
     }
 }
 
+/// Renders pre-parsed blocks. The parse belongs to `EnhancedNotesDocument`,
+/// so body evaluation never touches the raw markdown, and the lazy stack
+/// only instantiates rows as they approach the viewport.
 struct MarkdownBlocksView: View {
-    let markdown: String
+    let blocks: [MarkdownBlock]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            ForEach(Array(MarkdownParser.parse(markdown).enumerated()), id: \.offset) { _, block in
+        LazyVStack(alignment: .leading, spacing: 11) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 blockView(block)
             }
         }

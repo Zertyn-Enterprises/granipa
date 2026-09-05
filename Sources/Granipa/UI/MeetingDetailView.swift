@@ -62,6 +62,7 @@ struct MeetingDetailView: View {
     @State private var meeting: Meeting
     @State private var tab: Tab
     @State private var transcript = MeetingTranscriptModel()
+    @State private var enhancedDocument = EnhancedNotesDocument()
     @State private var saveTask: Task<Void, Never>?
     @State private var renamingSpeaker: String?
     @State private var renameSpeakerTo = ""
@@ -127,7 +128,7 @@ struct MeetingDetailView: View {
                         onOpenEnhanced: { tab = .enhanced },
                         onOpenActionItems: { tab = .actionItems })
                 case .enhanced:
-                    EnhancedNotesView(meetingID: meeting.id)
+                    EnhancedNotesView(meetingID: meeting.id, document: enhancedDocument)
                 case .transcript:
                     MeetingTranscriptView(
                         segments: transcript.segments,

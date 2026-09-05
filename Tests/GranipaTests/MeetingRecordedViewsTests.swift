@@ -265,3 +265,94 @@ import Testing
         #expect(LiveNotesAnchor.cardID == "live-notes-card")
     }
 }
+
+@Suite @MainActor struct EnhancedNotesDocumentTests {
+    private func hugeMarkdown(lines: Int) -> String {
+        "## Decisions\n- Launch moved to July\n"
+            + String(repeating: "- filler line for the notes budget\n", count: lines)
+    }
+
+    private func waitUntilComplete(_ document: EnhancedNotesDocument) async throws {
+        for _ in 0..<400 {
+            if document.isComplete { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        Issue.record("timed out waiting for the full parse")
+    }
+
+    @Test func longContentShowsABoundedPrefixImmediatelyAndCompletesLater() async throws {
+        let source = hugeMarkdown(lines: 50_000)
+        let document = EnhancedNotesDocument()
+        document.update(source: source)
+        #expect(!document.isComplete)
+        #expect(document.blocks.count == EnhancedNotesDocument.previewBlockLimit)
+        try await waitUntilComplete(document)
+        #expect(document.blocks == MarkdownParser.parse(source))
+        #expect(document.blocks.count > EnhancedNotesDocument.previewBlockLimit)
+    }
+
+    @Test func enteringALongDocumentCostsAFractionOfTheFullParse() {
+        let source = hugeMarkdown(lines: 20_000)
+        let clock = ContinuousClock()
+        func nanos(_ body: () -> Int) -> Int64 {
+            (0..<3).map { _ in
+                let duration = clock.measure { _ = body() }
+                let parts = duration.components
+                return parts.seconds * 1_000_000_000 + parts.attoseconds / 1_000_000_000
+            }.min() ?? Int64.max
+        }
+        let entryNs = nanos {
+            let document = EnhancedNotesDocument()
+            document.update(source: source)
+            return document.blocks.count
+        }
+        var fullBlocks = 0
+        let fullNs = nanos {
+            fullBlocks = MarkdownParser.parse(source).count
+            return fullBlocks
+        }
+        #expect(fullBlocks > EnhancedNotesDocument.previewBlockLimit)
+        #expect(
+            entryNs * 8 < fullNs,
+            "entry \(entryNs)ns vs full parse \(fullNs)ns over \(fullBlocks) blocks")
+    }
+
+    @Test func shortContentCompletesImmediatelyWithoutBackgroundWork() {
+        let document = EnhancedNotesDocument()
+        document.update(source: "## Decisions\n- one")
+        #expect(document.isComplete)
+        #expect(document.blocks.count == 2)
+    }
+
+    @Test func emptySourceIsCompleteAndEmpty() {
+        let document = EnhancedNotesDocument()
+        document.update(source: "")
+        #expect(document.isComplete)
+        #expect(document.blocks.isEmpty)
+    }
+
+    @Test func reentryWithTheSameSourceKeepsTheCompletedCache() async throws {
+        let source = hugeMarkdown(lines: 20_000)
+        let document = EnhancedNotesDocument()
+        document.update(source: source)
+        try await waitUntilComplete(document)
+        let fullCount = document.blocks.count
+        document.update(source: source)
+        #expect(document.isComplete)
+        #expect(document.blocks.count == fullCount)
+    }
+
+    @Test func sourceChangeInvalidatesAndStaleResultsNeverLand() async throws {
+        let old = hugeMarkdown(lines: 100_000)
+        let new = "## Fresh\n- new content"
+        let document = EnhancedNotesDocument()
+        document.update(source: old)
+        document.update(source: new)
+        #expect(document.blocks == MarkdownParser.parse(new))
+        try await waitUntilComplete(document)
+        #expect(document.blocks == MarkdownParser.parse(new))
+        #expect(document.blocks != MarkdownParser.parse(old))
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(document.blocks == MarkdownParser.parse(new))
+    }
+}

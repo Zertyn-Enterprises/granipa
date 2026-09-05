@@ -1,8 +1,52 @@
 import SwiftUI
 
+/// One meeting's enhanced-notes markdown as renderable blocks: a bounded
+/// prefix parses synchronously so tab entry paints immediately, the full
+/// document parses off the main actor, and the result is cached for the
+/// source it came from (a re-enhance invalidates it).
+@MainActor
+@Observable
+final class EnhancedNotesDocument {
+    static let previewBlockLimit = 30
+
+    private(set) var blocks: [MarkdownBlock] = []
+    private(set) var isComplete = false
+    private var source = ""
+    private var inFlight = false
+    private var generation = 0
+
+    func update(source newSource: String) {
+        if newSource == source, isComplete || inFlight { return }
+        generation += 1
+        let current = generation
+        source = newSource
+        isComplete = false
+        let prefix = MarkdownParser.parse(newSource, maxBlocks: Self.previewBlockLimit).blocks
+        blocks = prefix
+        // Fewer blocks than the limit means the prefix reached the end of
+        // the document; there is nothing left to parse in the background.
+        guard prefix.count >= Self.previewBlockLimit else {
+            isComplete = true
+            inFlight = false
+            return
+        }
+        inFlight = true
+        Task {
+            let full = await Task.detached(priority: .userInitiated) {
+                MarkdownParser.parse(newSource)
+            }.value
+            guard current == generation else { return }
+            blocks = full
+            isComplete = true
+            inFlight = false
+        }
+    }
+}
+
 struct EnhancedNotesView: View {
     @Environment(AppState.self) private var app
     let meetingID: String
+    let document: EnhancedNotesDocument
 
     @State private var emailExpanded = false
 
@@ -27,8 +71,8 @@ struct EnhancedNotesView: View {
                         .foregroundStyle(Theme.textTertiary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let meeting, meeting.enhancedNotesMarkdown != nil {
-                content(for: meeting)
+            } else if let meeting, let notes = meeting.enhancedNotesMarkdown {
+                content(for: meeting, notes: notes)
             } else {
                 VStack(spacing: 10) {
                     Image(systemName: "wand.and.stars")
@@ -50,7 +94,7 @@ struct EnhancedNotesView: View {
 
     // MARK: - Document
 
-    private func content(for meeting: Meeting) -> some View {
+    private func content(for meeting: Meeting, notes: String) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 if let summary = meeting.summary, !summary.isEmpty {
@@ -68,8 +112,8 @@ struct EnhancedNotesView: View {
                     .card(cornerRadius: Theme.radiusL)
                 }
 
-                if let notes = meeting.enhancedNotesMarkdown {
-                    MarkdownBlocksView(markdown: notes)
+                if !notes.isEmpty {
+                    MarkdownBlocksView(blocks: document.blocks)
                 }
 
                 let items = ActionItem.decodeList(from: meeting.actionItemsJSON)
@@ -122,6 +166,7 @@ struct EnhancedNotesView: View {
             .padding(.vertical, 22)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .task(id: notes) { document.update(source: notes) }
     }
 
     private func sectionHeader(_ title: String) -> some View {
