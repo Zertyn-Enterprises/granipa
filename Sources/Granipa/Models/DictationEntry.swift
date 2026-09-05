@@ -23,6 +23,14 @@ struct DictationEntry: Codable, Identifiable, Hashable, Sendable, FetchableRecor
     }
 }
 
+/// One consistent read of the history screen: page, total, stats and app list.
+struct DictationLibrarySnapshot: Sendable {
+    var entries: [DictationEntry]
+    var total: Int
+    var stats: DictationStats
+    var sourceApps: [String]
+}
+
 struct DictationStats: Equatable, Sendable {
     var words: Int
     var durationSeconds: Double

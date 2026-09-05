@@ -99,6 +99,91 @@ import Testing
         #expect(try db.dictationEntryCount() == 4)
     }
 
+    @Test func librarySnapshotPagesPastNewerInsertsWithoutRepeats() throws {
+        let db = try makeDatabase()
+        for index in 0..<7 {
+            try seed(db, text: "entry \(index)", minutesAgo: Double(index) + 1, sourceApp: nil)
+        }
+
+        let page1 = try db.fetchDictationLibrarySnapshot(limit: 5)
+        #expect(page1.entries.map(\.text) == (0..<5).map { "entry \($0)" })
+        #expect(page1.total == 7)
+
+        // Three dictations are saved while the list is mounted.
+        for index in 0..<3 {
+            try seed(db, text: "new \(index)", minutesAgo: 0.1 * Double(index + 1), sourceApp: nil)
+        }
+
+        let oldest = try #require(page1.entries.last)
+        let page2 = try db.fetchDictationLibrarySnapshot(
+            limit: 5, before: (createdAt: oldest.createdAt, id: oldest.id))
+        let page1IDs = Set(page1.entries.map(\.id))
+        #expect(page2.entries.map(\.text) == ["entry 5", "entry 6"])
+        #expect(page2.entries.allSatisfy { !page1IDs.contains($0.id) })
+        #expect(page2.total == 10)
+    }
+
+    @Test func librarySnapshotCursorIgnoresDeletedShownRows() throws {
+        let db = try makeDatabase()
+        for index in 0..<7 {
+            try seed(db, text: "entry \(index)", minutesAgo: Double(index) + 1, sourceApp: nil)
+        }
+
+        let page1 = try db.fetchDictationLibrarySnapshot(limit: 5)
+        for row in page1.entries.prefix(2) {
+            try db.deleteDictationEntry(id: row.id)
+        }
+
+        let oldest = try #require(page1.entries.last)
+        let page2 = try db.fetchDictationLibrarySnapshot(
+            limit: 5, before: (createdAt: oldest.createdAt, id: oldest.id))
+        #expect(page2.entries.map(\.text) == ["entry 5", "entry 6"])
+        #expect(page2.total == 5)
+    }
+
+    @Test func librarySnapshotTiebreaksIdenticalCreatedAtByID() throws {
+        let db = try makeDatabase()
+        let sameInstant = Date.now.addingTimeInterval(-120)
+        for index in 0..<5 {
+            var entry = DictationEntry.new(
+                text: "tie \(index)", durationSeconds: 1, sourceApp: nil)
+            entry.createdAt = sameInstant
+            try db.insertDictationEntry(entry)
+        }
+
+        var seen = Set<String>()
+        var cursor: (createdAt: Date, id: String)?
+        var pages = 0
+        while seen.count < 5 {
+            let page = try db.fetchDictationLibrarySnapshot(limit: 2, before: cursor)
+            #expect(!page.entries.isEmpty)
+            for pair in zip(page.entries, page.entries.dropFirst()) {
+                #expect(pair.0.id > pair.1.id)
+            }
+            seen.formUnion(page.entries.map(\.id))
+            guard let oldest = page.entries.last else { break }
+            cursor = (createdAt: oldest.createdAt, id: oldest.id)
+            pages += 1
+            if pages > 5 { Issue.record("keyset paging did not terminate"); break }
+        }
+        #expect(seen.count == 5)
+        #expect(pages == 3)
+    }
+
+    @Test func librarySnapshotCountsAndStatsMatchTheSameRead() throws {
+        let db = try makeDatabase()
+        try seed(db, text: "a b", minutesAgo: 1, sourceApp: "Safari")
+        try seed(db, text: "c", minutesAgo: 2, sourceApp: "Mail")
+        try seed(db, text: "d e", minutesAgo: 3, sourceApp: "Safari")
+
+        let snapshot = try db.fetchDictationLibrarySnapshot(limit: 2)
+        #expect(snapshot.entries.count == 2)
+        #expect(snapshot.total == 3)
+        #expect(snapshot.stats.words == 5)
+        #expect(snapshot.stats.apps == 2)
+        #expect(snapshot.sourceApps == ["Mail", "Safari"])
+    }
+
     @Test func sourceAppsListDistinctNonNullWithinWindow() throws {
         let db = try makeDatabase()
         try seed(db, text: "a", minutesAgo: 1, sourceApp: "Safari")
