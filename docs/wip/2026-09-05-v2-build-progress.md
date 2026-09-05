@@ -109,3 +109,45 @@ is still pending; a DEBUG self-view snapshot hook is being prepared.
   verified. A locked desktop is not evidence of a successful visual smoke test.
 - New local data shapes and external integrations still need the requested user choices;
   paused/resumed recording and live AI are not implemented. V2 is not complete.
+
+## Next interactive gates (not yet passed)
+
+The Mac must be unlocked first. Do not infer visual success from AXPress returning 0.
+
+1. Open the signed worktree bundle, click its menu-bar icon and **Open Grañipa**.
+   Confirm the full main window, then Home/Dictation/Meetings/Notes/Files navigation,
+   inspector collapse/expand and layout at 960, 1120 and 1440 points.
+2. In a throwaway text document, use the configured dictation shortcut with known
+   Spanish speech. Confirm live partial text, Stop/paste, saved history refresh,
+   search/app/period filters, and paging during filter changes. Do not dictate into
+   an existing user document or capture bystanders while unattended.
+3. Copy harmless test text, open Clipboard History and paste into that same throwaway
+   document. Verify focus returns to the intended app and no modifier remains held.
+4. Record a short consented test meeting, stop and await processing. Verify original
+   language, actual audio duration/channels, player seek/pause/rate/EOF, transcript
+   search/speaker rename/filter, notes, actions and Markdown export.
+5. Test all Settings sections at minimum size. Enter nonsensitive test text without
+   saving in the credential fields, leave and return: draft must survive, Keychain
+   must not change. Verify permission rescan reports actual OS state; explicit
+   permission prompts/probes require the user's deliberate action.
+6. Measure visible-window idle, navigation, dictation and recording separately and
+   run a soak. Current menu/background samples do not satisfy these gates.
+
+## Verified build at 8f0a086 (11:55)
+
+- All four recorded-screen findings are addressed: stale waveform publication,
+  unused layout helpers, transport-tick talk-time recomputation and speaker-filter rename.
+- Settings drafts now survive section navigation in window-local state. Save actions,
+  Keychain accounts and persisted schemas remain unchanged. The alleged Form overflow
+  was not reproduced; native hosted layout tests verify the existing bounded grouped Form.
+- `Scripts/bundle.sh`: exit 0; signed app at `build/Grañipa.app`, 38M (`du -sh`).
+- `swift test`: exit 0; 317 tests / 55 suites, 0.775 seconds test execution.
+- `swift build -c release`: exit 0; 22.72 seconds.
+- `codesign --verify --deep --strict build/Grañipa.app`: exit 0.
+  TeamIdentifier is R4V252C833; bundle identifier is com.zertyn.granipa.
+- The normal test app was closed; `pgrep -fl Granipa` returned no process.
+- Removed completed auxiliary worktrees for meetings, self-view capture and settings;
+  branches/commits are retained in Git. Integration and pre-existing lanes are preserved.
+- This is a testable development build, NOT completed V2. No merge, release or final PR.
+  Outstanding: new persisted feature decisions, providers/account access, pause/resume,
+  live AI, visual/a11y/end-to-end interaction and foreground/recording performance gates.
