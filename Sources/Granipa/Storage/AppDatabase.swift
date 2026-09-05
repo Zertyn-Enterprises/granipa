@@ -206,24 +206,68 @@ extension AppDatabase {
         try writer.write { db in try entry.insert(db) }
     }
 
-    func fetchDictationEntries(search: String? = nil, since: Date? = nil, limit: Int = 500)
-        throws -> [DictationEntry]
-    {
+    private func filteredDictationRequest(
+        since: Date?,
+        sourceApp: String?,
+        search: String?
+    ) -> QueryInterfaceRequest<DictationEntry> {
+        var request = DictationEntry.all()
+        if let since {
+            request = request.filter(Column("createdAt") >= since)
+        }
+        if let sourceApp, !sourceApp.isEmpty {
+            request = request.filter(Column("sourceApp") == sourceApp)
+        }
+        if let search, !search.isEmpty {
+            let escaped = search
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "%", with: "\\%")
+                .replacingOccurrences(of: "_", with: "\\_")
+            request = request.filter(
+                sql: "text LIKE ? ESCAPE '\\' COLLATE NOCASE",
+                arguments: ["%\(escaped)%"])
+        }
+        return request
+    }
+
+    func fetchDictationEntries(
+        search: String? = nil,
+        since: Date? = nil,
+        sourceApp: String? = nil,
+        limit: Int = 500,
+        offset: Int = 0
+    ) throws -> [DictationEntry] {
         try writer.read { db in
-            var request = DictationEntry.order(Column("createdAt").desc).limit(limit)
+            try filteredDictationRequest(since: since, sourceApp: sourceApp, search: search)
+                .order(Column("createdAt").desc)
+                .limit(limit, offset: offset)
+                .fetchAll(db)
+        }
+    }
+
+    func dictationEntryCount(
+        search: String? = nil,
+        since: Date? = nil,
+        sourceApp: String? = nil
+    ) throws -> Int {
+        try writer.read { db in
+            try filteredDictationRequest(since: since, sourceApp: sourceApp, search: search)
+                .fetchCount(db)
+        }
+    }
+
+    /// Distinct non-nil source apps captured in the window, alphabetical.
+    func dictationSourceApps(since: Date? = nil) throws -> [String] {
+        try writer.read { db in
+            var request = DictationEntry
+                .select(Column("sourceApp"))
+                .filter(Column("sourceApp") != nil)
+                .distinct()
+                .order(Column("sourceApp"))
             if let since {
                 request = request.filter(Column("createdAt") >= since)
             }
-            if let search, !search.isEmpty {
-                let escaped = search
-                    .replacingOccurrences(of: "\\", with: "\\\\")
-                    .replacingOccurrences(of: "%", with: "\\%")
-                    .replacingOccurrences(of: "_", with: "\\_")
-                request = request.filter(
-                    sql: "text LIKE ? ESCAPE '\\' COLLATE NOCASE",
-                    arguments: ["%\(escaped)%"])
-            }
-            return try request.fetchAll(db)
+            return try String.fetchAll(db, request)
         }
     }
 

@@ -61,4 +61,56 @@ import Testing
         #expect(recent.words == 2)
         #expect(recent.apps == 1)
     }
+
+    private func seed(
+        _ db: AppDatabase, text: String, minutesAgo: Double, sourceApp: String?
+    ) throws {
+        var entry = DictationEntry.new(text: text, durationSeconds: 1, sourceApp: sourceApp)
+        entry.createdAt = Date.now.addingTimeInterval(-minutesAgo * 60)
+        try db.insertDictationEntry(entry)
+    }
+
+    @Test func pagingUsesOffsetAndKeepsNewestFirst() throws {
+        let db = try makeDatabase()
+        for index in 0..<7 {
+            try seed(db, text: "entry \(index)", minutesAgo: Double(index), sourceApp: nil)
+        }
+
+        let firstPage = try db.fetchDictationEntries(limit: 5)
+        let secondPage = try db.fetchDictationEntries(limit: 5, offset: 5)
+        #expect(firstPage.map(\.text) == (0..<5).map { "entry \($0)" })
+        #expect(secondPage.map(\.text) == ["entry 5", "entry 6"])
+        #expect(try db.dictationEntryCount() == 7)
+    }
+
+    @Test func sourceAppFilterComposesWithSearchAndCount() throws {
+        let db = try makeDatabase()
+        try seed(db, text: "ship the card", minutesAgo: 1, sourceApp: "Safari")
+        try seed(db, text: "ship the docs", minutesAgo: 2, sourceApp: "Mail")
+        try seed(db, text: "unrelated", minutesAgo: 3, sourceApp: "Safari")
+        try seed(db, text: "ship in secret", minutesAgo: 4, sourceApp: nil)
+
+        let safariShips = try db.fetchDictationEntries(search: "ship", sourceApp: "Safari")
+        #expect(safariShips.map(\.text) == ["ship the card"])
+
+        #expect(try db.dictationEntryCount(search: "ship") == 3)
+        #expect(try db.dictationEntryCount(sourceApp: "Mail") == 1)
+        #expect(try db.dictationEntryCount(search: "ship", sourceApp: "Mail") == 1)
+        #expect(try db.dictationEntryCount() == 4)
+    }
+
+    @Test func sourceAppsListDistinctNonNullWithinWindow() throws {
+        let db = try makeDatabase()
+        try seed(db, text: "a", minutesAgo: 1, sourceApp: "Safari")
+        try seed(db, text: "b", minutesAgo: 2, sourceApp: "Mail")
+        try seed(db, text: "c", minutesAgo: 3, sourceApp: "Safari")
+        try seed(db, text: "d", minutesAgo: 4, sourceApp: nil)
+        try seed(db, text: "old", minutesAgo: 60_000, sourceApp: "TextEdit")
+
+        #expect(try db.dictationSourceApps() == ["Mail", "Safari", "TextEdit"])
+        #expect(
+            try db.dictationSourceApps(since: Date.now.addingTimeInterval(-3_600)) == [
+                "Mail", "Safari",
+            ])
+    }
 }
