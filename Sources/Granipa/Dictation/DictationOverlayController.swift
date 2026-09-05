@@ -8,6 +8,7 @@ final class DictationOverlayController {
     private var panel: NSPanel?
 
     func attach(_ controller: DictationController) {
+        DictationSessionClock.shared.beginObserving()
         if panel != nil { return }
         let host = NSHostingView(
             rootView: AnyView(DictationOverlayView().environment(controller)))
