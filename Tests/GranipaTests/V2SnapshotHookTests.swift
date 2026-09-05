@@ -1,4 +1,5 @@
 #if DEBUG
+import AppKit
 import Testing
 
 @testable import Granipa
@@ -81,6 +82,25 @@ import Testing
         else {
             Issue.record("missing width value must be refused")
             return
+        }
+    }
+
+    @Test func meaningfulContentSizeAcceptsShellMinimumAndAbove() {
+        #expect(
+            V2SnapshotHook.isMeaningfulContentSize(
+                NSSize(width: ShellLayout.minWidth, height: V2SnapshotHook.minimumContentHeight)))
+        #expect(
+            V2SnapshotHook.isMeaningfulContentSize(
+                NSSize(width: V2SnapshotHook.defaultWidth, height: V2SnapshotHook.captureHeight)))
+    }
+
+    @Test func meaningfulContentSizeRejectsUtilityWindows() {
+        for size in [
+            NSSize(width: 32, height: 44),
+            NSSize(width: ShellLayout.minWidth - 1, height: 600),
+            NSSize(width: 960, height: V2SnapshotHook.minimumContentHeight - 1),
+        ] {
+            #expect(!V2SnapshotHook.isMeaningfulContentSize(size), "\(size)")
         }
     }
 }

@@ -1,6 +1,7 @@
 #if DEBUG
 import AppKit
 import Foundation
+import SwiftUI
 
 /// One-shot self-view snapshot for the debug fixture, `--v2-snapshot`.
 /// Renders the app's own main-window content view via NSView
@@ -8,6 +9,28 @@ import Foundation
 /// into the root of the validated fixture home. Only runs inside an
 /// honored `--v2-fixture` launch; compiled out of release builds.
 enum V2SnapshotHook {
+    /// Hosting window reported by the probe placed inside MainWindow.
+    /// Weak so a closed window can deinit if the app outlives the fixture.
+    @MainActor
+    enum HostWindow {
+        static weak var current: NSWindow?
+    }
+
+    /// Zero-footprint probe placed inside MainWindow on fixture launches.
+    /// Its view's own `window` is by definition the main window's host —
+    /// no keyWindow/first-visible guessing, no title heuristics.
+    struct MainWindowProbe: NSViewRepresentable {
+        final class ProbeView: NSView {
+            override func viewDidMoveToWindow() {
+                super.viewDidMoveToWindow()
+                HostWindow.current = window
+            }
+        }
+
+        func makeNSView(context: Context) -> ProbeView { ProbeView() }
+        func updateNSView(_ view: ProbeView, context: Context) {}
+    }
+
     static let flag = "--v2-snapshot"
     static let destinationFlag = "--v2-destination"
     static let widthFlag = "--v2-width"
@@ -15,6 +38,16 @@ enum V2SnapshotHook {
     static let defaultWidth: Double = 1440
     static let maxWidth: Double = 2560
     static let captureHeight: Double = 900
+
+    /// Matches MainWindow's own `minHeight: 600`. A capture smaller than
+    /// the shell minimum is a HUD/utility window, not the fixture shell —
+    /// refuse instead of emitting a near-empty PNG.
+    static let minimumContentHeight: CGFloat = 600
+
+    static func isMeaningfulContentSize(_ size: NSSize) -> Bool {
+        size.width >= ShellLayout.minWidth && size.height >= minimumContentHeight
+    }
+
 
     struct Request: Equatable, Sendable {
         var width: Double
@@ -75,17 +108,28 @@ enum V2SnapshotHook {
             V2FixtureRuntime.isIsolatedTempRoot(home)
         else { return }
         Task { @MainActor in
-            try? await Task.sleep(for: .seconds(1.5))
-            guard
-                let window = NSApp.keyWindow
-                    ?? NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }),
-                let view = window.contentView
-            else {
-                Self.fail("no visible fixture window to capture")
+            guard let window = await Self.awaitHostWindow() else {
+                Self.fail(Self.hostWindowMissingDiagnostic())
                 return
             }
+            try? await Task.sleep(for: .seconds(1.5))
             window.setContentSize(NSSize(width: request.width, height: Self.captureHeight))
             try? await Task.sleep(for: .seconds(0.8))
+            guard let view = window.contentView else {
+                Self.fail("the main window lost its content view before capture")
+                return
+            }
+            view.needsLayout = true
+            view.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+            let size = view.bounds.size
+            Self.log("window '\(window.title)' content \(Int(size.width))x\(Int(size.height))")
+            guard Self.isMeaningfulContentSize(size) else {
+                Self.fail(
+                    "content is \(Int(size.width))x\(Int(size.height)); the shell minimum is "
+                        + "\(Int(ShellLayout.minWidth))x\(Int(Self.minimumContentHeight))")
+                return
+            }
             let rect = view.bounds
             guard let rep = view.bitmapImageRepForCachingDisplay(in: rect) else {
                 Self.fail("could not allocate the fixture bitmap")
@@ -108,6 +152,31 @@ enum V2SnapshotHook {
         }
     }
 
+    /// Waits out window creation instead of assuming the launch always
+    /// shows the main window (restoration can suppress it).
+    @MainActor
+    private static func awaitHostWindow(timeout: Duration = .seconds(6)) async -> NSWindow? {
+        let deadline = ContinuousClock.now + timeout
+        while true {
+            if let window = HostWindow.current { return window }
+            if ContinuousClock.now >= deadline { return nil }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+    }
+
+    @MainActor
+    private static func hostWindowMissingDiagnostic() -> String {
+        let inventory = NSApp.windows
+            .map {
+                "'\($0.title)' \(Int($0.frame.width))x\(Int($0.frame.height))"
+                    + " visible=\($0.isVisible)"
+            }
+            .joined(separator: ", ")
+        return inventory.isEmpty
+            ? "MainWindow was never created (no windows exist)"
+            : "MainWindow was never created; windows: \(inventory)"
+    }
+
     private static func value(after flag: String, in arguments: [String]) -> String? {
         guard let index = arguments.firstIndex(of: flag),
             arguments.indices.contains(index + 1)
@@ -117,6 +186,10 @@ enum V2SnapshotHook {
 
     private static func fail(_ message: String) {
         FileHandle.standardError.write(Data(("ERROR: v2-snapshot: \(message)\n").utf8))
+    }
+
+    private static func log(_ message: String) {
+        FileHandle.standardError.write(Data(("v2-snapshot: \(message)\n").utf8))
     }
 }
 #endif

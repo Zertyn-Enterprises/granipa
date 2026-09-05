@@ -81,6 +81,13 @@ struct MainWindow: View {
             }
         }
         .onPreferenceChange(MainWindowWidthKey.self) { windowWidth = $0 }
+        #if DEBUG
+        .background {
+            if V2FixtureRuntime.isActive {
+                V2SnapshotHook.MainWindowProbe()
+            }
+        }
+        #endif
         .toolbar {
             if inspectorKind != .none {
                 Button {
