@@ -299,3 +299,177 @@ import Testing
         #expect(groups[1].entries.map(\.text) == ["yesterday"])
     }
 }
+
+/// Load-lifecycle contract of the history list, driven with real snapshots
+/// from an ephemeral database: a first load must never pose as an empty
+/// library, a failed refresh must keep the last-good rows, and a straggler
+/// fetch for a superseded query must not overwrite the rows on screen.
+@Suite struct DictationLibraryModelTests {
+    private func makeDatabase() throws -> AppDatabase {
+        try AppDatabase(writer: DatabaseQueue())
+    }
+
+    private func seed(
+        _ db: AppDatabase, text: String, minutesAgo: Double, sourceApp: String?
+    ) throws {
+        var entry = DictationEntry.new(text: text, durationSeconds: 1, sourceApp: sourceApp)
+        entry.createdAt = Date.now.addingTimeInterval(-minutesAgo * 60)
+        try db.insertDictationEntry(entry)
+    }
+
+    private func snapshot(
+        _ db: AppDatabase, query: DictationLibraryQuery, limit: Int = 50
+    ) throws -> DictationLibrarySnapshot {
+        try db.fetchDictationLibrarySnapshot(
+            search: query.search.isEmpty ? nil : query.search,
+            since: query.since,
+            sourceApp: query.sourceApp,
+            limit: limit)
+    }
+
+    @Test func firstFetchShowsLoadingUntilTheSnapshotApplies() throws {
+        let db = try makeDatabase()
+        try seed(db, text: "hello", minutesAgo: 1, sourceApp: "Safari")
+        var model = DictationLibraryModel()
+        let query = DictationLibraryQuery(search: "", period: .all, sourceApp: nil)
+
+        model.begin(query)
+        // Before the first snapshot lands the list has no verdict: an empty
+        // library or zeroed metrics would be phantom data.
+        #expect(model.isFirstLoad)
+        #expect(!model.showsEmptyState)
+        #expect(model.showsPlaceholderStats)
+
+        model.succeed(try snapshot(db, query: query), query: query)
+        #expect(!model.isFirstLoad)
+        #expect(!model.showsEmptyState)
+        #expect(!model.showsPlaceholderStats)
+        #expect(model.entries.count == 1)
+        #expect(model.stats.words == 1)
+    }
+
+    @Test func emptyVerdictAppearsOnlyAfterAFetchSucceeds() throws {
+        let db = try makeDatabase()
+        var model = DictationLibraryModel()
+        let query = DictationLibraryQuery(search: "", period: .all, sourceApp: nil)
+
+        model.begin(query)
+        #expect(!model.showsEmptyState)
+
+        model.succeed(try snapshot(db, query: query), query: query)
+        #expect(model.showsEmptyState)
+        #expect(model.entries.isEmpty)
+    }
+
+    @Test func lateSnapshotForASupersededQueryIsDropped() throws {
+        let db = try makeDatabase()
+        try seed(db, text: "alpha", minutesAgo: 2, sourceApp: nil)
+        try seed(db, text: "beta", minutesAgo: 1, sourceApp: nil)
+        var model = DictationLibraryModel()
+        let all = DictationLibraryQuery(search: "", period: .all, sourceApp: nil)
+
+        model.begin(all)
+        model.succeed(try snapshot(db, query: all), query: all)
+        #expect(model.entries.count == 2)
+
+        // The user narrows the search; a re-fetch of the old query (now
+        // seeing an extra row committed meanwhile) resolves late.
+        let narrowed = DictationLibraryQuery(search: "gamma", period: .all, sourceApp: nil)
+        model.begin(narrowed)
+        try seed(db, text: "late commit", minutesAgo: 0.1, sourceApp: nil)
+        let straggler = try snapshot(db, query: all)
+        #expect(straggler.entries.count == 3)
+
+        model.succeed(straggler, query: all)
+        #expect(model.entries.count == 2, "a superseded query must not replace rows")
+        #expect(model.appliedQuery == all)
+
+        model.succeed(try snapshot(db, query: narrowed), query: narrowed)
+        #expect(model.appliedQuery == narrowed)
+        #expect(model.showsEmptyState)
+    }
+
+    @Test func failedRefreshKeepsLastGoodRowsAndReportsInline() throws {
+        let db = try makeDatabase()
+        try seed(db, text: "kept", minutesAgo: 1, sourceApp: "Safari")
+        var model = DictationLibraryModel()
+        let query = DictationLibraryQuery(search: "", period: .all, sourceApp: nil)
+
+        model.begin(query)
+        model.succeed(try snapshot(db, query: query), query: query)
+        let goodStats = model.stats
+
+        let next = DictationLibraryQuery(search: "", period: .today, sourceApp: nil)
+        model.begin(next)
+        model.fail(query: next)
+
+        #expect(!model.isRefreshing)
+        #expect(model.showsRefreshError)
+        #expect(!model.showsFullScreenError, "rows exist — a full-screen error would drop them")
+        #expect(model.entries.count == 1)
+        #expect(model.stats == goodStats)
+
+        model.begin(next)
+        model.succeed(try snapshot(db, query: next), query: next)
+        #expect(!model.showsRefreshError)
+    }
+
+    @Test func failedFirstLoadShowsFullScreenErrorUntilRetrySucceeds() throws {
+        let db = try makeDatabase()
+        try seed(db, text: "recovered", minutesAgo: 1, sourceApp: nil)
+        var model = DictationLibraryModel()
+        let query = DictationLibraryQuery(search: "", period: .all, sourceApp: nil)
+
+        model.begin(query)
+        model.fail(query: query)
+        #expect(model.showsFullScreenError)
+        #expect(!model.showsEmptyState)
+        #expect(!model.isFirstLoad)
+
+        // Retry goes through the loading state again before it can recover.
+        model.begin(query)
+        #expect(model.isFirstLoad)
+        model.succeed(try snapshot(db, query: query), query: query)
+        #expect(!model.showsFullScreenError)
+        #expect(model.entries.count == 1)
+    }
+
+    @Test func sameQueryReloadRefreshesWithoutLosingRows() throws {
+        let db = try makeDatabase()
+        try seed(db, text: "hello", minutesAgo: 1, sourceApp: nil)
+        var model = DictationLibraryModel()
+        let query = DictationLibraryQuery(search: "", period: .all, sourceApp: nil)
+
+        model.begin(query)
+        model.succeed(try snapshot(db, query: query), query: query)
+        model.begin(query)
+        // A reload under the same query keeps the rows on screen up while
+        // flagging the refresh, instead of flashing an empty or loading list.
+        #expect(model.isRefreshing)
+        #expect(!model.isFirstLoad)
+        #expect(!model.showsEmptyState)
+        #expect(model.entries.count == 1)
+    }
+
+    @Test func deletingAShownRowAdjustsTheShownCount() throws {
+        let db = try makeDatabase()
+        for index in 0..<3 {
+            try seed(db, text: "entry \(index)", minutesAgo: Double(index) + 1, sourceApp: nil)
+        }
+        var model = DictationLibraryModel()
+        let query = DictationLibraryQuery(search: "", period: .all, sourceApp: nil)
+        model.begin(query)
+        model.succeed(try snapshot(db, query: query), query: query)
+        #expect(model.total == 3)
+
+        try db.deleteDictationEntry(id: model.entries[1].id)
+        model.removeEntry(id: model.entries[1].id)
+        #expect(model.entries.count == 2)
+        #expect(model.total == 2)
+
+        model.begin(query)
+        model.succeed(try snapshot(db, query: query), query: query)
+        #expect(model.entries.count == 2)
+        #expect(model.total == 2)
+    }
+}

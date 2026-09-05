@@ -53,6 +53,7 @@ private struct InspectorCard<Content: View>: View {
 private struct InspectorRow: View {
     let label: String
     let value: String
+    var monospaced = false
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -62,10 +63,41 @@ private struct InspectorRow: View {
             Text(value)
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.trailing)
+                .lineLimit(monospaced ? 1 : nil)
+                .truncationMode(.middle)
                 .textSelection(.enabled)
+                .monospaced(monospaced)
         }
         .font(.system(size: 12))
         .padding(.vertical, 7)
+    }
+}
+
+/// The live status dot. Its slow opacity pulse is the one repeating motion on
+/// this pane and only while a capture is actually running; Reduce Motion
+/// keeps the dot steady.
+private struct InspectorStatusDot: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let color: Color
+    let listening: Bool
+    @State private var dimmed = false
+
+    var body: some View {
+        if listening && !reduceMotion {
+            Circle()
+                .fill(color)
+                .frame(width: 8, height: 8)
+                .opacity(dimmed ? 0.35 : 1)
+                .onAppear {
+                    withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                        dimmed = true
+                    }
+                }
+        } else {
+            Circle()
+                .fill(color)
+                .frame(width: 8, height: 8)
+        }
     }
 }
 
@@ -89,6 +121,41 @@ enum DictationIdleEngine: Equatable {
     }
 }
 
+/// Field formatting shared by the inspector cards.
+enum InspectorFormat {
+    /// Display label for a speech-locale identifier ("es-ES") or "auto":
+    /// localized language name plus region, e.g. "Spanish (ES)". Falls back
+    /// to the raw identifier when Foundation has no name for it — never an
+    /// invented one.
+    static func languageLabel(forIdentifier identifier: String) -> String {
+        if identifier.isEmpty || identifier == "auto" { return "Auto" }
+        let locale = Locale(identifier: identifier)
+        guard let code = locale.language.languageCode?.identifier,
+            let name = Locale.current.localizedString(forLanguageCode: code)
+        else { return identifier }
+        if let region = locale.language.region?.identifier, !region.isEmpty {
+            return "\(name) (\(region))"
+        }
+        return name
+    }
+}
+
+/// One cadence step of the live inspector's elapsed clock.
+enum DictationLiveTicker {
+    /// Sleeps one interval, then reports whether the caller should keep
+    /// ticking. Cancellation is that "stop": `.task` cancels on disappear
+    /// while the app-scoped controller can still be `.listening`, so a
+    /// plain `try? sleep` would spin the loop forever.
+    static func wait(interval: Duration) async -> Bool {
+        do {
+            try await Task.sleep(for: interval)
+            return true
+        } catch {
+            return false
+        }
+    }
+}
+
 private struct DictationInspectorView: View {
     @Bindable var dictation: DictationController
     let isLive: Bool
@@ -102,7 +169,8 @@ private struct DictationInspectorView: View {
                     .task(id: dictation.phase) {
                         while dictation.phase == .preparing || dictation.phase == .listening {
                             now = .now
-                            try? await Task.sleep(for: .milliseconds(500))
+                            guard await DictationLiveTicker.wait(interval: .milliseconds(500))
+                            else { break }
                         }
                     }
             } else {
@@ -118,10 +186,12 @@ private struct DictationInspectorView: View {
                 Text("Ready to dictate")
                     .font(Theme.sectionFont)
                     .foregroundStyle(Theme.textPrimary)
-                Text("Hold \(DictationController.shortcutLabel) to dictate, or use Record on the Dictation page.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Text(
+                    "Tap \(DictationController.shortcutLabel) to start and stop, or hold it and speak — release to finish."
+                )
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
             }
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Ready to dictate")
@@ -130,7 +200,7 @@ private struct DictationInspectorView: View {
                 InspectorRow(label: "Engine", value: idleEngineLabel)
                 if idleEngine == .local {
                     InspectorHairline()
-                    InspectorRow(label: "Language", value: languageCode)
+                    InspectorRow(label: "Language", value: languageLabel)
                 }
                 InspectorHairline()
                 InspectorRow(label: "Auto-save", value: "Saves to history on device")
@@ -151,9 +221,7 @@ private struct DictationInspectorView: View {
     private var liveContent: some View {
         VStack(alignment: .leading, spacing: Theme.spaceL) {
             HStack(spacing: 8) {
-                Circle()
-                    .fill(dotColor)
-                    .frame(width: 8, height: 8)
+                InspectorStatusDot(color: dotColor, listening: dictation.phase == .listening)
                 Text(headline)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary)
@@ -205,7 +273,7 @@ private struct DictationInspectorView: View {
 
             InspectorCard(title: "Session") {
                 if dictation.engineID == .local {
-                    InspectorRow(label: "Language", value: languageCode)
+                    InspectorRow(label: "Language", value: languageLabel)
                     InspectorHairline()
                 }
                 // preferredLocale() is only the locale actually handed to the
@@ -237,9 +305,9 @@ private struct DictationInspectorView: View {
             startedAt: DictationSessionClock.shared.sessionStartedAt, now: now)
     }
 
-    private var languageCode: String {
-        let locale = DictationController.preferredLocale()
-        return locale.language.languageCode?.identifier.uppercased() ?? locale.identifier
+    private var languageLabel: String {
+        InspectorFormat.languageLabel(
+            forIdentifier: DictationController.preferredLocale().identifier)
     }
 
     private var idleEngine: DictationIdleEngine {
@@ -300,15 +368,15 @@ private struct MeetingInspectorView: View {
     @Environment(AppState.self) private var app
     let meeting: Meeting
     @State private var segments: [TranscriptSegment] = []
+    // Derived once per fetch, not on every body evaluation — hover and other
+    // local state changes must not re-walk the whole transcript.
+    @State private var talk = SpeakerTalkTime.report(segments: [])
     @State private var confirmDelete = false
 
     private var folder: Folder? { app.folder(for: meeting) }
     private var calendarEvent: CalendarMeeting? {
         guard let id = meeting.calendarEventID else { return nil }
         return app.calendar.upcoming.first { $0.id == id }
-    }
-    private var talk: SpeakerTalkTime.Report {
-        SpeakerTalkTime.report(segments: segments)
     }
     private var summaryText: String? {
         guard let summary = meeting.summary?
@@ -337,7 +405,7 @@ private struct MeetingInspectorView: View {
                 InspectorHairline()
                 InspectorRow(
                     label: "Language",
-                    value: meeting.language == "auto" ? "Auto" : meeting.language)
+                    value: InspectorFormat.languageLabel(forIdentifier: meeting.language))
                 if let folder {
                     InspectorHairline()
                     InspectorRow(
@@ -350,22 +418,25 @@ private struct MeetingInspectorView: View {
                     InspectorHairline()
                     InspectorRow(label: "Duration", value: duration)
                 }
-                if let event = calendarEvent {
-                    InspectorHairline()
-                    InspectorRow(label: "Calendar", value: event.title)
+                InspectorHairline()
+                InspectorRow(label: "ID", value: meeting.id, monospaced: true)
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Meeting details")
+
+            if let event = calendarEvent {
+                InspectorCard(title: "Calendar") {
+                    InspectorRow(label: "Event", value: event.title)
                     if let url = event.joinURL {
                         InspectorHairline()
                         InspectorRow(label: "Join", value: url.absoluteString)
                     }
-                } else if let id = meeting.calendarEventID, !id.isEmpty {
-                    InspectorHairline()
-                    InspectorRow(label: "Calendar", value: id)
                 }
-                InspectorHairline()
-                InspectorRow(label: "ID", value: meeting.id)
+            } else if let id = meeting.calendarEventID, !id.isEmpty {
+                InspectorCard(title: "Calendar") {
+                    InspectorRow(label: "Event", value: id)
+                }
             }
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel("Meeting details")
 
             if !talk.rows.isEmpty {
                 InspectorCard(title: "Speakers") {
@@ -429,12 +500,15 @@ private struct MeetingInspectorView: View {
         .task(id: meeting.id) {
             guard let db = app.database else {
                 segments = []
+                talk = SpeakerTalkTime.report(segments: [])
                 return
             }
             let meetingID = meeting.id
-            segments = await Task.detached(priority: .utility) {
+            let fetched = await Task.detached(priority: .utility) {
                 (try? db.fetchSegments(meetingID: meetingID, finalOnly: true)) ?? []
             }.value
+            segments = fetched
+            talk = SpeakerTalkTime.report(segments: fetched)
         }
         .alert("Delete this meeting?", isPresented: $confirmDelete) {
             Button("Delete", role: .destructive) { app.deleteMeeting(id: meeting.id) }
@@ -461,6 +535,7 @@ private struct MeetingInspectorView: View {
             .padding(.vertical, 7)
         }
         .buttonStyle(.plain)
+        .hoverHighlight(cornerRadius: 6)
         .accessibilityLabel(title == "Export notes" ? "Export as Markdown" : title)
     }
 
