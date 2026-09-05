@@ -1,7 +1,8 @@
 # V2 polish — content loading and live inspector (lane `fix/v2-polish-content`)
 
 Scope: `Dictation/DictationHistoryView.swift`, `UI/InspectorViews.swift`, their tests.
-Base `d54906e`. Shared Theme/Chrome/Shell untouched (Grok's lane). No schema,
+Base `d54906e`; rebased onto shared shell `33e655b` (review commit `b6bd875`,
+followups below). Shared Theme/Chrome/Shell untouched (Grok's lane). No schema,
 preferences, audio or behavior changes beyond the states described below.
 
 ## History list: truthful load lifecycle
@@ -31,9 +32,10 @@ renders only what it derives:
 - Empty-state guidance updated to the real gesture contract: tap toggles,
   hold talks (matches `DictationTrigger`'s 0.22 s threshold).
 
-Deviation noted: with `app.database == nil` (unreachable in production —
-`AppState` opens a database or surfaces `loadError`), reload now records a
-failure instead of silently showing an empty library.
+Deviation noted: with `app.database == nil` the database is missing, which is
+an error state; reload records a failure (retryable) instead of silently
+showing an empty library. No claim is made here about how reachable that
+state is.
 
 ### Test evidence (RED first)
 
@@ -68,8 +70,10 @@ are unchanged. No other loop of this shape exists in `Sources/`.
 
 ### Content polish (all within the two files)
 
-- Idle guidance is truthful: "Tap Right ⌥ to start and stop, or hold it and
-  speak — release to finish." (matches the gesture fix in `ddf16a8`).
+- Idle guidance is truthful and names the configured shortcut (dynamic
+  `DictationController.shortcutLabel`; Right ⌥ is only the default): "Tap
+  <shortcut> to start and stop, or hold it and speak — release to finish."
+  (matches the gesture fix in `ddf16a8`).
 - Language labels are meaningful: `InspectorFormat.languageLabel` renders
   "Spanish (ES)" from "es-ES" via Foundation's localized names, "Auto" for
   `auto`, and the raw identifier when no name exists. Used by the idle
@@ -88,13 +92,52 @@ are unchanged. No other loop of this shape exists in `Sources/`.
 ## Gates
 
 - `swift build` — clean, 0 warnings.
-- `swift test` — 403 tests / 70 suites pass (baseline at `d54906e`: 390/67;
-  +13 new: 7 model, 3 ticker, 3 format).
-- Lint: no project linter is configured (no `.swift-format`/`.swiftlint.yml`);
-  the `swift-format` binary is not installed on this host, so the supplementary
-  check could not be run — style was matched by hand to the surrounding
-  4-space conventions. Not run: app bundle, visual capture (no interactive
-  session on this locked Mac; visual QA is the integrated-screen review).
+- `swift test` — all suites pass; 403/70 at the first round (baseline 390/67,
+  +13 new), 415/71 after the review round (+6 presentation tests and shared
+  shell tests from `33e655b`).
+- Lint: no project linter config exists (no `.swift-format`/`.swiftlint.yml`).
+  The toolchain `swift format` subcommand is available (an earlier note in
+  this doc wrongly claimed it was not — I had only probed the standalone
+  `swift-format` binary). Root's `swift format lint` run reported 42 warnings
+  including existing ones in these four files; the review round applied
+  `swift format format --configuration '{"indentation":{"spaces":4}}'
+  --in-place` to the four touched files and `swift format lint` on them now
+  exits 0 with no findings.
+- Not run by this session: app bundle, app launch, visual capture. Visual QA
+  of the reference PNGs was not possible from here — this session could not
+  view them natively (they routed through a remote vision service), and no
+  claim about the host's lock state is made; root's AX navigation of the real
+  UI is the visual check of record.
+
+## Review round 2 (integrated-screen review, fixed)
+
+Root-confirmed findings and fixes, all RED-first at the new
+`DictationHistoryListState.resolve` seam (presentation selection, extracted
+first carrying the shipped wiring):
+
+1. A last-good EMPTY snapshot suppressed the "Updating results" indicator and
+   the inline refresh failure/Retry — a failed reload after an empty verdict
+   looked like a finished empty library. The banner now reports the
+   transition independently of the applied row count. RED:
+   `refreshOverAnEmptyLastGoodSnapshotStillShowsProgress`,
+   `refreshFailureOverAnEmptyLastGoodSnapshotShowsInlineRetry`.
+2. Empty-state copy read the live filter fields while the shown snapshot
+   belonged to `appliedQuery` — during debounce/in-flight changes the UI
+   relabeled the old query's empty as the new input's result. Copy is frozen
+   to the applied query (`empty(search:sourceApp:)` carries it), and filters
+   that differ from the applied query show "Updating results" immediately,
+   inside the debounce window, before any fetch begins. Superseded in-flight
+   fetches were already dropped by the model's in-flight guard; the paging
+   query/cursor guards are unchanged. RED:
+   `changedFiltersShowProgressBeforeAnyFetchBegins`;
+   `emptyCopyIsFrozenToTheAppliedQuery` is the contract test for the frozen
+   copy (green by construction at the seam).
+3. `InspectorStatusDot` kept `dimmed` on the parent view, so a later
+   `.listening` stretch (retry after failure, Reduce Motion toggle) inherited
+   a finished pulse and never restarted. The pulsing dot is now its own
+   branch-owned view (`PulsingDot`), so structural identity resets its state
+   on every entry; still the only repeating motion, only while actually
+   listening, steady under Reduce Motion, no tasks. Presentational — no test.
 
 ## Out-of-scope followups (proposals only)
 
@@ -103,7 +146,7 @@ are unchanged. No other loop of this shape exists in `Sources/`.
    does not. If the panel ever gets narrower than ~340 pt, give the
    placeholder the same fallback (Chrome file, Grok's lane).
 2. `DictationHistoryView.groups` recomputes day groups per body evaluation —
-   O(n log n) on at most a few hundred rows; measured irrelevant now, but it
-   could move into the model's apply step if paging ever grows large.
+   one sort of at most a few hundred rows; unmeasured, expected negligible,
+   but it could move into the model's apply step if paging ever grows large.
 3. A live input-level meter (reference's orange level bar) needs a level feed
    from `DictationController` — shared controller, human decision.

@@ -164,7 +164,10 @@ import Testing
             guard let oldest = page.entries.last else { break }
             cursor = (createdAt: oldest.createdAt, id: oldest.id)
             pages += 1
-            if pages > 5 { Issue.record("keyset paging did not terminate"); break }
+            if pages > 5 {
+                Issue.record("keyset paging did not terminate")
+                break
+            }
         }
         #expect(seen.count == 5)
         #expect(pages == 3)
@@ -238,22 +241,26 @@ import Testing
 
         #expect(DictationLibraryQuery.pageQuery(applied: applied, current: applied) != nil)
         #expect(DictationLibraryQuery.pageQuery(applied: nil, current: applied) == nil)
-        #expect(DictationLibraryQuery.pageQuery(
-            applied: applied,
-            current: DictationLibraryQuery(search: "shipped", period: .week, sourceApp: "Mail"))
-            == nil)
-        #expect(DictationLibraryQuery.pageQuery(
-            applied: applied,
-            current: DictationLibraryQuery(search: "ship", period: .all, sourceApp: "Mail"))
-            == nil)
-        #expect(DictationLibraryQuery.pageQuery(
-            applied: applied,
-            current: DictationLibraryQuery(search: "ship", period: .week, sourceApp: "Safari"))
-            == nil)
-        #expect(DictationLibraryQuery.pageQuery(
-            applied: applied,
-            current: DictationLibraryQuery(search: "ship", period: .week, sourceApp: nil))
-            == nil)
+        #expect(
+            DictationLibraryQuery.pageQuery(
+                applied: applied,
+                current: DictationLibraryQuery(search: "shipped", period: .week, sourceApp: "Mail"))
+                == nil)
+        #expect(
+            DictationLibraryQuery.pageQuery(
+                applied: applied,
+                current: DictationLibraryQuery(search: "ship", period: .all, sourceApp: "Mail"))
+                == nil)
+        #expect(
+            DictationLibraryQuery.pageQuery(
+                applied: applied,
+                current: DictationLibraryQuery(search: "ship", period: .week, sourceApp: "Safari"))
+                == nil)
+        #expect(
+            DictationLibraryQuery.pageQuery(
+                applied: applied,
+                current: DictationLibraryQuery(search: "ship", period: .week, sourceApp: nil))
+                == nil)
     }
 
     @Test func pageGateNormalizesSearchWhitespace() {
@@ -280,10 +287,11 @@ import Testing
         #expect(page?.since == applied.since)
         #expect(page?.since != current.since)
 
-        #expect(DictationLibraryQuery.pageQuery(
-            applied: applied,
-            current: DictationLibraryQuery(search: "", period: .all, sourceApp: nil))
-            == nil)
+        #expect(
+            DictationLibraryQuery.pageQuery(
+                applied: applied,
+                current: DictationLibraryQuery(search: "", period: .all, sourceApp: nil))
+                == nil)
     }
 
     @Test func dayGroupsSortDaysNewestFirst() throws {
@@ -471,5 +479,111 @@ import Testing
         model.succeed(try snapshot(db, query: query), query: query)
         #expect(model.entries.count == 2)
         #expect(model.total == 2)
+    }
+}
+
+/// Presentation selection for the list area — the wiring between the load
+/// model and what renders. In particular: a last-good EMPTY snapshot must
+/// still show its in-flight progress and inline refresh failure, and the
+/// empty copy must describe the applied query, never the live filter fields.
+@Suite struct DictationHistoryListStateTests {
+    private func appliedEmpty(
+        search: String = "old", sourceApp: String? = nil
+    ) -> DictationLibraryModel {
+        var model = DictationLibraryModel()
+        let query = DictationLibraryQuery(search: search, period: .all, sourceApp: sourceApp)
+        model.begin(query)
+        model.succeed(
+            DictationLibrarySnapshot(
+                entries: [], total: 0, stats: .empty, sourceApps: []),
+            query: query)
+        return model
+    }
+
+    private func appliedRows() -> DictationLibraryModel {
+        var model = DictationLibraryModel()
+        let query = DictationLibraryQuery(search: "", period: .all, sourceApp: nil)
+        model.begin(query)
+        model.succeed(
+            DictationLibrarySnapshot(
+                entries: [DictationEntry.new(text: "row", durationSeconds: 1, sourceApp: nil)],
+                total: 1,
+                stats: DictationStats(words: 1, durationSeconds: 1, apps: 1),
+                sourceApps: []),
+            query: query)
+        return model
+    }
+
+    @Test func refreshOverAnEmptyLastGoodSnapshotStillShowsProgress() {
+        var model = appliedEmpty()
+        model.begin(DictationLibraryQuery(search: "new", period: .all, sourceApp: nil))
+        let state = DictationHistoryListState.resolve(model: model, pendingInputs: true)
+        #expect(state.banner == .updating)
+        #expect(state.content == .empty(search: "old", sourceApp: nil))
+    }
+
+    @Test func refreshFailureOverAnEmptyLastGoodSnapshotShowsInlineRetry() {
+        var model = appliedEmpty()
+        let retryable = DictationLibraryQuery(search: "new", period: .all, sourceApp: nil)
+        model.begin(retryable)
+        model.fail(query: retryable)
+        let state = DictationHistoryListState.resolve(model: model, pendingInputs: true)
+        #expect(state.banner == .refreshFailed)
+        #expect(
+            state.content == .empty(search: "old", sourceApp: nil),
+            "an applied empty verdict stays content — never a full-screen error")
+    }
+
+    @Test func changedFiltersShowProgressBeforeAnyFetchBegins() {
+        // The debounce window: inputs differ from the applied query but no
+        // fetch is in flight. The shown rows/empty still belong to the old
+        // query, so the UI must mark the transition immediately.
+        var model = appliedRows()
+        model.abandonInFlight()
+        let state = DictationHistoryListState.resolve(model: model, pendingInputs: true)
+        #expect(state.banner == .updating)
+        #expect(state.content == .rows)
+
+        let settled = DictationHistoryListState.resolve(model: model, pendingInputs: false)
+        #expect(settled.banner == .none)
+        #expect(settled.content == .rows)
+    }
+
+    @Test func emptyCopyIsFrozenToTheAppliedQuery() {
+        // The applied query searched "old" and found nothing; the live field
+        // has moved on. The empty copy must not claim the new input's
+        // results are what's missing.
+        let model = appliedEmpty(search: "old")
+        let state = DictationHistoryListState.resolve(model: model, pendingInputs: true)
+        #expect(state.content == .empty(search: "old", sourceApp: nil))
+
+        let filtered = appliedEmpty(search: "", sourceApp: "Mail")
+        let filteredState = DictationHistoryListState.resolve(
+            model: filtered, pendingInputs: true)
+        #expect(filteredState.content == .empty(search: "", sourceApp: "Mail"))
+    }
+
+    @Test func firstLoadAndFullScreenErrorCarryNoBanner() {
+        var loading = DictationLibraryModel()
+        loading.begin(DictationLibraryQuery(search: "", period: .all, sourceApp: nil))
+        #expect(
+            DictationHistoryListState.resolve(model: loading, pendingInputs: true)
+                == DictationHistoryListState(content: .loading, banner: .none))
+
+        var failed = DictationLibraryModel()
+        let query = DictationLibraryQuery(search: "", period: .all, sourceApp: nil)
+        failed.begin(query)
+        failed.fail(query: query)
+        #expect(
+            DictationHistoryListState.resolve(model: failed, pendingInputs: true)
+                == DictationHistoryListState(content: .fullScreenError, banner: .none))
+    }
+
+    @Test func rowsWithAnInFlightReloadShowProgress() {
+        var model = appliedRows()
+        model.begin(DictationLibraryQuery(search: "", period: .all, sourceApp: nil))
+        let state = DictationHistoryListState.resolve(model: model, pendingInputs: false)
+        #expect(state.content == .rows)
+        #expect(state.banner == .updating)
     }
 }

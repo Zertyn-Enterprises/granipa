@@ -91,6 +91,64 @@ struct DictationLibraryModel: Equatable {
     }
 }
 
+/// What the list area renders, resolved from the load model plus whether the
+/// live filters already describe a different query than the applied one. The
+/// view renders exactly this; selection lives here so the wiring is testable.
+struct DictationHistoryListState: Equatable {
+    enum Banner: Equatable {
+        case none
+        case updating
+        case refreshFailed
+    }
+
+    enum Content: Equatable {
+        case loading
+        case fullScreenError
+        /// The applied snapshot has no rows; its own query drives the copy,
+        /// never the live filter fields.
+        case empty(search: String, sourceApp: String?)
+        case rows
+    }
+
+    let content: Content
+    let banner: Banner
+
+    static func resolve(
+        model: DictationLibraryModel,
+        pendingInputs: Bool
+    ) -> DictationHistoryListState {
+        let content: Content
+        if model.showsFullScreenError {
+            content = .fullScreenError
+        } else if model.isFirstLoad {
+            content = .loading
+        } else if model.showsEmptyState {
+            content = .empty(
+                search: model.appliedQuery?.search ?? "",
+                sourceApp: model.appliedQuery?.sourceApp)
+        } else {
+            content = .rows
+        }
+
+        // The banner reports the transition the list is in, independent of
+        // how many rows the last-good snapshot happens to carry: an empty
+        // verdict that can't refresh looks finished otherwise. Inputs that
+        // already differ from the applied query count as in transition even
+        // inside the debounce window, before any fetch begins.
+        let banner: Banner
+        if model.showsFullScreenError || model.isFirstLoad {
+            banner = .none
+        } else if model.showsRefreshError {
+            banner = .refreshFailed
+        } else if model.isRefreshing || pendingInputs {
+            banner = .updating
+        } else {
+            banner = .none
+        }
+        return DictationHistoryListState(content: content, banner: banner)
+    }
+}
+
 struct DictationHistoryView: View {
     @Environment(AppState.self) private var app
     var onClose: (() -> Void)?
@@ -149,7 +207,10 @@ struct DictationHistoryView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(onClose == nil ? AnyShapeStyle(Theme.bg) : AnyShapeStyle(.ultraThinMaterial))
-        .clipShape(RoundedRectangle(cornerRadius: onClose == nil ? 0 : Theme.radiusOverlay, style: .continuous))
+        .clipShape(
+            RoundedRectangle(
+                cornerRadius: onClose == nil ? 0 : Theme.radiusOverlay, style: .continuous)
+        )
         .overlay {
             if onClose != nil {
                 RoundedRectangle(cornerRadius: Theme.radiusOverlay, style: .continuous)
@@ -218,21 +279,33 @@ struct DictationHistoryView: View {
         }
     }
 
+    private var listState: DictationHistoryListState {
+        DictationHistoryListState.resolve(
+            model: model,
+            pendingInputs: DictationLibraryQuery(
+                search: trimmedSearch, period: period, sourceApp: appFilter)
+                != model.appliedQuery)
+    }
+
     @ViewBuilder
     private var listContent: some View {
-        if model.showsFullScreenError {
+        switch listState.content {
+        case .fullScreenError:
             errorState
                 .frame(maxWidth: .infinity)
                 .padding(.top, 50)
-        } else if model.isFirstLoad {
+        case .loading:
             loadingState
                 .frame(maxWidth: .infinity)
                 .padding(.top, 50)
-        } else if model.showsEmptyState {
-            emptyState
-                .frame(maxWidth: .infinity)
-                .padding(.top, 50)
-        } else {
+        case .empty(let search, let sourceApp):
+            VStack(spacing: 16) {
+                refreshBanner
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                emptyState(search: search, sourceApp: sourceApp)
+            }
+            .padding(.top, 44)
+        case .rows:
             LazyVStack(alignment: .leading, spacing: 12) {
                 refreshBanner
                 ForEach(groups, id: \.day) { group in
@@ -260,7 +333,10 @@ struct DictationHistoryView: View {
     /// rows on screen are the last applied query's, never a mix.
     @ViewBuilder
     private var refreshBanner: some View {
-        if model.isRefreshing {
+        switch listState.banner {
+        case .none:
+            EmptyView()
+        case .updating:
             HStack(spacing: 8) {
                 ProgressView()
                     .controlSize(.mini)
@@ -270,7 +346,7 @@ struct DictationHistoryView: View {
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Updating results")
-        } else if model.showsRefreshError {
+        case .refreshFailed:
             HStack(spacing: 8) {
                 Image(systemName: "exclamationmark.triangle")
                     .font(.system(size: 11, weight: .medium))
@@ -367,7 +443,8 @@ struct DictationHistoryView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
         .background(
-            Theme.card, in: RoundedRectangle(cornerRadius: Theme.radiusS, style: .continuous))
+            Theme.card, in: RoundedRectangle(cornerRadius: Theme.radiusS, style: .continuous)
+        )
         .overlay(
             RoundedRectangle(cornerRadius: Theme.radiusS, style: .continuous)
                 .stroke(Theme.border, lineWidth: 1))
@@ -395,7 +472,8 @@ struct DictationHistoryView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
             .background(
-                Theme.card, in: RoundedRectangle(cornerRadius: Theme.radiusS, style: .continuous))
+                Theme.card, in: RoundedRectangle(cornerRadius: Theme.radiusS, style: .continuous)
+            )
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.radiusS, style: .continuous)
                     .stroke(Theme.border, lineWidth: 1))
@@ -454,27 +532,28 @@ struct DictationHistoryView: View {
         .padding(.top, 6)
     }
 
-    private var emptyState: some View {
-        VStack(spacing: 10) {
-            EmptyStateView(
-                icon: trimmedSearch.isEmpty && appFilter == nil ? "mic" : "magnifyingglass",
-                title: emptyTitle,
-                message: emptyMessage
-            )
-        }
+    /// Copy for an applied-empty verdict, keyed to the query that produced
+    /// it — never to the live filter fields, which may describe a query
+    /// whose results have not arrived yet.
+    private func emptyState(search: String, sourceApp: String?) -> some View {
+        EmptyStateView(
+            icon: search.isEmpty && sourceApp == nil ? "mic" : "magnifyingglass",
+            title: emptyTitle(search: search, sourceApp: sourceApp),
+            message: emptyMessage(search: search, sourceApp: sourceApp))
     }
 
-    private var emptyTitle: String {
-        if !trimmedSearch.isEmpty { return "No results for \"\(trimmedSearch)\"" }
-        if appFilter != nil { return "No dictations from this app" }
+    private func emptyTitle(search: String, sourceApp: String?) -> String {
+        if !search.isEmpty { return "No results for \"\(search)\"" }
+        if sourceApp != nil { return "No dictations from this app" }
         return "No dictations yet"
     }
 
-    private var emptyMessage: String? {
-        if trimmedSearch.isEmpty && appFilter == nil {
-            return "Tap \(DictationController.shortcutLabel) to start and stop, or hold to talk. Entries land here."
+    private func emptyMessage(search: String, sourceApp: String?) -> String? {
+        if search.isEmpty && sourceApp == nil {
+            return
+                "Tap \(DictationController.shortcutLabel) to start and stop, or hold to talk. Entries land here."
         }
-        if appFilter != nil && trimmedSearch.isEmpty {
+        if sourceApp != nil && search.isEmpty {
             return "Try another period or pick a different app."
         }
         return "Try different words or check the filter."
@@ -550,8 +629,9 @@ struct DictationHistoryView: View {
         // the fetch — `.week` re-derives a later cutoff on every read.
         let current = DictationLibraryQuery(
             search: trimmedSearch, period: period, sourceApp: appFilter)
-        guard let query = DictationLibraryQuery.pageQuery(
-            applied: model.appliedQuery, current: current)
+        guard
+            let query = DictationLibraryQuery.pageQuery(
+                applied: model.appliedQuery, current: current)
         else { return }
         loadTask?.cancel()
         model.abandonInFlight()

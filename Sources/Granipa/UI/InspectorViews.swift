@@ -43,7 +43,9 @@ private struct InspectorCard<Content: View>: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 11)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.radiusM, style: .continuous))
+        .background(
+            Theme.card, in: RoundedRectangle(cornerRadius: Theme.radiusM, style: .continuous)
+        )
         .overlay(
             RoundedRectangle(cornerRadius: Theme.radiusM, style: .continuous)
                 .stroke(Theme.border, lineWidth: 1))
@@ -80,24 +82,35 @@ private struct InspectorStatusDot: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let color: Color
     let listening: Bool
-    @State private var dimmed = false
 
     var body: some View {
         if listening && !reduceMotion {
-            Circle()
-                .fill(color)
-                .frame(width: 8, height: 8)
-                .opacity(dimmed ? 0.35 : 1)
-                .onAppear {
-                    withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
-                        dimmed = true
-                    }
-                }
+            // Its own view, so each listening stretch (retry after failure,
+            // a Reduce Motion toggle) enters with fresh state and the pulse
+            // restarts instead of inheriting a finished one.
+            PulsingDot(color: color)
         } else {
             Circle()
                 .fill(color)
                 .frame(width: 8, height: 8)
         }
+    }
+}
+
+private struct PulsingDot: View {
+    let color: Color
+    @State private var dimmed = false
+
+    var body: some View {
+        Circle()
+            .fill(color)
+            .frame(width: 8, height: 8)
+            .opacity(dimmed ? 0.35 : 1)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                    dimmed = true
+                }
+            }
     }
 }
 
@@ -238,12 +251,14 @@ private struct DictationInspectorView: View {
             .accessibilityLabel("\(headline), \(engineLabel)")
 
             if showsWaveform {
-                InspectorWaveform(samples: dictation.waveform, active: dictation.phase == .listening)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(
-                        Theme.fillSubtle,
-                        in: RoundedRectangle(cornerRadius: Theme.radiusS, style: .continuous))
+                InspectorWaveform(
+                    samples: dictation.waveform, active: dictation.phase == .listening
+                )
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(
+                    Theme.fillSubtle,
+                    in: RoundedRectangle(cornerRadius: Theme.radiusS, style: .continuous))
             }
 
             if let elapsed = elapsedLabel {
@@ -258,7 +273,8 @@ private struct DictationInspectorView: View {
                 Text(bodyText)
                     .font(.system(size: 15))
                     .foregroundStyle(
-                        dictation.preview.isEmpty ? Theme.textSecondary : Theme.textPrimary)
+                        dictation.preview.isEmpty ? Theme.textSecondary : Theme.textPrimary
+                    )
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -379,8 +395,9 @@ private struct MeetingInspectorView: View {
         return app.calendar.upcoming.first { $0.id == id }
     }
     private var summaryText: String? {
-        guard let summary = meeting.summary?
-            .trimmingCharacters(in: .whitespacesAndNewlines), !summary.isEmpty
+        guard
+            let summary = meeting.summary?
+                .trimmingCharacters(in: .whitespacesAndNewlines), !summary.isEmpty
         else { return nil }
         return summary
     }
@@ -527,7 +544,8 @@ private struct MeetingInspectorView: View {
                 Label(title, systemImage: systemImage)
                     .font(.system(size: 12.5))
                     .foregroundStyle(
-                        destructive ? Theme.statusListening.opacity(0.9) : Theme.textSecondary)
+                        destructive ? Theme.statusListening.opacity(0.9) : Theme.textSecondary
+                    )
                     .labelStyle(.titleAndIcon)
                 Spacer(minLength: 0)
             }
