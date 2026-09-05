@@ -168,6 +168,67 @@ struct DictationGestureTests {
         #expect(!controller.isToggle)
         #expect(!controller.hasOpenCapture)
     }
+
+    @Test func partialDuringListeningStillUpdatesPreview() async {
+        let controller = hookedController()
+        defer { controller.cancel() }
+
+        controller.handlePress(at: 4.0)
+        controller.handleRelease(at: 4.05)
+        #expect(await waitUntil { controller.phase == .listening })
+        let generation = controller.testSessionGeneration
+        controller.publishPreviewForTesting("partial", generation: generation)
+        #expect(controller.preview == "partial")
+        #expect(controller.phase == .listening)
+    }
+
+    @Test func latePartialAfterDoneDoesNotOverwriteCommittedPreview() async {
+        var committed: String?
+        let controller = hookedController(transcribe: { chunks in
+            for await _ in chunks {}
+            return "hello"
+        })
+        controller.onCommitted = { text, _, _ in committed = text }
+        defer { controller.cancel() }
+
+        controller.handlePress(at: 6.0)
+        #expect(await waitUntil { controller.phase == .listening })
+        let generation = controller.testSessionGeneration
+        controller.publishPreviewForTesting("partial", generation: generation)
+        #expect(controller.preview == "partial")
+
+        controller.handleRelease(at: 6.50)
+        #expect(await waitUntil { controller.phase == .done })
+        #expect(committed == "hello")
+        #expect(controller.preview == "hello")
+
+        controller.publishPreviewForTesting("late", generation: generation)
+        #expect(controller.phase == .done)
+        #expect(controller.preview == "hello")
+        #expect(committed == "hello")
+    }
+
+    @Test func latePartialAfterFailureDoesNotOverwriteFailedState() async {
+        let controller = hookedController(captureError: DictationError.audioFormat)
+        defer { controller.cancel() }
+
+        controller.toggleFromMenu()
+        #expect(
+            await waitUntil {
+                if case .failed = controller.phase { return true }
+                return false
+            })
+        let generation = controller.testSessionGeneration
+        #expect(controller.preview == "")
+        controller.publishPreviewForTesting("late", generation: generation)
+        #expect(controller.preview == "")
+        if case .failed(let message) = controller.phase {
+            #expect(message == DictationError.audioFormat.errorDescription)
+        } else {
+            Issue.record("expected failed phase")
+        }
+        #expect(controller.lastFailureRetryable)
+    }
 }
 
 @Suite(.serialized)

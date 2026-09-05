@@ -432,7 +432,12 @@ final class DictationController {
 
     private func publishPreview(_ text: String, generation: Int) {
         guard generation == sessionGeneration else { return }
-        preview = text
+        switch phase {
+        case .preparing, .listening, .processing:
+            preview = text
+        case .idle, .done, .failed:
+            return
+        }
     }
 
     private func pushLevel(_ level: Float) {
