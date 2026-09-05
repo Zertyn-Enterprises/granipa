@@ -108,6 +108,26 @@ import Testing
         #expect(TranscriptQuery.containing(rows, at: 3).map(\.text) == ["backwards"])
         #expect(TranscriptQuery.containing(rows, at: 4).map(\.text) == ["backwards"])
     }
+
+    @Test func remappedSpeakerFilterKeepsTheRenamedSelection() {
+        #expect(
+            TranscriptQuery.remappedSpeakerFilter("Speaker 1", from: "Speaker 1", to: "María")
+                == "María")
+        #expect(
+            TranscriptQuery.remappedSpeakerFilter("Me", from: "Speaker 1", to: "María") == "Me")
+        #expect(TranscriptQuery.remappedSpeakerFilter(nil, from: "Speaker 1", to: "María") == nil)
+    }
+
+    @Test func retainedSpeakerFilterClearsNamesMissingFromRows() {
+        let rows = [
+            seg("Me", "hello", 0, 1, channel: .mic),
+            seg("María", "ok", 1, 2),
+        ]
+        #expect(TranscriptQuery.retainedSpeakerFilter("María", in: rows) == "María")
+        #expect(TranscriptQuery.retainedSpeakerFilter("Speaker 1", in: rows) == nil)
+        #expect(TranscriptQuery.retainedSpeakerFilter(nil, in: rows) == nil)
+        #expect(TranscriptQuery.retainedSpeakerFilter("Me", in: []) == nil)
+    }
 }
 
 @Suite struct SpeakerTalkTimeTests {

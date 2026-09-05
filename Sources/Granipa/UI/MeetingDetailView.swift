@@ -110,6 +110,8 @@ struct MeetingDetailView: View {
                     let to = renameSpeakerTo.trimmingCharacters(in: .whitespaces)
                     if !to.isEmpty, to != from {
                         try? db.renameSpeaker(meetingID: meeting.id, from: from, to: to)
+                        speakerFilter = TranscriptQuery.remappedSpeakerFilter(
+                            speakerFilter, from: from, to: to)
                         Task { await loadSegments() }
                     }
                 }
@@ -479,6 +481,7 @@ struct MeetingDetailView: View {
         }.value
         guard !Task.isCancelled else { return }
         segments = loaded
+        speakerFilter = TranscriptQuery.retainedSpeakerFilter(speakerFilter, in: loaded)
     }
 
     private func scheduleSave() {

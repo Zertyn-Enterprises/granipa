@@ -33,6 +33,21 @@ enum TranscriptQuery {
         return ordered
     }
 
+    /// After a rename, keep the filter on the new name when that was the
+    /// selection; leave any other selection (including "all") untouched.
+    static func remappedSpeakerFilter(_ current: String?, from: String, to: String) -> String? {
+        current == from ? to : current
+    }
+
+    /// Drop a speaker filter whose name is no longer in the loaded rows.
+    static func retainedSpeakerFilter(
+        _ current: String?,
+        in segments: [TranscriptSegment]
+    ) -> String? {
+        guard let current else { return nil }
+        return segments.contains(where: { $0.speaker == current }) ? current : nil
+    }
+
     /// Segments whose half-open interval `[start, end)` contains `seconds`.
     /// At a segment's exact end the next row owns the boundary, except when
     /// `seconds` is the last end in the list (EOF), which keeps that row.
