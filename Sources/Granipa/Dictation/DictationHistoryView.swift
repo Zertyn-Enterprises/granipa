@@ -37,6 +37,7 @@ struct DictationHistoryView: View {
     @State private var stats = DictationStats.empty
     @State private var sourceApps: [String] = []
     @State private var loadFailed = false
+    @State private var loadMoreFailed = false
     @State private var loadingMore = false
     @State private var loadTask: Task<Void, Never>?
     @State private var searchDebounce: Task<Void, Never>?
@@ -106,6 +107,11 @@ struct DictationHistoryView: View {
         .onExitCommand { onClose?() }
         .onChange(of: period) { reload() }
         .onChange(of: appFilter) { reload() }
+        // A commit persists (recordDictation writes before the observation
+        // ticks), so a mounted list picks the new row up without a manual reload.
+        .onChange(of: app.dictation.phase) { _, phase in
+            if phase == .done { reload() }
+        }
         .onChange(of: search) {
             searchDebounce?.cancel()
             searchDebounce = Task {
@@ -276,30 +282,43 @@ struct DictationHistoryView: View {
 
     private var loadMoreFooter: some View {
         VStack(spacing: 10) {
-            Text("Showing \(entries.count.formatted()) of \(total.formatted())")
-                .font(Theme.fontSmall)
-                .foregroundStyle(Theme.textTertiary)
-                .monospacedDigit()
-                .accessibilityHidden(true)
-            Button {
-                loadMore()
-            } label: {
-                HStack(spacing: 6) {
-                    if loadingMore {
-                        ProgressView()
-                            .controlSize(.small)
-                    }
-                    Text(loadingMore ? "Loading…" : "Load more")
-                        .font(.system(size: 13, weight: .semibold))
+            if loadMoreFailed {
+                Text("Couldn't load more")
+                    .font(Theme.fontSmall)
+                    .foregroundStyle(Theme.textTertiary)
+                Button("Retry") {
+                    loadMore()
                 }
-                .frame(maxWidth: .infinity)
-                .frame(height: 20)
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.accent)
+                .controlSize(.regular)
+                .accessibilityLabel("Retry loading more history")
+            } else {
+                Text("Showing \(entries.count.formatted()) of \(total.formatted())")
+                    .font(Theme.fontSmall)
+                    .foregroundStyle(Theme.textTertiary)
+                    .monospacedDigit()
+                    .accessibilityHidden(true)
+                Button {
+                    loadMore()
+                } label: {
+                    HStack(spacing: 6) {
+                        if loadingMore {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                        Text(loadingMore ? "Loading…" : "Load more")
+                            .font(.system(size: 13, weight: .semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 20)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.accent)
+                .controlSize(.regular)
+                .disabled(loadingMore)
+                .accessibilityLabel("Load more, showing \(entries.count) of \(total)")
             }
-            .buttonStyle(.borderedProminent)
-            .tint(Theme.accent)
-            .controlSize(.regular)
-            .disabled(loadingMore)
-            .accessibilityLabel("Load more, showing \(entries.count) of \(total)")
         }
         .padding(.top, 6)
     }
@@ -355,33 +374,20 @@ struct DictationHistoryView: View {
             .accessibilityHidden(true)
     }
 
-    private struct Snapshot: Sendable {
-        var entries: [DictationEntry]
-        var total: Int
-        var stats: DictationStats
-        var sourceApps: [String]
-    }
-
     private static func fetch(
         search: String,
         since: Date?,
         sourceApp: String?,
         limit: Int,
-        offset: Int,
+        before: (createdAt: Date, id: String)? = nil,
         database: AppDatabase?
-    ) async -> Snapshot? {
+    ) async -> DictationLibrarySnapshot? {
         guard let database else { return nil }
         let query = search.isEmpty ? nil : search
         return await Task.detached(priority: .userInitiated) {
-            guard let entries = try? database.fetchDictationEntries(
-                search: query, since: since, sourceApp: sourceApp, limit: limit, offset: offset),
-                let total = try? database.dictationEntryCount(
-                    search: query, since: since, sourceApp: sourceApp),
-                let stats = try? database.dictationStats(since: since),
-                let sourceApps = try? database.dictationSourceApps(since: since)
-            else { return nil }
-            return Snapshot(
-                entries: entries, total: total, stats: stats, sourceApps: sourceApps)
+            try? database.fetchDictationLibrarySnapshot(
+                search: query, since: since, sourceApp: sourceApp,
+                limit: limit, before: before)
         }.value
     }
 
@@ -394,43 +400,46 @@ struct DictationHistoryView: View {
         loadTask = Task {
             let snapshot = await Self.fetch(
                 search: search, since: since, sourceApp: filter,
-                limit: keeping, offset: 0, database: app.database)
+                limit: keeping, database: app.database)
             guard !Task.isCancelled else { return }
             apply(snapshot, failureMeansFailed: app.database != nil)
         }
     }
 
     private func loadMore() {
-        guard !loadingMore, entries.count < total else { return }
+        guard !loadingMore, entries.count < total, let oldest = entries.last else { return }
+        loadTask?.cancel()
         loadingMore = true
         let search = trimmedSearch
         let since = period.since
         let filter = appFilter
-        let offset = entries.count
         loadTask = Task {
             defer { loadingMore = false }
             let snapshot = await Self.fetch(
                 search: search, since: since, sourceApp: filter,
-                limit: Self.pageSize, offset: offset, database: app.database)
+                limit: Self.pageSize,
+                before: (createdAt: oldest.createdAt, id: oldest.id),
+                database: app.database)
             guard !Task.isCancelled else { return }
             if let snapshot {
-                loadFailed = false
+                loadMoreFailed = false
                 entries.append(contentsOf: snapshot.entries)
                 total = snapshot.total
                 stats = snapshot.stats
                 sourceApps = snapshot.sourceApps
             } else if app.database != nil {
-                loadFailed = true
+                loadMoreFailed = true
             }
         }
     }
 
-    private func apply(_ snapshot: Snapshot?, failureMeansFailed: Bool) {
+    private func apply(_ snapshot: DictationLibrarySnapshot?, failureMeansFailed: Bool) {
         guard let snapshot else {
             if failureMeansFailed { loadFailed = true }
             return
         }
         loadFailed = false
+        loadMoreFailed = false
         entries = snapshot.entries
         total = snapshot.total
         stats = snapshot.stats
