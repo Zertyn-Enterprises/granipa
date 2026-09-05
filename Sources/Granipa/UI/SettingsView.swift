@@ -3,93 +3,310 @@ import ServiceManagement
 import Speech
 import SwiftUI
 
-struct SettingsView: View {
-    var body: some View {
-        TabView {
-            GeneralSettings()
-                .tabItem { Label("General", systemImage: "gearshape") }
-            DictationSettings()
-                .tabItem { Label("Dictation", systemImage: "mic") }
-            ShortcutsSettings()
-                .tabItem { Label("Shortcuts", systemImage: "keyboard") }
-            PermissionsSettings()
-                .tabItem { Label("Permissions", systemImage: "lock.shield") }
-            AITab()
-                .tabItem { Label("AI", systemImage: "wand.and.stars") }
-            ExtrasTab()
-                .tabItem { Label("Extras", systemImage: "puzzlepiece") }
-            IntegrationsTab()
-                .tabItem { Label("Integrations", systemImage: "network") }
+enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
+    case general, dictation, shortcuts, permissions, ai, extras, integrations
+
+    var id: String { rawValue }
+
+    /// Single source for the pane the settings window opens on (the old first tab).
+    static let initialSelection = SettingsSection.general
+
+    var title: String {
+        switch self {
+        case .general: "General"
+        case .dictation: "Dictation"
+        case .shortcuts: "Shortcuts"
+        case .permissions: "Permissions"
+        case .ai: "AI"
+        case .extras: "Extras"
+        case .integrations: "Integrations"
         }
-        .frame(width: 640, height: 600)
+    }
+
+    var icon: String {
+        switch self {
+        case .general: "gearshape"
+        case .dictation: "mic"
+        case .shortcuts: "keyboard"
+        case .permissions: "lock.shield"
+        case .ai: "wand.and.stars"
+        case .extras: "puzzlepiece"
+        case .integrations: "network"
+        }
+    }
+
+    var subPages: [SettingsSubPage] {
+        switch self {
+        case .ai: [.providers, .templates]
+        case .extras: [.clipboardAndOCR, .windows, .battery]
+        case .integrations: [.api, .webhooks]
+        case .general, .dictation, .shortcuts, .permissions: []
+        }
+    }
+}
+
+enum SettingsSubPage: String, Hashable, Identifiable {
+    case providers, templates
+    case clipboardAndOCR, windows, battery
+    case api, webhooks
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .providers: "Providers"
+        case .templates: "Templates"
+        case .clipboardAndOCR: "Clipboard & OCR"
+        case .windows: "Windows"
+        case .battery: "Battery"
+        case .api: "API"
+        case .webhooks: "Webhooks"
+        }
+    }
+}
+
+enum SettingsLayout {
+    static let sidebarWidth: CGFloat = 220
+    static let contentMaxWidth: CGFloat = 720
+    static let minWindowWidth: CGFloat = 900
+    static let idealWindowWidth: CGFloat = 1100
+    static let minWindowHeight: CGFloat = 680
+}
+
+struct SettingsView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var section = SettingsSection.initialSelection
+    @State private var aiPane = SettingsSubPage.providers
+    @State private var extrasPane = SettingsSubPage.clipboardAndOCR
+    @State private var integrationsPane = SettingsSubPage.api
+
+    var body: some View {
+        HStack(spacing: 0) {
+            SettingsSidebar(selection: section) { section = $0 }
+            Rectangle()
+                .fill(Theme.border)
+                .frame(width: 1)
+            page
+        }
+        .animation(
+            reduceMotion ? nil : .easeOut(duration: Theme.motionNormal), value: section)
+        .frame(
+            minWidth: SettingsLayout.minWindowWidth,
+            idealWidth: SettingsLayout.idealWindowWidth,
+            minHeight: SettingsLayout.minWindowHeight)
         .tint(Theme.accent)
         .preferredColorScheme(.dark)
+        .background(Theme.bg)
     }
-}
 
-private struct AITab: View {
-    @State private var pane = 0
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Picker("", selection: $pane) {
-                Text("Providers").tag(0)
-                Text("Templates").tag(1)
+    // switch keeps only the selected pane instantiated
+    @ViewBuilder
+    private var page: some View {
+        switch section {
+        case .general:
+            SettingsPage(
+                title: "General",
+                subtitle: "Meeting language, detection, recording and startup."
+            ) {
+                GeneralSettings()
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(10)
-            if pane == 0 {
-                AISettings()
-            } else {
-                TemplateSettings()
+        case .dictation:
+            SettingsPage(
+                title: "Dictation",
+                subtitle: "Hold-to-talk dictation: shortcut, language, engine and instant rewrite."
+            ) {
+                DictationSettings()
+            }
+        case .shortcuts:
+            SettingsPage(
+                title: "Shortcuts",
+                subtitle: "Rebind the macro key and every productivity or window shortcut."
+            ) {
+                ShortcutsSettings()
+            }
+        case .permissions:
+            PermissionsSettings()
+                .frame(maxWidth: SettingsLayout.contentMaxWidth, alignment: .leading)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(Theme.bg)
+                .transition(.opacity)
+        case .ai:
+            SettingsPage(
+                title: "AI",
+                subtitle: "Notes providers, speaker identification and note templates."
+            ) {
+                SettingsSubNav(pages: SettingsSection.ai.subPages, selection: $aiPane)
+                if aiPane == .templates {
+                    TemplateSettings()
+                } else {
+                    AISettings()
+                }
+            }
+        case .extras:
+            SettingsPage(
+                title: "Extras",
+                subtitle: "Clipboard history, text capture, window snapping and battery."
+            ) {
+                SettingsSubNav(pages: SettingsSection.extras.subPages, selection: $extrasPane)
+                if extrasPane == .windows {
+                    WindowSettings()
+                } else if extrasPane == .battery {
+                    BatterySettings()
+                } else {
+                    ProductivitySettings()
+                }
+            }
+        case .integrations:
+            SettingsPage(
+                title: "Integrations",
+                subtitle: "Local REST API and outgoing webhooks."
+            ) {
+                SettingsSubNav(
+                    pages: SettingsSection.integrations.subPages, selection: $integrationsPane)
+                if integrationsPane == .webhooks {
+                    WebhookSettings()
+                } else {
+                    APISettings()
+                }
             }
         }
     }
 }
 
-private struct ExtrasTab: View {
-    @State private var pane = 0
+private struct SettingsSidebar: View {
+    let selection: SettingsSection
+    let select: (SettingsSection) -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            Picker("", selection: $pane) {
-                Text("Clipboard & OCR").tag(0)
-                Text("Windows").tag(1)
-                Text("Battery").tag(2)
+        VStack(alignment: .leading, spacing: 2) {
+            Text("SETTINGS")
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(Theme.textTertiary)
+                .tracking(0.8)
+                .padding(.leading, 8)
+                .padding(.top, 18)
+                .padding(.bottom, 8)
+
+            ForEach(SettingsSection.allCases) { section in
+                SettingsNavItem(
+                    title: section.title,
+                    icon: section.icon,
+                    isActive: selection == section
+                ) {
+                    select(section)
+                }
+                .accessibilityLabel(section.title)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(10)
-            if pane == 0 {
-                ProductivitySettings()
-            } else if pane == 1 {
-                WindowSettings()
-            } else {
-                BatterySettings()
-            }
+
+            Spacer(minLength: 12)
+
+            Text(versionLabel)
+                .font(.system(size: 10.5))
+                .foregroundStyle(Theme.textTertiary)
+                .padding(.leading, 8)
+                .padding(.bottom, 6)
         }
+        .padding(.horizontal, 10)
+        .frame(width: SettingsLayout.sidebarWidth)
+        .background(Theme.bgSidebar)
+    }
+
+    private var versionLabel: String {
+        let version =
+            Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        return version.map { "Grañipa \($0)" } ?? "Grañipa"
     }
 }
 
-private struct IntegrationsTab: View {
-    @State private var pane = 0
+private struct SettingsNavItem: View {
+    let title: String
+    let icon: String
+    let isActive: Bool
+    let action: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            Picker("", selection: $pane) {
-                Text("API").tag(0)
-                Text("Webhooks").tag(1)
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(Theme.fontCaption.weight(.semibold))
+                    .foregroundStyle(isActive ? Theme.accent : Theme.textSecondary)
+                    .frame(width: 16)
+                Text(title)
+                    .font(.system(size: 13, weight: isActive ? .semibold : .regular))
+                    .foregroundStyle(isActive ? Theme.textPrimary : Theme.textSecondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(10)
-            if pane == 0 {
-                APISettings()
-            } else {
-                WebhookSettings()
+            .padding(.vertical, 7)
+            .padding(.horizontal, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background {
+            if isActive {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Theme.accent.opacity(0.10))
             }
         }
+        .overlay(alignment: .leading) {
+            if isActive {
+                Capsule()
+                    .fill(Theme.accent)
+                    .frame(width: 3, height: 16)
+            }
+        }
+        .hoverHighlight(cornerRadius: 10)
+        .accessibilityAddTraits(isActive ? [.isSelected] : [])
+    }
+}
+
+private struct SettingsPage<Content: View>: View {
+    let title: String
+    let subtitle: String
+    private let content: Content
+
+    init(title: String, subtitle: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.subtitle = subtitle
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.system(size: 22, weight: .semibold, design: .serif))
+                    .foregroundStyle(Theme.textPrimary)
+                Text(subtitle)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .combine)
+
+            content
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(16)
+        .frame(maxWidth: SettingsLayout.contentMaxWidth, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Theme.bg)
+        .transition(.opacity)
+    }
+}
+
+private struct SettingsSubNav: View {
+    let pages: [SettingsSubPage]
+    @Binding var selection: SettingsSubPage
+
+    var body: some View {
+        Picker("Section", selection: $selection) {
+            ForEach(pages) { page in
+                Text(page.title).tag(page)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
     }
 }
 
