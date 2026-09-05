@@ -324,8 +324,28 @@ struct MeetingDetailView: View {
         saveTask = Task {
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled else { return }
-            app.update(snapshot)
+            // The editor snapshot can be older than pipeline writes (stop →
+            // status/endedAt/audio paths; enhance → summary/notes), so merge
+            // the edited fields onto the freshest copy instead of saving the
+            // snapshot whole.
+            guard let current = app.meetings.first(where: { $0.id == snapshot.id }) else {
+                return
+            }
+            app.update(Meeting.mergingEditorEdits(snapshot, into: current))
         }
+    }
+}
+
+extension Meeting {
+    /// Fields the detail editor owns; every other field comes from `current`
+    /// so a stale editor copy never clobbers pipeline writes.
+    static func mergingEditorEdits(_ edited: Meeting, into current: Meeting) -> Meeting {
+        var merged = current
+        merged.title = edited.title
+        merged.notesMarkdown = edited.notesMarkdown
+        merged.folderID = edited.folderID
+        merged.templateID = edited.templateID
+        return merged
     }
 }
 
