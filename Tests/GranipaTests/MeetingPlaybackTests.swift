@@ -82,20 +82,35 @@ enum TestMeetingAudio {
     @Test @MainActor func loadPlayPauseSeekRateAndEOFUseAVFoundation() async throws {
         let url = tempURL("tone")
         defer { try? FileManager.default.removeItem(at: url) }
-        try TestMeetingAudio.writeTone(to: url, seconds: 0.45)
+        // 30 s, not a sub-second sample: pause() must be reached while the
+        // audio is still playing, but under the full suite synchronous
+        // @MainActor tests can delay this test's Task.sleep resumption by
+        // 1-3 s, by which time a 0.45 s sample has genuinely ended. The EOF
+        // section seeks to the tail, so length costs no wall time.
+        try TestMeetingAudio.writeTone(to: url, seconds: 30)
 
         let player = MeetingPlaybackController()
         player.load(micPath: url.path, systemPath: nil)
         #expect(player.state == .ready)
         #expect(player.channel == .mic)
         #expect(player.availableChannels == [.mic])
-        #expect(player.duration > 0.35 && player.duration < 0.6)
+        #expect(player.duration > 29.8 && player.duration < 30.2)
         #expect(player.currentTime == 0)
         #expect(player.loadedURL?.path == url.path)
 
         player.play()
         #expect(player.state == .playing)
-        try await Task.sleep(for: .milliseconds(80))
+        // Task.sleep is a minimum, not a deadline: wait for observable
+        // progress. The controller mutates state only on the main actor, so
+        // once both conditions hold, the synchronous pause() below cannot
+        // race EOF.
+        for _ in 0..<100 {
+            if player.currentTime > 0, player.state == .playing {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        #expect(player.state == .playing)
         #expect(player.currentTime > 0)
 
         player.pause()
