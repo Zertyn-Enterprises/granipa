@@ -110,34 +110,46 @@ struct MeetingPlaybackBar: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    @ViewBuilder
     private var playButton: some View {
-        Button {
-            playback.togglePlaying()
-        } label: {
+        if playback.state == .preparing {
             ZStack {
                 Circle()
                     .stroke(Theme.fillSubtle, lineWidth: 3)
-                Circle()
-                    .trim(from: 0, to: progress)
-                    .stroke(
-                        Theme.accent,
-                        style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
-                Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                    .offset(x: playback.isPlaying ? 0 : 0.5)
-                    .frame(
-                        width: PlaybackTransport.innerSize,
-                        height: PlaybackTransport.innerSize)
-                    .background(Theme.accent, in: Circle())
+                ProgressView()
+                    .controlSize(.small)
             }
             .frame(width: PlaybackTransport.ringSize, height: PlaybackTransport.ringSize)
+            .accessibilityLabel("Preparing audio")
+        } else {
+            Button {
+                playback.togglePlaying()
+            } label: {
+                ZStack {
+                    Circle()
+                        .stroke(Theme.fillSubtle, lineWidth: 3)
+                    Circle()
+                        .trim(from: 0, to: progress)
+                        .stroke(
+                            Theme.accent,
+                            style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                    Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                        .offset(x: playback.isPlaying ? 0 : 0.5)
+                        .frame(
+                            width: PlaybackTransport.innerSize,
+                            height: PlaybackTransport.innerSize)
+                        .background(Theme.accent, in: Circle())
+                }
+                .frame(width: PlaybackTransport.ringSize, height: PlaybackTransport.ringSize)
+            }
+            .buttonStyle(.plain)
+            .disabled(!canControl)
+            .accessibilityLabel(playback.isPlaying ? "Pause" : "Play")
+            .help(playback.isPlaying ? "Pause" : "Play")
         }
-        .buttonStyle(.plain)
-        .disabled(!canControl)
-        .accessibilityLabel(playback.isPlaying ? "Pause" : "Play")
-        .help(playback.isPlaying ? "Pause" : "Play")
     }
 
     private var rateMenu: some View {
@@ -202,7 +214,7 @@ struct MeetingPlaybackBar: View {
     private var canControl: Bool {
         switch playback.state {
         case .ready, .playing, .paused, .ended: true
-        case .idle, .failed: false
+        case .idle, .preparing, .failed: false
         }
     }
 

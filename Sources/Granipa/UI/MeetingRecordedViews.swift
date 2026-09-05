@@ -338,7 +338,7 @@ struct MeetingTranscriptView: View {
     private var canPlay: Bool {
         switch playback.state {
         case .ready, .playing, .paused, .ended: true
-        case .idle, .failed: false
+        case .idle, .preparing, .failed: false
         }
     }
 

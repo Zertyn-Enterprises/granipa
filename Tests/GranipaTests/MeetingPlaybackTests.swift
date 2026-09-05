@@ -79,6 +79,32 @@ enum TestMeetingAudio {
             .appendingPathComponent("granipa-play-\(suffix)-\(UUID().uuidString).caf")
     }
 
+    @MainActor private func waitUntil(
+        _ player: MeetingPlaybackController, _ matches: (MeetingPlaybackState) -> Bool
+    ) async throws {
+        for _ in 0..<400 {
+            if matches(player.state) { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        Issue.record("timed out waiting for playback state, stayed \(player.state)")
+    }
+
+    @Test @MainActor func loadReturnsBeforePreparationBlocksTheMainActor() async throws {
+        let url = tempURL("nonblocking")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try TestMeetingAudio.writeTone(to: url, seconds: 0.3)
+
+        let player = MeetingPlaybackController()
+        player.load(micPath: url.path, systemPath: nil)
+        // The enqueued preparation cannot run while this main-actor test
+        // holds the thread, so load() returning before .ready proves the
+        // file open and prepareToPlay happen off the meeting-open path.
+        #expect(player.state != .ready)
+        try await waitUntil(player) { $0 == .ready }
+        #expect(player.duration > 0.2)
+        #expect(player.loadedURL?.path == url.path)
+    }
+
     @Test @MainActor func loadPlayPauseSeekRateAndEOFUseAVFoundation() async throws {
         let url = tempURL("tone")
         defer { try? FileManager.default.removeItem(at: url) }
@@ -91,7 +117,7 @@ enum TestMeetingAudio {
 
         let player = MeetingPlaybackController()
         player.load(micPath: url.path, systemPath: nil)
-        #expect(player.state == .ready)
+        try await waitUntil(player) { $0 == .ready }
         #expect(player.channel == .mic)
         #expect(player.availableChannels == [.mic])
         #expect(player.duration > 29.8 && player.duration < 30.2)
@@ -148,7 +174,7 @@ enum TestMeetingAudio {
         #expect(player.duration == 0)
     }
 
-    @Test @MainActor func missingAndCorruptFilesFailWithoutPlaying() {
+    @Test @MainActor func missingAndCorruptFilesFailWithoutPlaying() async throws {
         let player = MeetingPlaybackController()
         let missing = "/tmp/granipa-missing-\(UUID().uuidString).caf"
         player.load(micPath: missing, systemPath: nil)
@@ -160,13 +186,13 @@ enum TestMeetingAudio {
         defer { try? FileManager.default.removeItem(at: junk) }
         try? Data("not audio".utf8).write(to: junk)
         player.load(micPath: junk.path, systemPath: nil)
-        guard case .failed(.loadFailed) = player.state else {
-            Issue.record("expected loadFailed, got \(player.state)")
-            return
-        }
+        try await waitUntil(player) {
+                    if case .failed(.loadFailed) = $0 { return true }
+                    return false
+                }
     }
 
-    @Test @MainActor func channelSwitchDoesNotMixAndDoesNotAutoplay() throws {
+    @Test @MainActor func channelSwitchDoesNotMixAndDoesNotAutoplay() async throws {
         let mic = tempURL("mic")
         let system = tempURL("system")
         defer {
@@ -178,7 +204,7 @@ enum TestMeetingAudio {
 
         let player = MeetingPlaybackController()
         player.load(micPath: mic.path, systemPath: system.path)
-        #expect(player.state == .ready)
+        try await waitUntil(player) { $0 == .ready }
         #expect(!player.isPlaying)
         #expect(player.availableChannels == [.mic, .system])
         #expect(player.channel == .system)
@@ -187,6 +213,7 @@ enum TestMeetingAudio {
         player.selectChannel(.mic)
         #expect(player.channel == .mic)
         #expect(!player.isPlaying)
+        try await waitUntil(player) { $0 == .ready }
         #expect(player.duration > 0.2 && player.duration < 0.4)
         #expect(player.loadedURL?.path == mic.path)
 
@@ -195,6 +222,7 @@ enum TestMeetingAudio {
         player.selectChannel(.system)
         #expect(player.channel == .system)
         #expect(!player.isPlaying)
+        try await waitUntil(player) { $0 == .ready }
         #expect(player.loadedURL?.path == system.path)
     }
 
