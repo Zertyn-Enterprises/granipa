@@ -56,8 +56,12 @@ or transcript content appears in any log.
   The old open path paid round-1 numbers synchronously on the main actor per
   open/channel switch; slow disks make it unbounded.
 - AI-notes entry vs full parse (20k filler lines, min of 3, debug tests):
-  old-equivalent model 733.8 ms entry vs 84.8 ms full parse; new model passes
-  `entry * 8 < full` with the prefix path.
+  old-equivalent model 91.7 ms entry vs 84.8 ms full parse — i.e. entry cost
+  the whole parse. (Arithmetic corrected from the first draft of this doc and
+  from `21026b5`'s message, which quoted `entryNs × 8 = 733,799,672 ns` as if
+  it were the entry time itself.) The new model passes `entry * 8 < full`
+  with the prefix path; the boolean ratio test does not measure the new
+  entry duration, only that it is well under an eighth of a full parse.
 - Vendor docs checked: Apple documents `AVAudioPlayer` as Sendable
   (Conforms To, current docs), but the installed macOS SDK interface does not
   expose it — compile probe under Swift 6 strict concurrency fails. Hence
@@ -121,6 +125,49 @@ finding-1 tests keep their observable.
 Post-fix gates: debug 372 tests / 65 suites; release 350 tests / 63 suites;
 playback suite 5× green; format-lint warning profile identical to `ea6171e`
 baseline; `git diff --check` clean; no new annotations or API surface.
+
+## Grok screen-review reconciliation (follow-up round)
+
+Review file: `docs/wip/2026-09-05-meeting-review-followup.md` (root-attached,
+root's file — left uncommitted here). Verdict ISSUES; items and outcomes:
+
+- Ticking before `engine.play`; nil/missing paths not releasing; stale async
+  completions — overlap with the audit round, fixed in `5a678b4` above.
+- **Missing-path channel change vs an in-flight replacement.** Covered by the
+  same mechanism: `openCurrentChannel` bumps the generation (dropping the
+  in-flight completion's publish) and chains `releaseEngine` after any queued
+  `replace`, which resets whatever it created. Deterministic red found while
+  testing this: `selectChannel` to a vanished file left `loadedURL` published
+  after `.failed(.missingFile)` — `releaseEngine` now clears the loaded-file
+  facade (`loadedURL`, `duration`, `currentTime`), `stopAndRelease` reuses it.
+  New test `selectingAVanishedChannelFailsReleasesAndKeepsTheDiagnostic` was
+  red against `771ef47` (both `.ended` clobber and stale `loadedURL`) and is
+  green after. The interleaving where the previous `replace` is still queued
+  is not deterministically reachable from the public API (the prepare window
+  of a real file is ~1-10 ms); the generation/reset chaining that covers it
+  is the same code the audit-round tests exercise.
+- **AI Notes first frame / re-enhance flash.** `document.source` is now
+  exposed; while it differs from the meeting's notes the view shows a real
+  "Formatting notes…" row instead of an empty first frame or the previous
+  source's blocks, until the prefix lands. No artificial delay; tab re-entry
+  still hits the cache (source matches, no flash). View-level behavior — no
+  UI test framework in this target, verified by the model's source-equality
+  contract the view consumes.
+- **LazyVStack nested in an eager VStack.** Unverified inference, flagged as
+  such: SwiftUI's documented contract for lazy stacks is deferred child
+  realization as they approach the viewport, and the eager parent only
+  instantiates the container plus four card views — the thousands of row
+  views remain the LazyVStack's children. This was NOT measured here (no app
+  launch in this lane); root's live profiling should confirm row
+  realization before/after, or the content can be flattened into one lazy
+  list at that point.
+- **EOF/channel test honesty.** EOF test now also restarts after `.ended`
+  and requires real engine progress (catches a facade `.ended` over a dead
+  player, and a missing tick at second play); the channel-switch test keeps
+  playing a 0.3 s mic file across the switch and requires the facade to stay
+  `.ready` past its natural EOF — the underlying stop is verified by the
+  same EOF-observable mechanism as the release tests, not by UI flags alone.
+  No assertion weakened; only additions.
 
 ## Remaining caveats
 
