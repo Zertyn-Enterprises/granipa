@@ -23,6 +23,41 @@ enum TranscriptSource {
     }
 }
 
+enum TranscriptLoadPhase: Equatable {
+    case idle
+    case loading
+    case loaded
+    case failed(String)
+}
+
+/// Loads a meeting's transcript off the main actor and keeps the last good
+/// rows while a refresh is in flight, so re-entries and renames never flash
+/// an empty list. Only the newest load may publish its result.
+@MainActor
+@Observable
+final class MeetingTranscriptModel {
+    private(set) var segments: [TranscriptSegment] = []
+    private(set) var phase: TranscriptLoadPhase = .idle
+    private var loadID = 0
+
+    func reload(_ fetch: @escaping @Sendable () async throws -> [TranscriptSegment]) {
+        loadID += 1
+        let current = loadID
+        phase = .loading
+        Task {
+            do {
+                let loaded = try await fetch()
+                guard current == loadID else { return }
+                segments = loaded
+                phase = .loaded
+            } catch {
+                guard current == loadID else { return }
+                phase = .failed(error.localizedDescription)
+            }
+        }
+    }
+}
+
 struct MeetingOverviewView: View {
     @Environment(AppState.self) private var app
     let meeting: Meeting
@@ -270,6 +305,7 @@ struct MeetingActionItemsView: View {
 
 struct MeetingTranscriptView: View {
     let segments: [TranscriptSegment]
+    let loadPhase: TranscriptLoadPhase
     let live: TranscriptionCoordinator?
     let isProcessing: Bool
     @Bindable var playback: MeetingPlaybackController
@@ -278,6 +314,7 @@ struct MeetingTranscriptView: View {
     @Binding var search: String
     @Binding var speakerFilter: String?
     let onRename: (String) -> Void
+    let onRetry: () -> Void
 
     @FocusState private var searchFocused: Bool
     @State private var talkReport: SpeakerTalkTime.Report?
@@ -309,6 +346,16 @@ struct MeetingTranscriptView: View {
         Group {
             if let live, shown.isEmpty, case .failed(let message) = live.phase {
                 failed(message: message, retry: { live.retryIfFailed() })
+            } else if live == nil, shown.isEmpty, case .failed(let message) = loadPhase {
+                loadFailed(message: message)
+            } else if shown.isEmpty, live == nil, case .loading = loadPhase {
+                VStack(spacing: 10) {
+                    ProgressView()
+                    Text("Loading transcript…")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(Theme.textSecondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if shown.isEmpty, live == nil, isProcessing {
                 VStack(spacing: 10) {
                     ProgressView()
@@ -570,6 +617,26 @@ struct MeetingTranscriptView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 380)
             Button("Retry", action: retry)
+                .buttonStyle(.bordered)
+                .tint(.white)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func loadFailed(message: String) -> some View {
+        VStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 28))
+                .foregroundStyle(Theme.statusFailed)
+            Text("Couldn't load the transcript")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(Theme.textSecondary)
+            Text(message)
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.textTertiary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 380)
+            Button("Try Again", action: onRetry)
                 .buttonStyle(.bordered)
                 .tint(.white)
         }

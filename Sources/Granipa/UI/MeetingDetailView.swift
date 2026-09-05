@@ -61,7 +61,7 @@ struct MeetingDetailView: View {
     @Environment(AppState.self) private var app
     @State private var meeting: Meeting
     @State private var tab: Tab
-    @State private var segments: [TranscriptSegment] = []
+    @State private var transcript = MeetingTranscriptModel()
     @State private var saveTask: Task<Void, Never>?
     @State private var renamingSpeaker: String?
     @State private var renameSpeakerTo = ""
@@ -130,7 +130,8 @@ struct MeetingDetailView: View {
                     EnhancedNotesView(meetingID: meeting.id)
                 case .transcript:
                     MeetingTranscriptView(
-                        segments: segments,
+                        segments: transcript.segments,
+                        loadPhase: transcript.phase,
                         live: liveTranscription,
                         isProcessing: isPostStopProcessing,
                         playback: playback,
@@ -141,7 +142,8 @@ struct MeetingDetailView: View {
                         onRename: { speaker in
                             renameSpeakerTo = speaker
                             renamingSpeaker = speaker
-                        })
+                        },
+                        onRetry: { loadSegments() })
                 case .actionItems:
                     MeetingActionItemsView(meeting: freshMeeting)
                 case .notes:
@@ -149,8 +151,13 @@ struct MeetingDetailView: View {
                 }
             }
         }
-        .task(id: taskKey) { await loadSegments() }
+        .task(id: taskKey) { loadSegments() }
         .task(id: audioPathsKey) { reloadPlayback() }
+        .onChange(of: transcript.phase) { _, phase in
+            guard case .loaded = phase else { return }
+            speakerFilter = TranscriptQuery.retainedSpeakerFilter(
+                speakerFilter, in: transcript.segments)
+        }
         .onChange(of: app.recorder.isBusy) { _, busy in
             if busy { playback.stopAndRelease() }
             else { reloadPlayback() }
@@ -172,7 +179,7 @@ struct MeetingDetailView: View {
                         try? db.renameSpeaker(meetingID: meeting.id, from: from, to: to)
                         speakerFilter = TranscriptQuery.remappedSpeakerFilter(
                             speakerFilter, from: from, to: to)
-                        Task { await loadSegments() }
+                        loadSegments()
                     }
                 }
                 renamingSpeaker = nil
@@ -570,15 +577,14 @@ struct MeetingDetailView: View {
         playback.load(micPath: fresh.audioMicPath, systemPath: fresh.audioSystemPath)
     }
 
-    private func loadSegments() async {
+    private func loadSegments() {
         guard let db = app.database else { return }
         let meetingID = meeting.id
-        let loaded = await Task.detached(priority: .userInitiated) {
-            (try? db.fetchSegments(meetingID: meetingID)) ?? []
-        }.value
-        guard !Task.isCancelled else { return }
-        segments = loaded
-        speakerFilter = TranscriptQuery.retainedSpeakerFilter(speakerFilter, in: loaded)
+        transcript.reload {
+            try await Task.detached(priority: .userInitiated) {
+                try db.fetchSegments(meetingID: meetingID)
+            }.value
+        }
     }
 
     private func scheduleSave() {
