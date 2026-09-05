@@ -63,3 +63,24 @@ the fixture-defaults fix. Existing limitations remain: system-audio Denied state
 needs app recreation after a grant, and binary preflight APIs cannot distinguish
 never-asked from denied for accessibility/screen recording. Visual verification
 is still pending; a DEBUG self-view snapshot hook is being prepared.
+
+## Update at fd20e86 (10:55)
+
+- Live Recording integrated (9f57658, 1799a89): selected-meeting stage,
+  timer, gated RMS history, stop/cancel, notes, real live transcript when enabled,
+  honest post-stop transcript status otherwise. Pause/resume, bookmarks and live AI
+  are not implemented by this screen; do not count the full recording scope done.
+- Dictation full-screen Grok review found four issues. GLM fixes integrated:
+  consistent GRDB snapshot/keyset paging, refresh after commit, cancellation and
+  footer retry, and no misleading Apple locale label under Muse.
+- Signed bundle and full suite pass: 288 tests in 50 suites, 0.625 seconds test run.
+  Logs: `/private/tmp/granipa-v2-live-bundle.log`,
+  `/private/tmp/granipa-v2-live-tests.log`.
+- Debug self-view capture code integrated. First runtime output was 32×44 pixels:
+  a utility window, not the main screen. This is failed visual verification.
+  GLM is implementing a second and final approach targeting the actual main window.
+- Grok is implementing the recorded-meeting screen and real AVFoundation playback
+  on `feat/v2-meetings-grok`, based on integrated Live Recording.
+- Grok's one full-screen review of Live Recording is running. Speech/clipboard E2E
+  and final visual/performance checks remain unverified. V2 is not complete.
+- Remote `feat/granipa-v2` was backed up through 183cdbc; no merge performed.
