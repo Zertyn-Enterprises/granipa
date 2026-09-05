@@ -1,7 +1,9 @@
 #!/bin/bash
 # Launches Grañipa against an isolated throwaway home so V2 fixture
-# screenshots and scroll profiles never touch real data. Debug bundles only:
-# the --v2-fixture seam is compiled out of release builds.
+# screenshots and scroll profiles never touch the production database.
+# Debug bundles only: the --v2-fixture seam is compiled out of release
+# builds. CFFIXED_USER_HOME isolates FileManager Application Support
+# (database and fixture audio); it does not redirect UserDefaults.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -13,9 +15,10 @@ usage() {
 Usage: Scripts/v2-fixture.sh [--build] <shell|many>
 
 Runs the existing signed debug bundle with --v2-fixture under a fresh
-CFFIXED_USER_HOME created in /private/tmp. Database, defaults, and fixture
-audio all live inside that temp home, which is deleted when the app exits.
-No production data is read or written.
+CFFIXED_USER_HOME created in /private/tmp. The fixture dataset (database
+and placeholder audio) lives inside that temp home, which is deleted when
+the app exits. Fixture startup does not write persisted UserDefaults.
+Opening Settings or otherwise mutating preferences is not sandboxed.
 
   shell     small deterministic dataset: folders, meetings, transcript,
             notes, and recordings (tiny placeholder files)

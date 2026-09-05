@@ -16,6 +16,12 @@ struct MainWindow: View {
             || lower.contains("not authorized") || lower.contains("privacy")
     }
 
+    /// Fixture launches skip the welcome window in-process. They must not
+    /// write `onboardingCompleted` — cfprefsd ignores CFFIXED_USER_HOME.
+    nonisolated static func shouldPresentOnboarding(completed: Bool, fixtureActive: Bool) -> Bool {
+        !fixtureActive && !completed
+    }
+
     private var inspectorKind: InspectorContentKind {
         AppNavigation.inspectorKind(
             destination: app.sidebarDestination,
@@ -113,7 +119,14 @@ struct MainWindow: View {
             Text(app.loadError ?? "")
         }
         .onAppear {
-            if !onboardingCompleted {
+            #if DEBUG
+            let fixtureActive = V2FixtureRuntime.isActive
+            #else
+            let fixtureActive = false
+            #endif
+            if Self.shouldPresentOnboarding(
+                completed: onboardingCompleted, fixtureActive: fixtureActive)
+            {
                 openWindow(id: "onboarding")
             }
         }

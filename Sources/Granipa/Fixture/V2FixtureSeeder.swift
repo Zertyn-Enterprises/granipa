@@ -9,13 +9,6 @@ enum V2FixtureSeeder {
     /// 2026-06-15T09:00:00Z.
     static let referenceDate = Date(timeIntervalSince1970: 1_781_514_000)
 
-    /// Marks onboarding as complete in the given defaults domain. The fixture
-    /// process passes `UserDefaults.standard`, which CFFIXED_USER_HOME has
-    /// already redirected into the throwaway home.
-    static func markOnboardingComplete(in defaults: UserDefaults) {
-        defaults.set(true, forKey: "onboardingCompleted")
-    }
-
     static func seed(
         _ fixture: V2Fixture,
         into database: AppDatabase,

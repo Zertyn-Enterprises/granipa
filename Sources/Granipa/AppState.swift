@@ -72,7 +72,8 @@ final class AppState {
     /// `--v2-fixture` launch: the runtime gate has already verified
     /// CFFIXED_USER_HOME points into a throwaway temp home, so AppDatabase and
     /// AppPaths land there naturally. Seeds deterministic rows and starts no
-    /// background service, permission probe, or network loop.
+    /// background service, permission probe, or network loop. Does not write
+    /// UserDefaults — cfprefsd ignores CFFIXED_USER_HOME.
     init(fixture: V2Fixture) {
         do {
             let db = try AppDatabase.open()
@@ -87,7 +88,6 @@ final class AppState {
         } catch {
             loadError = error.localizedDescription
         }
-        V2FixtureSeeder.markOnboardingComplete(in: UserDefaults.standard)
     }
     #endif
 

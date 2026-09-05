@@ -262,18 +262,13 @@ import Testing
         #expect(try db.fetchSegments(meetingID: "fixture-many-001").isEmpty)
     }
 
-    // MARK: onboarding defaults
+    // MARK: onboarding presentation
 
-    @Test func onboardingIsCompletedInTheInjectedDefaultsDomain() {
-        guard let suite = UserDefaults(suiteName: "v2-fixture-tests") else {
-            Issue.record("defaults suite could not be created")
-            return
-        }
-        defer { suite.removePersistentDomain(forName: "v2-fixture-tests") }
-
-        V2FixtureSeeder.markOnboardingComplete(in: suite)
-
-        #expect(suite.bool(forKey: "onboardingCompleted"))
+    @Test func onboardingPresentsOnlyWhenIncompleteAndFixtureInactive() {
+        #expect(MainWindow.shouldPresentOnboarding(completed: false, fixtureActive: false))
+        #expect(!MainWindow.shouldPresentOnboarding(completed: true, fixtureActive: false))
+        #expect(!MainWindow.shouldPresentOnboarding(completed: false, fixtureActive: true))
+        #expect(!MainWindow.shouldPresentOnboarding(completed: true, fixtureActive: true))
     }
 }
 #endif
