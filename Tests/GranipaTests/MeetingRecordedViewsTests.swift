@@ -157,7 +157,8 @@ import Testing
             }.value
         }
         #expect(model.phase == .loading)
-        try await waitUntil({ model.phase == .loaded && model.segments.count == 2 }, "both segments")
+        try await waitUntil(
+            { model.phase == .loaded && model.segments.count == 2 }, "both segments")
         #expect(model.segments.map(\.text) == ["first line", "second line"])
     }
 

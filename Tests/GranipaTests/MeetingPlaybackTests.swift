@@ -187,9 +187,9 @@ enum TestMeetingAudio {
         try? Data("not audio".utf8).write(to: junk)
         player.load(micPath: junk.path, systemPath: nil)
         try await waitUntil(player) {
-                    if case .failed(.loadFailed) = $0 { return true }
-                    return false
-                }
+            if case .failed(.loadFailed) = $0 { return true }
+            return false
+        }
     }
 
     @Test @MainActor func channelSwitchDoesNotMixAndDoesNotAutoplay() async throws {
