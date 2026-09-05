@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #if DEBUG
         if V2FixtureRuntime.isActive {
             os_signpost(.event, log: Self.lifecycleLog, name: "appReady")
+            V2SnapshotHook.captureIfRequested()
             return
         }
         #endif
@@ -46,6 +47,15 @@ struct GranipaApp: App {
             appState = AppState()
         case .run(let fixture):
             appState = AppState(fixture: fixture)
+            switch V2SnapshotHook.resolve(arguments: CommandLine.arguments) {
+            case .off:
+                break
+            case .run(let request):
+                appState.sidebarDestination = request.destination
+            case .refuse(let message):
+                FileHandle.standardError.write(Data(("ERROR: \(message)\n").utf8))
+                exit(1)
+            }
         case .refuse(let message):
             // Fail closed before any production database is opened.
             FileHandle.standardError.write(Data(("ERROR: \(message)\n").utf8))
