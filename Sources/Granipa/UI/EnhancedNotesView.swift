@@ -11,7 +11,10 @@ final class EnhancedNotesDocument {
 
     private(set) var blocks: [MarkdownBlock] = []
     private(set) var isComplete = false
-    private var source = ""
+    /// The source `blocks` currently render. Until `.task` runs `update`,
+    /// this differs from the meeting's notes and the view shows preparation
+    /// instead of flashing the previous source's blocks.
+    private(set) var source = ""
     private var inFlight = false
     private var generation = 0
 
@@ -112,8 +115,18 @@ struct EnhancedNotesView: View {
                     .card(cornerRadius: Theme.radiusL)
                 }
 
-                if !notes.isEmpty {
+                if document.source == notes {
                     MarkdownBlocksView(blocks: document.blocks)
+                } else if !notes.isEmpty {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Formatting notes…")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Theme.textTertiary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 8)
                 }
 
                 let items = ActionItem.decodeList(from: meeting.actionItemsJSON)
