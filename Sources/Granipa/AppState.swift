@@ -127,8 +127,8 @@ final class AppState {
             id: 3,
             keyCode: keyCode,
             modifiers: modifiers,
-            onPress: { DictationController.shared.handlePress() },
-            onRelease: { DictationController.shared.handleRelease() }
+            onPress: { DictationController.shared.handlePress(at: $0) },
+            onRelease: { DictationController.shared.handleRelease(at: $0) }
         )
         if HotkeyBinding.isModifierOnly(keyCode: keyCode, modifiers: modifiers),
             !PasteService.isTrusted

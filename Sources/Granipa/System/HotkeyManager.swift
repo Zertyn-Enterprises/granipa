@@ -66,8 +66,8 @@ final class HotkeyManager: @unchecked Sendable {
     private static let log = Logger(subsystem: "com.zertyn.granipa", category: "hotkey")
 
     private struct Handler {
-        var onPress: @MainActor () -> Void
-        var onRelease: (@MainActor () -> Void)?
+        var onPress: @MainActor (TimeInterval) -> Void
+        var onRelease: (@MainActor (TimeInterval) -> Void)?
     }
 
     private struct ModifierSpec {
@@ -78,6 +78,7 @@ final class HotkeyManager: @unchecked Sendable {
     private var hotkeyRefs: [UInt32: EventHotKeyRef] = [:]
     private var modifierSpecs: [UInt32: ModifierSpec] = [:]
     private var modifierDown: [UInt32: Bool] = [:]
+    private var keyDown: [UInt32: Bool] = [:]
     private var eventHandler: EventHandlerRef?
     private var localMonitor: Any?
     private var globalMonitor: Any?
@@ -85,15 +86,17 @@ final class HotkeyManager: @unchecked Sendable {
     func register(
         id: UInt32, keyCode: UInt32, modifiers: UInt32, handler: @escaping @MainActor () -> Void
     ) {
-        register(id: id, keyCode: keyCode, modifiers: modifiers, onPress: handler, onRelease: nil)
+        register(
+            id: id, keyCode: keyCode, modifiers: modifiers,
+            onPress: { _ in handler() }, onRelease: nil)
     }
 
     func register(
         id: UInt32,
         keyCode: UInt32,
         modifiers: UInt32,
-        onPress: @escaping @MainActor () -> Void,
-        onRelease: (@MainActor () -> Void)?
+        onPress: @escaping @MainActor (TimeInterval) -> Void,
+        onRelease: (@MainActor (TimeInterval) -> Void)?
     ) {
         unregister(id: id)
         handlers[id] = Handler(onPress: onPress, onRelease: onRelease)
@@ -103,6 +106,7 @@ final class HotkeyManager: @unchecked Sendable {
             refreshModifierMonitors()
             return
         }
+        keyDown[id] = false
         installIfNeeded()
         var ref: EventHotKeyRef?
         let hotKeyID = EventHotKeyID(signature: OSType(0x47524E50), id: id)
@@ -122,6 +126,7 @@ final class HotkeyManager: @unchecked Sendable {
         }
         let hadModifier = modifierSpecs.removeValue(forKey: id) != nil
         modifierDown.removeValue(forKey: id)
+        keyDown.removeValue(forKey: id)
         handlers.removeValue(forKey: id)
         if hadModifier {
             refreshModifierMonitors()
@@ -139,38 +144,55 @@ final class HotkeyManager: @unchecked Sendable {
         }
         guard !modifierSpecs.isEmpty else { return }
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            self?.handleFlagsChanged(event)
+            self?.handleModifierEvent(event)
             return event
         }
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            self?.handleFlagsChanged(event)
+            self?.handleModifierEvent(event)
         }
         if globalMonitor == nil {
             Self.log.error("flagsChanged global monitor nil — grant Accessibility for Right Option dictation")
         }
     }
 
-    private func handleFlagsChanged(_ event: NSEvent) {
+    func handleModifierEvent(_ event: NSEvent) {
         let code = UInt32(event.keyCode)
         let down = HotkeyBinding.eventReportsModifierDown(
             keyCode: code, flags: event.modifierFlags)
+        // Hardware time, captured before the MainActor hop so overlay/UI
+        // stalls cannot turn a tap into a hold.
+        let timestamp = event.timestamp
         Task { @MainActor in
-            self.dispatchModifier(code: code, down: down)
+            self.dispatchModifier(code: code, down: down, timestamp: timestamp)
         }
     }
 
     @MainActor
-    private func dispatchModifier(code: UInt32, down: Bool) {
+    private func dispatchModifier(code: UInt32, down: Bool, timestamp: TimeInterval) {
         for (id, spec) in modifierSpecs where spec.keyCode == code {
             let was = modifierDown[id] ?? false
             guard down != was else { continue }
             modifierDown[id] = down
             guard let handler = handlers[id] else { continue }
             if down {
-                handler.onPress()
+                handler.onPress(timestamp)
             } else {
-                handler.onRelease?()
+                handler.onRelease?(timestamp)
             }
+        }
+    }
+
+    @MainActor
+    func dispatchHotKey(id: UInt32, released: Bool, timestamp: TimeInterval) {
+        let was = keyDown[id] ?? false
+        if released {
+            guard was else { return }
+            keyDown[id] = false
+            handlers[id]?.onRelease?(timestamp)
+        } else {
+            guard !was else { return }
+            keyDown[id] = true
+            handlers[id]?.onPress(timestamp)
         }
     }
 
@@ -200,13 +222,12 @@ final class HotkeyManager: @unchecked Sendable {
                 let manager = Unmanaged<HotkeyManager>.fromOpaque(userData).takeUnretainedValue()
                 let id = hotKeyID.id
                 let kind = GetEventKind(event)
+                let timestamp = TimeInterval(GetEventTime(event))
                 Task { @MainActor in
-                    guard let handler = manager.handlers[id] else { return }
-                    if kind == UInt32(kEventHotKeyReleased) {
-                        handler.onRelease?()
-                    } else {
-                        handler.onPress()
-                    }
+                    manager.dispatchHotKey(
+                        id: id,
+                        released: kind == UInt32(kEventHotKeyReleased),
+                        timestamp: timestamp)
                 }
                 return noErr
             },

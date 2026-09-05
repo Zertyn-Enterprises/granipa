@@ -29,6 +29,24 @@ import Testing
         #expect(DictationTrigger.actionOnRelease(held: 1.4) == .stop)
     }
 
+    @Test func eventTimestampsClassifyTapEvenWhenHandlingIsLate() {
+        let press = 10.0
+        let release = 10.05
+        let handlingDelay: TimeInterval = 1.5
+        #expect(handlingDelay > DictationTrigger.toggleThreshold)
+        #expect(
+            DictationTrigger.actionOnRelease(press: press, release: release) == .keepAsToggle)
+        #expect(
+            DictationTrigger.actionOnRelease(held: (release + handlingDelay) - press) == .stop)
+    }
+
+    @Test func eventTimestampHoldBoundaryMatchesDurationPolicy() {
+        #expect(
+            DictationTrigger.actionOnRelease(press: 10.0, release: 10.219) == .keepAsToggle)
+        #expect(DictationTrigger.actionOnRelease(press: 10.0, release: 10.22) == .stop)
+        #expect(DictationTrigger.actionOnRelease(press: 10.0, release: 9.5) == .keepAsToggle)
+    }
+
     @Test func museParsesHandshakeWithoutType() {
         let event = MuseEventParser.parse(#"{"sessionId":"abc-123"}"#)
         #expect(event == .handshake(sessionID: "abc-123"))

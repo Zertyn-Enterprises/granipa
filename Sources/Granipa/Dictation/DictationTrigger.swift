@@ -12,6 +12,14 @@ enum DictationTrigger {
     static func actionOnRelease(held: TimeInterval) -> ReleaseAction {
         held < toggleThreshold ? .keepAsToggle : .stop
     }
+
+    /// `press`/`release` are hardware event times (seconds since system startup),
+    /// not `Date.now` after a MainActor hop.
+    static func actionOnRelease(
+        press: TimeInterval, release: TimeInterval
+    ) -> ReleaseAction {
+        actionOnRelease(held: max(0, release - press))
+    }
 }
 
 enum DictationEngineID: String, CaseIterable, Sendable {
