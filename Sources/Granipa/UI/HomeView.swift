@@ -23,16 +23,22 @@ enum LibraryCopy {
             return summary
         }
         for markdown in [enhancedNotesMarkdown ?? "", notesMarkdown] {
-            let lines = plainLines(from: markdown)
+            let lines = plainLines(from: markdown, maxLines: 2)
             if !lines.isEmpty {
-                return lines.prefix(2).joined(separator: "\n")
+                return lines.joined(separator: "\n")
             }
         }
         return nil
     }
 
-    static func plainLines(from markdown: String) -> [String] {
-        MarkdownParser.parse(markdown).compactMap { block in
+    static func plainLines(from markdown: String, maxLines: Int = Int.max) -> [String] {
+        let blocks: [MarkdownBlock]
+        if maxLines == Int.max {
+            blocks = MarkdownParser.parse(markdown)
+        } else {
+            blocks = MarkdownParser.parse(markdown, maxBlocks: maxLines).blocks
+        }
+        return blocks.compactMap { block in
             switch block {
             case .heading(_, let text), .paragraph(let text), .bullet(_, let text),
                 .numbered(_, _, let text):

@@ -11,34 +11,62 @@ enum MarkdownParser {
     static func parse(_ markdown: String) -> [MarkdownBlock] {
         var blocks: [MarkdownBlock] = []
         for rawLine in markdown.components(separatedBy: .newlines) {
-            let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
-            if trimmed.isEmpty { continue }
-            let leading = rawLine.prefix { $0 == " " || $0 == "\t" }
-            let indentWidth = leading.reduce(0) { $0 + ($1 == "\t" ? 4 : 1) }
-            let indent = min(indentWidth / 2, 4)
-
-            if trimmed.hasPrefix("#") {
-                let hashes = trimmed.prefix(while: { $0 == "#" })
-                let rest = trimmed.dropFirst(hashes.count)
-                if hashes.count <= 6, rest.hasPrefix(" ") {
-                    let text = rest.trimmingCharacters(in: .whitespaces)
-                    if !text.isEmpty {
-                        blocks.append(.heading(level: hashes.count, text: text))
-                        continue
-                    }
-                }
+            if let block = block(from: rawLine) {
+                blocks.append(block)
             }
-            if let text = bulletText(of: trimmed) {
-                blocks.append(.bullet(indent: indent, text: text))
-                continue
-            }
-            if let (marker, text) = numberedText(of: trimmed) {
-                blocks.append(.numbered(indent: indent, marker: marker, text: text))
-                continue
-            }
-            blocks.append(.paragraph(trimmed))
         }
         return blocks
+    }
+
+    /// Walks physical lines until `maxBlocks` non-empty blocks. Does not split
+    /// the unread tail. `linesVisited` includes skipped blanks.
+    static func parse(
+        _ markdown: String, maxBlocks: Int
+    ) -> (blocks: [MarkdownBlock], linesVisited: Int) {
+        var blocks: [MarkdownBlock] = []
+        var linesVisited = 0
+        guard maxBlocks > 0 else { return ([], 0) }
+        var start = markdown.startIndex
+        let end = markdown.endIndex
+        while start < end, blocks.count < maxBlocks {
+            var lineEnd = start
+            while lineEnd < end, !markdown[lineEnd].isNewline {
+                markdown.formIndex(after: &lineEnd)
+            }
+            linesVisited += 1
+            if let parsed = block(from: markdown[start..<lineEnd]) {
+                blocks.append(parsed)
+            }
+            if lineEnd == end { break }
+            start = markdown.index(after: lineEnd)
+        }
+        return (blocks, linesVisited)
+    }
+
+    private static func block<S: StringProtocol>(from rawLine: S) -> MarkdownBlock? {
+        let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty { return nil }
+        let leading = rawLine.prefix { $0 == " " || $0 == "\t" }
+        let indentWidth = leading.reduce(0) { $0 + ($1 == "\t" ? 4 : 1) }
+        let indent = min(indentWidth / 2, 4)
+
+        if trimmed.hasPrefix("#") {
+            let hashes = trimmed.prefix(while: { $0 == "#" })
+            let rest = trimmed.dropFirst(hashes.count)
+            if hashes.count <= 6, rest.hasPrefix(" ") {
+                let text = rest.trimmingCharacters(in: .whitespaces)
+                if !text.isEmpty {
+                    return .heading(level: hashes.count, text: text)
+                }
+            }
+        }
+        if let text = bulletText(of: trimmed) {
+            return .bullet(indent: indent, text: text)
+        }
+        if let (marker, text) = numberedText(of: trimmed) {
+            return .numbered(indent: indent, marker: marker, text: text)
+        }
+        return .paragraph(trimmed)
     }
 
     private static func bulletText(of line: String) -> String? {

@@ -41,6 +41,98 @@ import Testing
                 == nil)
     }
 
+    @Test func libraryExcerptSkipsLeadingBlanksAndStopsAtTwoPlainLines() {
+        let leading = "\n\n  \n- first real\n- second real\n- third ignored\n"
+        #expect(
+            LibraryCopy.excerpt(
+                summary: nil, enhancedNotesMarkdown: leading, notesMarkdown: "fallback")
+                == "first real\nsecond real")
+        #expect(
+            LibraryCopy.excerpt(
+                summary: nil, enhancedNotesMarkdown: "  \n\t\n", notesMarkdown: "  \n")
+                == nil)
+        #expect(
+            LibraryCopy.excerpt(
+                summary: nil,
+                enhancedNotesMarkdown: "\n\n",
+                notesMarkdown: "\n# Next\n\nplain closer")
+                == "Next\nplain closer")
+    }
+
+    @Test func libraryExcerptOnLongNotesMatchesTheFirstTwoPlainLines() {
+        var markdown = "## Decisions\n- Launch moved to July\n"
+        for index in 0..<5_000 {
+            markdown += "- filler \(index) that must not appear in the card excerpt\n"
+        }
+        #expect(
+            LibraryCopy.excerpt(
+                summary: nil, enhancedNotesMarkdown: markdown, notesMarkdown: "fallback")
+                == "Decisions\nLaunch moved to July")
+        #expect(
+            LibraryCopy.excerpt(
+                summary: "Keep the summary.",
+                enhancedNotesMarkdown: markdown,
+                notesMarkdown: markdown) == "Keep the summary.")
+    }
+
+    @Test func libraryExcerptUsesPersistedMeetingNotesNotASourceString() throws {
+        let db = try AppDatabase(writer: DatabaseQueue())
+        var meeting = Meeting.new(title: "Persisted long note", language: "en-US")
+        meeting.notesMarkdown = "\n\n- first real\n- second real\n"
+        for index in 0..<2_000 {
+            meeting.notesMarkdown += "- stored filler \(index)\n"
+        }
+        meeting.enhancedNotesMarkdown = "  \n"
+        try db.save(meeting)
+
+        let loaded = try #require(try db.fetchMeeting(id: meeting.id))
+        #expect(loaded.notesMarkdown.count > 20_000)
+        #expect(
+            LibraryCopy.excerpt(
+                summary: loaded.summary,
+                enhancedNotesMarkdown: loaded.enhancedNotesMarkdown,
+                notesMarkdown: loaded.notesMarkdown)
+                == "first real\nsecond real")
+
+        var empty = Meeting.new(title: "Persisted empty", language: "en-US")
+        empty.notesMarkdown = "  \n\n"
+        try db.save(empty)
+        let loadedEmpty = try #require(try db.fetchMeeting(id: empty.id))
+        #expect(
+            LibraryCopy.excerpt(
+                summary: loadedEmpty.summary,
+                enhancedNotesMarkdown: loadedEmpty.enhancedNotesMarkdown,
+                notesMarkdown: loadedEmpty.notesMarkdown) == nil)
+    }
+
+    @Test func libraryExcerptDoesNotParsePastTheTwoShownLines() {
+        var markdown = "Hello\nWorld\n"
+        markdown += String(repeating: "- filler line for the card excerpt budget\n", count: 20_000)
+        let clock = ContinuousClock()
+        func nanos(_ body: () -> Void) -> Int64 {
+            (0..<5).map { _ in
+                let duration = clock.measure(body)
+                let parts = duration.components
+                return parts.seconds * 1_000_000_000 + parts.attoseconds / 1_000_000_000
+            }.min() ?? Int64.max
+        }
+        var fullBlocks = 0
+        let fullNs = nanos { fullBlocks = MarkdownParser.parse(markdown).count }
+        var excerpt: String?
+        let excerptNs = nanos {
+            excerpt = LibraryCopy.excerpt(
+                summary: nil, enhancedNotesMarkdown: markdown, notesMarkdown: "")
+        }
+        let prefix = MarkdownParser.parse(markdown, maxBlocks: 2)
+        #expect(fullBlocks == 20_002)
+        #expect(excerpt == "Hello\nWorld")
+        #expect(prefix.blocks.count == 2)
+        #expect(prefix.linesVisited == 2)
+        #expect(
+            excerptNs * 8 < fullNs,
+            "excerpt \(excerptNs)ns vs full parse \(fullNs)ns over \(fullBlocks) blocks")
+    }
+
     @Test func libraryMetaKeepsRealStatusFolderDurationAndDate() {
         let date = Date(timeIntervalSince1970: 1_750_968_000)
         let parts = LibraryCopy.metaParts(
