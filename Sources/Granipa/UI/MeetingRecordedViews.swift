@@ -341,13 +341,18 @@ struct MeetingTranscriptView: View {
     }
 
     private var populated: some View {
-        VStack(spacing: 0) {
-            toolbar
+        // One shared computation per render; per-tick reads below stay O(1).
+        let rows = filtered
+        let currentIDs = self.currentIDs
+        let speakerNames = speakers
+
+        return VStack(spacing: 0) {
+            toolbar(speakers: speakerNames)
             Rectangle().fill(Theme.border).frame(height: 1)
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 6) {
-                        ForEach(filtered) { segment in
+                        ForEach(rows) { segment in
                             SegmentRow(
                                 segment: segment,
                                 isCurrent: currentIDs.contains(segment.id),
@@ -381,19 +386,19 @@ struct MeetingTranscriptView: View {
                 }
                 .onChange(of: playback.currentTime) {
                     guard autoscroll else { return }
-                    if let id = TranscriptQuery.containing(filtered, at: playback.currentTime)
+                    if let id = TranscriptQuery.containing(rows, at: playback.currentTime)
                         .first?.id
                     {
                         proxy.scrollTo(id, anchor: .center)
                     }
                 }
-                .onChange(of: filtered.count) {
-                    guard autoscroll, let last = filtered.last else { return }
+                .onChange(of: rows.count) {
+                    guard autoscroll, let last = rows.last else { return }
                     proxy.scrollTo(last.id, anchor: .bottom)
                 }
             }
             talkStrip
-            footer
+            footer(matching: rows.count)
         }
         .background {
             Button("Search transcript") { searchFocused = true }
@@ -403,7 +408,7 @@ struct MeetingTranscriptView: View {
         }
     }
 
-    private var toolbar: some View {
+    private func toolbar(speakers: [String]) -> some View {
         HStack(spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
@@ -435,13 +440,13 @@ struct MeetingTranscriptView: View {
                 RoundedRectangle(cornerRadius: Theme.radiusS, style: .continuous)
                     .stroke(Theme.border, lineWidth: 1))
 
-            speakerMenu
+            speakerMenu(speakers: speakers)
         }
         .padding(.horizontal, 28)
         .padding(.vertical, 10)
     }
 
-    private var speakerMenu: some View {
+    private func speakerMenu(speakers: [String]) -> some View {
         Menu {
             Picker("Speakers", selection: $speakerFilter) {
                 Text("All speakers").tag(String?.none)
@@ -525,9 +530,9 @@ struct MeetingTranscriptView: View {
         }
     }
 
-    private var footer: some View {
+    private func footer(matching count: Int) -> some View {
         HStack {
-            Text(resultLabel)
+            Text(resultLabel(matching: count))
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.textTertiary)
             Spacer()
@@ -543,12 +548,12 @@ struct MeetingTranscriptView: View {
         .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
     }
 
-    private var resultLabel: String {
+    private func resultLabel(matching count: Int) -> String {
         let needle = TranscriptQuery.normalizedQuery(search)
         if needle.isEmpty, speakerFilter == nil {
-            return "\(filtered.count) lines"
+            return "\(count) lines"
         }
-        return "\(filtered.count) results"
+        return "\(count) results"
     }
 
     private func failed(message: String, retry: @escaping () -> Void) -> some View {
