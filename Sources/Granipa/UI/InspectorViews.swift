@@ -108,13 +108,18 @@ private struct DictationInspectorView: View {
             }
 
             HStack(spacing: 10) {
-                Text(languageCode)
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(Theme.textSecondary)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(Theme.fillSubtle, in: Capsule())
-                    .accessibilityLabel("Language \(languageCode)")
+                // preferredLocale() is only the locale actually handed to the
+                // Apple engine; Muse biases from a separate setting, so the
+                // chip would mislabel a Muse session. Hide it there.
+                if dictation.engineID == .local {
+                    Text(languageCode)
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(Theme.textSecondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Theme.fillSubtle, in: Capsule())
+                        .accessibilityLabel("Language \(languageCode)")
+                }
 
                 Label("Auto-saves to history", systemImage: "checkmark.shield")
                     .font(.system(size: 11))
