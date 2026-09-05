@@ -100,15 +100,20 @@ struct MeetingDetailView: View {
 
     init(meeting: Meeting, preferNotes: Bool = false) {
         _meeting = State(initialValue: meeting)
+        _tab = State(initialValue: Self.initialTab(for: meeting, preferNotes: preferNotes))
+    }
+
+    /// Landing tab when someone opens a meeting from the library.
+    static func initialTab(for meeting: Meeting, preferNotes: Bool) -> Tab {
         if preferNotes {
-            _tab = State(initialValue: .notes)
-        } else if meeting.audioMicPath != nil || meeting.audioSystemPath != nil
+            return .notes
+        }
+        if meeting.audioMicPath != nil || meeting.audioSystemPath != nil
             || meeting.status == .recording
         {
-            _tab = State(initialValue: .transcript)
-        } else {
-            _tab = State(initialValue: .notes)
+            return .transcript
         }
+        return .notes
     }
 
     var body: some View {
