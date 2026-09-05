@@ -52,17 +52,20 @@ struct EnhancedNotesView: View {
 
     private func content(for meeting: Meeting) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 22) {
                 if let summary = meeting.summary, !summary.isEmpty {
-                    VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label("Summary", systemImage: "sparkles")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Theme.textPrimary)
                         MarkdownText(markdown: summary)
                             .font(.system(size: 14))
-                            .lineSpacing(5)
+                            .lineSpacing(6)
                             .foregroundStyle(Theme.textSecondary)
-                        Rectangle()
-                            .fill(Theme.border)
-                            .frame(height: 1)
                     }
+                    .padding(20)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .card(cornerRadius: Theme.radiusL)
                 }
 
                 if let notes = meeting.enhancedNotesMarkdown {
@@ -115,15 +118,15 @@ struct EnhancedNotesView: View {
                 }
                 .padding(.top, 10)
             }
-            .frame(maxWidth: 720, alignment: .leading)
-            .padding(.horizontal, 32)
-            .padding(.vertical, 26)
+            .padding(.horizontal, 28)
+            .padding(.vertical, 22)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
     private func sectionHeader(_ title: String) -> some View {
         Text(title)
-            .font(.system(size: 17, weight: .semibold, design: .serif))
+            .font(Theme.sectionFont)
             .foregroundStyle(Theme.textPrimary)
             .padding(.top, 6)
     }
@@ -158,16 +161,24 @@ struct ActionItemRow: View {
                 Image(systemName: isDone ? "checkmark.square.fill" : "square")
                     .font(.system(size: 14))
                     .foregroundStyle(isDone ? Theme.accent : Theme.textTertiary)
-                Text(item.text + (item.owner.map { " — \($0)" } ?? ""))
+                Text(item.text)
                     .font(.system(size: 14))
                     .strikethrough(isDone)
                     .foregroundStyle(isDone ? Theme.textTertiary : Theme.textPrimary)
                     .multilineTextAlignment(.leading)
-                Spacer(minLength: 0)
+                Spacer(minLength: 8)
+                if let owner = item.owner, !owner.isEmpty {
+                    Text(owner)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.textTertiary)
+                        .lineLimit(1)
+                }
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(
+            item.text + (item.owner.map { ", \($0)" } ?? "") + (isDone ? ", done" : ""))
     }
 }
 

@@ -43,13 +43,32 @@ enum LiveStageFormat {
 }
 
 enum LiveStageLayout {
-    /// The stage column caps at 460 pt; the notes editor needs 340 pt beside
-    /// it, plus the HStack spacing (16) and the page padding (2×24) inside
-    /// the measured width. The default window's column (1120 − 248 = 872)
-    /// clears this; anything narrower stacks the stage above the notes.
-    static func isTwoColumn(width: CGFloat) -> Bool {
-        width >= 864
+    /// Width at which notes sit beside the live transcript under a full-width
+    /// stage. The default window's content column (1120 − 248 = 872) clears
+    /// this; anything narrower stacks transcript then notes so Quick note can
+    /// still scroll the editor onscreen.
+    static let twoColumnMinWidth: CGFloat = 864
+
+    enum Arrangement: Equatable {
+        case stacked
+        case notesBesideTranscript
     }
+
+    static func isTwoColumn(width: CGFloat) -> Bool {
+        width >= twoColumnMinWidth
+    }
+
+    static func arrangement(width: CGFloat, hasTranscript: Bool) -> Arrangement {
+        if isTwoColumn(width: width) && hasTranscript {
+            return .notesBesideTranscript
+        }
+        return .stacked
+    }
+}
+
+enum LiveNotesAnchor {
+    /// Scroll target for Quick note. ⌘N while already focused must re-scroll.
+    static let cardID = "live-notes-card"
 }
 
 /// Ring of the most recent gated RMS peaks, appended from observation of the
@@ -104,51 +123,29 @@ struct LiveRecordingView: View {
 
     var body: some View {
         if let state {
-            VStack(spacing: Theme.spaceL) {
-                stageCard(state)
-                if state.isCapturing, let live = liveTranscription, !live.phase.isFailed {
-                    liveTranscriptPanel(live)
-                }
-            }
-            .frame(maxWidth: 560)
-            .frame(maxWidth: .infinity)
+            stageCard(state)
+                .frame(maxWidth: .infinity)
         }
     }
 
     private func stageCard(_ state: LiveStageState) -> some View {
         VStack(spacing: Theme.spaceL) {
-            HStack(spacing: 10) {
-                if state == .starting {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Starting…")
-                        .font(Theme.fontBody.weight(.semibold))
+            ZStack {
+                LiveStageRings()
+                VStack(spacing: 10) {
+                    timer(state)
+                    statusLine(state)
+                    Text(languageCode)
+                        .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(Theme.textSecondary)
-                } else {
-                    PulsingDot(color: Theme.statusListening)
-                    Text("Recording")
-                        .font(Theme.fontBody.weight(.semibold))
-                        .foregroundStyle(Theme.textPrimary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Theme.fillSubtle, in: Capsule())
+                        .accessibilityLabel("Language \(languageRaw)")
                 }
-                Spacer()
-                Text(languageCode)
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Theme.textSecondary)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(Theme.fillSubtle, in: Capsule())
-                    .accessibilityLabel("Language \(languageRaw)")
             }
+            .frame(minHeight: 188)
             .frame(maxWidth: .infinity)
-
-            timer(state)
-
-            HStack(spacing: Theme.spaceXL) {
-                LevelMeter(label: "Mic", level: app.recorder.micLevel)
-                    .accessibilityLabel("Microphone level")
-                LevelMeter(label: "System", level: app.recorder.systemLevel)
-                    .accessibilityLabel("System level")
-            }
 
             LiveLevelWaveform(samples: levels.samples)
                 // Gated-RMS sparkline only (C5): gate-rate publish, and static
@@ -162,16 +159,47 @@ struct LiveRecordingView: View {
                     levels.append(max(app.recorder.micLevel, value))
                 }
 
+            HStack(spacing: Theme.spaceXL) {
+                LevelMeter(label: "Mic", level: app.recorder.micLevel)
+                    .accessibilityLabel("Microphone level")
+                LevelMeter(label: "System", level: app.recorder.systemLevel)
+                    .accessibilityLabel("System level")
+            }
+
             transcriptionStatus
             warnings
             controls(state)
         }
-        .padding(Theme.spaceXL)
+        .padding(.horizontal, Theme.spaceXL)
+        .padding(.vertical, 22)
+        .frame(maxWidth: .infinity)
         .background(
-            Theme.card, in: RoundedRectangle(cornerRadius: Theme.radiusL, style: .continuous))
+            Theme.card,
+            in: RoundedRectangle(cornerRadius: Theme.radiusL, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.radiusL, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: Theme.radiusL, style: .continuous)
                 .stroke(Theme.border, lineWidth: 1))
+    }
+
+    @ViewBuilder
+    private func statusLine(_ state: LiveStageState) -> some View {
+        if state == .starting {
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Starting…")
+                    .font(Theme.fontBody.weight(.semibold))
+                    .foregroundStyle(Theme.textSecondary)
+            }
+        } else {
+            HStack(spacing: 8) {
+                PulsingDot(color: Theme.statusListening)
+                Text("Recording live…")
+                    .font(Theme.fontBody.weight(.semibold))
+                    .foregroundStyle(Theme.textPrimary)
+            }
+        }
     }
 
     @ViewBuilder
@@ -180,7 +208,7 @@ struct LiveRecordingView: View {
             TimelineView(.periodic(from: started, by: 1)) { context in
                 let text = LiveStageFormat.elapsed(Int(context.date.timeIntervalSince(started)))
                 Text(text)
-                    .font(.system(size: 64, weight: .light).monospacedDigit())
+                    .font(.system(size: 76, weight: .light).monospacedDigit())
                     .foregroundStyle(Theme.textPrimary)
                     .minimumScaleFactor(0.5)
                     .lineLimit(1)
@@ -188,7 +216,7 @@ struct LiveRecordingView: View {
             }
         } else {
             Text(LiveStageFormat.elapsed(0))
-                .font(.system(size: 64, weight: .light).monospacedDigit())
+                .font(.system(size: 76, weight: .light).monospacedDigit())
                 .foregroundStyle(Theme.textTertiary)
                 .minimumScaleFactor(0.5)
                 .lineLimit(1)
@@ -250,12 +278,18 @@ struct LiveRecordingView: View {
                 Button {
                     Task { await app.stopRecording() }
                 } label: {
-                    Label("Stop", systemImage: "stop.fill")
-                        .font(.system(size: 15, weight: .semibold))
+                    ZStack {
+                        Circle()
+                            .stroke(Theme.statusListening.opacity(0.45), lineWidth: 3)
+                        Circle()
+                            .fill(Theme.statusListening.opacity(0.16))
+                        RoundedRectangle(cornerRadius: 3, style: .continuous)
+                            .fill(Theme.statusListening)
+                            .frame(width: 16, height: 16)
+                    }
+                    .frame(width: 56, height: 56)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.statusListening)
-                .controlSize(.large)
+                .buttonStyle(.plain)
                 .keyboardShortcut(".", modifiers: .command)
                 .help("Stop recording (⌘.)")
                 .accessibilityLabel("Stop recording")
@@ -273,8 +307,12 @@ struct LiveRecordingView: View {
             }
         }
     }
+}
 
-    private func liveTranscriptPanel(_ live: TranscriptionCoordinator) -> some View {
+struct LiveTranscriptPanel: View {
+    let live: TranscriptionCoordinator
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Circle().fill(Theme.statusProcessing).frame(width: 7, height: 7)
@@ -289,7 +327,7 @@ struct LiveRecordingView: View {
 
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
+                    LazyVStack(alignment: .leading, spacing: 6) {
                         // Volatiles stay in the HUD and captions overlay; this
                         // list only carries finalized segments (contract §3.3).
                         ForEach(live.liveSegments) { segment in
@@ -306,7 +344,7 @@ struct LiveRecordingView: View {
                     .padding(.bottom, Theme.spaceL)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxHeight: 320)
+                .frame(minHeight: 160, maxHeight: 280)
                 .onChange(of: live.liveSegments.count) { _, _ in
                     if let last = live.liveSegments.last {
                         proxy.scrollTo(last.id, anchor: .bottom)
@@ -314,18 +352,8 @@ struct LiveRecordingView: View {
                 }
             }
         }
-        .background(
-            Theme.card, in: RoundedRectangle(cornerRadius: Theme.radiusL, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.radiusL, style: .continuous)
-                .stroke(Theme.border, lineWidth: 1))
-    }
-}
-
-private extension TranscriptionCoordinator.Phase {
-    var isFailed: Bool {
-        if case .failed = self { return true }
-        return false
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card(cornerRadius: Theme.radiusL)
     }
 }
 
@@ -381,7 +409,27 @@ private struct LiveLevelWaveform: View {
                     with: .color(Theme.statusListening.opacity(0.85)))
             }
         }
-        .frame(height: 36)
+        .frame(height: 56)
+        .accessibilityHidden(true)
+    }
+}
+
+/// Static concentric rings behind the timer. Not animated — Reduce Motion
+/// does not need a branch (contract: no looping ambient animation).
+private struct LiveStageRings: View {
+    private static let diameters: [CGFloat] = [176, 248, 320]
+
+    var body: some View {
+        ZStack {
+            ForEach(Array(Self.diameters.enumerated()), id: \.offset) { index, diameter in
+                Circle()
+                    .stroke(
+                        Theme.statusListening.opacity(0.20 - Double(index) * 0.05),
+                        lineWidth: 1)
+                    .frame(width: diameter, height: diameter)
+            }
+        }
+        .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
 }

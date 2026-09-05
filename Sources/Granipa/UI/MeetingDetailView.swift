@@ -1,5 +1,62 @@
 import SwiftUI
 
+enum MeetingHeaderMeta {
+    struct Item: Equatable {
+        var text: String
+        var systemImage: String
+    }
+
+    static func items(
+        createdAt: Date,
+        startedAt: Date?,
+        endedAt: Date?,
+        language: String,
+        folderName: String?,
+        phase: MeetingPipelinePhase,
+        hasAudio: Bool
+    ) -> [Item] {
+        var result: [Item] = [
+            Item(text: dateText(createdAt: createdAt, startedAt: startedAt, endedAt: endedAt),
+                 systemImage: "calendar")
+        ]
+        if let duration = MeetingLibrary.durationLabel(from: startedAt, to: endedAt) {
+            result.append(Item(text: duration, systemImage: "clock"))
+        }
+        if language != "auto" {
+            result.append(
+                Item(
+                    text: String(language.prefix(2)).uppercased(),
+                    systemImage: "globe"))
+        }
+        if let folderName, !folderName.isEmpty {
+            result.append(Item(text: folderName, systemImage: "folder"))
+        }
+        if phase.isLive {
+            result.append(Item(text: phase.label, systemImage: phase.systemImage))
+        } else if hasAudio {
+            result.append(Item(text: "Recorded", systemImage: "checkmark.circle.fill"))
+        }
+        return result
+    }
+
+    static func dateText(createdAt: Date, startedAt: Date?, endedAt: Date?) -> String {
+        if let startedAt, let endedAt {
+            let day = startedAt.formatted(.dateTime.month(.abbreviated).day().year())
+            let from = startedAt.formatted(.dateTime.hour().minute())
+            let to = endedAt.formatted(.dateTime.hour().minute())
+            return "\(day) · \(from) – \(to)"
+        }
+        let start = startedAt ?? createdAt
+        return start.formatted(.dateTime.weekday(.wide).month().day().hour().minute())
+    }
+}
+
+enum MeetingTabAccessory {
+    static func actionItemCountLabel(_ count: Int) -> String? {
+        count > 0 ? "\(count)" : nil
+    }
+}
+
 struct MeetingDetailView: View {
     @Environment(AppState.self) private var app
     @State private var meeting: Meeting
@@ -63,9 +120,12 @@ struct MeetingDetailView: View {
             } else {
                 switch tab {
                 case .overview:
-                    MeetingOverviewView(meeting: freshMeeting, isProcessing: isPostStopProcessing) {
-                        tab = .notes
-                    }
+                    MeetingOverviewView(
+                        meeting: freshMeeting,
+                        isProcessing: isPostStopProcessing,
+                        onOpenNotes: { tab = .notes },
+                        onOpenEnhanced: { tab = .enhanced },
+                        onOpenActionItems: { tab = .actionItems })
                 case .enhanced:
                     EnhancedNotesView(meetingID: meeting.id)
                 case .transcript:
@@ -131,76 +191,67 @@ struct MeetingDetailView: View {
 
     // MARK: - Header
 
+    private var backLabel: String {
+        app.sidebarDestination == .home ? "Back to Home" : "Back"
+    }
+
     private var header: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
                 Button {
                     app.selectedMeetingID = nil
                 } label: {
-                    Image(systemName: "chevron.left")
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text(backLabel)
+                            .font(.system(size: 13, weight: .medium))
+                    }
+                    .foregroundStyle(Theme.textSecondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .hoverHighlight(cornerRadius: 6)
+                .accessibilityLabel(backLabel)
+
+                Spacer(minLength: 8)
+
+                Button {
+                    if let db = app.database {
+                        MeetingExporter.exportViaSavePanel(
+                            meeting: freshMeeting, database: db,
+                            folder: app.folders.first { $0.id == meeting.folderID })
+                    }
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Theme.textSecondary)
-                        .frame(width: 26, height: 26)
+                        .frame(width: 28, height: 28)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .hoverHighlight(cornerRadius: 6)
-                .accessibilityLabel(
-                    app.sidebarDestination == .home ? "Back to Home" : "Back")
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(
-                        meeting.createdAt,
-                        format: .dateTime.weekday(.wide).month().day().hour().minute()
-                    )
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textTertiary)
-                    .lineLimit(1)
-
-                    HStack(spacing: 6) {
-                        if meeting.language != "auto" {
-                            Text(String(meeting.language.prefix(2)).uppercased())
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(Theme.textSecondary)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Theme.border, in: Capsule())
-                        }
-                        if let folder = app.folders.first(where: { $0.id == meeting.folderID }) {
-                            Label(folder.name, systemImage: "folder")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(Theme.textSecondary)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(Theme.fillSubtle, in: Capsule())
-                                .lineLimit(1)
-                        }
-                        statusChip
-                        if let duration = MeetingLibrary.durationLabel(
-                            from: freshMeeting.startedAt, to: freshMeeting.endedAt)
-                        {
-                            Text(duration)
-                                .font(.system(size: 11, weight: .medium).monospacedDigit())
-                                .foregroundStyle(Theme.textTertiary)
-                        }
-                    }
-                }
-
-                Spacer(minLength: 8)
+                .help("Export as Markdown")
+                .accessibilityLabel("Export as Markdown")
 
                 actionsMenu
             }
 
-            TextField("Title", text: $meeting.title)
+            TextField("Title", text: $meeting.title, axis: .vertical)
                 .font(Theme.meetingTitleFont)
                 .foregroundStyle(Theme.textPrimary)
                 .textFieldStyle(.plain)
+                .lineLimit(1...3)
+                .fixedSize(horizontal: false, vertical: true)
                 .accessibilityLabel("Meeting title")
                 .onChange(of: meeting.title) { scheduleSave() }
 
+            metadataRow
+
             if !isLiveStage {
                 MeetingPlaybackBar(playback: playback, meeting: freshMeeting)
-
                 tabBar
             }
         }
@@ -209,24 +260,51 @@ struct MeetingDetailView: View {
         .padding(.bottom, isLiveStage ? 14 : 0)
     }
 
-    @ViewBuilder
-    private var statusChip: some View {
-        let phase = app.pipelinePhase(for: freshMeeting)
-        if phase.isLive {
-            Label(phase.label, systemImage: phase.systemImage)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(phase.color)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(phase.color.opacity(0.14), in: Capsule())
-        } else if freshMeeting.audioMicPath != nil || freshMeeting.audioSystemPath != nil {
-            Label("Recorded", systemImage: "checkmark.circle.fill")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Theme.statusDone)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(Theme.statusDone.opacity(0.14), in: Capsule())
+    private var metadataRow: some View {
+        let folderName = app.folders.first { $0.id == meeting.folderID }?.name
+        let chips = MeetingHeaderMeta.items(
+            createdAt: meeting.createdAt,
+            startedAt: freshMeeting.startedAt,
+            endedAt: freshMeeting.endedAt,
+            language: meeting.language,
+            folderName: folderName,
+            phase: app.pipelinePhase(for: freshMeeting),
+            hasAudio: freshMeeting.audioMicPath != nil || freshMeeting.audioSystemPath != nil)
+        return ViewThatFits(in: .horizontal) {
+            chipsRow(chips)
+            ScrollView(.horizontal, showsIndicators: false) {
+                chipsRow(chips)
+            }
         }
+    }
+
+    private func chipsRow(_ chips: [MeetingHeaderMeta.Item]) -> some View {
+        HStack(spacing: 8) {
+            ForEach(Array(chips.enumerated()), id: \.offset) { _, item in
+                metaChip(item)
+            }
+        }
+    }
+
+    private func metaChip(_ item: MeetingHeaderMeta.Item) -> some View {
+        let phase = app.pipelinePhase(for: freshMeeting)
+        let isRecorded = item.text == "Recorded"
+        let isLive = phase.isLive && item.text == phase.label
+        let color: Color = {
+            if isRecorded { return Theme.statusDone }
+            if isLive { return phase.color }
+            return Theme.textSecondary
+        }()
+        return Label(item.text, systemImage: item.systemImage)
+            .font(.system(size: 11, weight: .medium))
+            .monospacedDigit()
+            .foregroundStyle(color)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(
+                isRecorded || isLive ? color.opacity(0.14) : Theme.fillSubtle,
+                in: Capsule())
+            .lineLimit(1)
     }
 
     private var folderSection: some View {
@@ -289,8 +367,11 @@ struct MeetingDetailView: View {
                 confirmDelete = true
             }
         } label: {
-            Image(systemName: "ellipsis.circle")
+            Image(systemName: "ellipsis")
+                .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(Theme.textSecondary)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
@@ -304,7 +385,7 @@ struct MeetingDetailView: View {
                     Button {
                         tab = item
                     } label: {
-                        VStack(spacing: 7) {
+                        VStack(spacing: 0) {
                             HStack(spacing: 6) {
                                 Text(item.rawValue)
                                     .font(.system(size: 13, weight: tab == item ? .semibold : .regular))
@@ -315,13 +396,18 @@ struct MeetingDetailView: View {
                                         .fill(Theme.statusProcessing)
                                         .frame(width: 5, height: 5)
                                 }
-                                if item == .actionItems, actionItemCount > 0 {
-                                    Text("\(actionItemCount)")
+                                if item == .actionItems,
+                                    let count = MeetingTabAccessory.actionItemCountLabel(
+                                        actionItemCount)
+                                {
+                                    Text(count)
                                         .font(.system(size: 11, weight: .semibold))
-                                        .foregroundStyle(Theme.textTertiary)
-                                        .accessibilityLabel("Action Items, \(actionItemCount)")
+                                        .foregroundStyle(
+                                            tab == item ? Theme.accent : Theme.textTertiary)
+                                        .accessibilityLabel("Action Items, \(count)")
                                 }
                             }
+                            .padding(.bottom, 8)
                             Rectangle()
                                 .fill(tab == item ? Theme.accent : .clear)
                                 .frame(height: 2)
@@ -334,6 +420,7 @@ struct MeetingDetailView: View {
                     .accessibilityAddTraits(tab == item ? .isSelected : [])
                 }
             }
+            .padding(.top, 6)
         }
         .fixedSize(horizontal: false, vertical: true)
     }
@@ -342,26 +429,40 @@ struct MeetingDetailView: View {
 
     /// Scroll anchor for Quick note: in the stacked layout the notes card
     /// sits under the stage, so focusing the editor must also bring it onscreen.
-    private static let liveNotesCardID = "live-notes-card"
+    private var liveHasTranscript: Bool {
+        guard let live = liveTranscription else { return false }
+        let state = LiveStage.state(
+            isRecording: app.recorder.isRecording,
+            isStarting: app.recorder.isStarting,
+            transcriptionPhase: live.phase)
+        guard let state, state.isCapturing else { return false }
+        if case .failed = live.phase { return false }
+        return true
+    }
 
     private var liveContent: some View {
         GeometryReader { proxy in
+            let arrangement = LiveStageLayout.arrangement(
+                width: proxy.size.width, hasTranscript: liveHasTranscript)
             ScrollViewReader { scrollProxy in
                 ScrollView {
-                    Group {
-                        if LiveStageLayout.isTwoColumn(width: proxy.size.width) {
+                    VStack(alignment: .leading, spacing: Theme.spaceL) {
+                        LiveRecordingView(meeting: meeting, quickNote: focusQuickNote)
+                            .frame(maxWidth: .infinity)
+                        switch arrangement {
+                        case .notesBesideTranscript:
                             HStack(alignment: .top, spacing: Theme.spaceL) {
-                                LiveRecordingView(meeting: meeting, quickNote: focusQuickNote)
-                                    .frame(maxWidth: 460)
+                                if let live = liveTranscription, liveHasTranscript {
+                                    LiveTranscriptPanel(live: live)
+                                }
                                 liveNotesCard
-                                    .frame(maxWidth: .infinity)
+                                    .frame(minWidth: 280, maxWidth: 400)
                             }
-                        } else {
-                            VStack(alignment: .leading, spacing: Theme.spaceL) {
-                                LiveRecordingView(meeting: meeting, quickNote: focusQuickNote)
-                                    .frame(maxWidth: .infinity)
-                                liveNotesCard
+                        case .stacked:
+                            if let live = liveTranscription, liveHasTranscript {
+                                LiveTranscriptPanel(live: live)
                             }
+                            liveNotesCard
                         }
                     }
                     .padding(Theme.spaceXL)
@@ -370,7 +471,7 @@ struct MeetingDetailView: View {
                 .onChange(of: quickNoteScrolls) { _, _ in
                     // Deliberately unanimated so Reduce Motion gets a step
                     // change instead of a scroll.
-                    scrollProxy.scrollTo(Self.liveNotesCardID, anchor: .top)
+                    scrollProxy.scrollTo(LiveNotesAnchor.cardID, anchor: .top)
                 }
             }
         }
@@ -396,12 +497,8 @@ struct MeetingDetailView: View {
                 .frame(height: 260)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .id(Self.liveNotesCardID)
-        .background(
-            Theme.card, in: RoundedRectangle(cornerRadius: Theme.radiusL, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.radiusL, style: .continuous)
-                .stroke(Theme.border, lineWidth: 1))
+        .id(LiveNotesAnchor.cardID)
+        .card(cornerRadius: Theme.radiusL)
     }
 
     // MARK: - Notes

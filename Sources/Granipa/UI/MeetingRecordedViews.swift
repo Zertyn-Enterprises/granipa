@@ -1,10 +1,35 @@
 import SwiftUI
 
+enum OverviewPreview {
+    static func snippet(_ raw: String?, limit: Int = 320) -> String? {
+        let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty else { return nil }
+        if trimmed.count <= limit { return trimmed }
+        let end = trimmed.index(trimmed.startIndex, offsetBy: limit)
+        var snippet = String(trimmed[..<end])
+        if let lastSpace = snippet.lastIndex(of: " "), lastSpace > snippet.startIndex {
+            snippet = String(snippet[..<lastSpace])
+        }
+        return snippet.trimmingCharacters(in: .whitespacesAndNewlines) + "…"
+    }
+}
+
+enum TranscriptSource {
+    static func label(_ channel: AudioChannel) -> String {
+        switch channel {
+        case .mic: "Mic"
+        case .system: "System"
+        }
+    }
+}
+
 struct MeetingOverviewView: View {
     @Environment(AppState.self) private var app
     let meeting: Meeting
     let isProcessing: Bool
     let onOpenNotes: () -> Void
+    let onOpenEnhanced: () -> Void
+    let onOpenActionItems: () -> Void
 
     private var isEnhancing: Bool {
         app.enhancingMeetingIDs.contains(meeting.id)
@@ -16,6 +41,22 @@ struct MeetingOverviewView: View {
 
     private var hasAudio: Bool {
         meeting.audioMicPath != nil || meeting.audioSystemPath != nil
+    }
+
+    private var notesSnippet: String? {
+        OverviewPreview.snippet(meeting.notesMarkdown)
+    }
+
+    private var enhancedSnippet: String? {
+        OverviewPreview.snippet(meeting.enhancedNotesMarkdown)
+    }
+
+    private var isBare: Bool {
+        !hasAudio
+            && OverviewPreview.snippet(meeting.summary) == nil
+            && actionItems.isEmpty
+            && notesSnippet == nil
+            && enhancedSnippet == nil
     }
 
     var body: some View {
@@ -35,21 +76,13 @@ struct MeetingOverviewView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: Theme.spaceL) {
                         summaryCard
-                        if !actionItems.isEmpty {
-                            actionCard
-                        }
-                        if !hasAudio, meeting.summary == nil, actionItems.isEmpty {
-                            EmptyStateView(
-                                icon: "doc.text",
-                                title: "No overview yet",
-                                message: "Record or enhance to build this overview.")
+                        secondaryCards
+                        if isBare {
                             Button("Open notes", action: onOpenNotes)
                                 .buttonStyle(.bordered)
                                 .tint(.white)
-                                .frame(maxWidth: .infinity)
                         }
                     }
-                    .frame(maxWidth: 720, alignment: .leading)
                     .padding(.horizontal, 28)
                     .padding(.vertical, 22)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -59,12 +92,52 @@ struct MeetingOverviewView: View {
     }
 
     @ViewBuilder
+    private var secondaryCards: some View {
+        let actions = !actionItems.isEmpty
+        let notes = notesSnippet != nil || enhancedSnippet != nil
+        if actions || notes {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: Theme.spaceL) {
+                    if actions { actionCard.frame(minWidth: 300) }
+                    if notes { notesColumn.frame(minWidth: 300) }
+                }
+                VStack(alignment: .leading, spacing: Theme.spaceL) {
+                    if actions { actionCard }
+                    if notes { notesColumn }
+                }
+            }
+        }
+    }
+
+    private var notesColumn: some View {
+        VStack(alignment: .leading, spacing: Theme.spaceL) {
+            if let snippet = notesSnippet {
+                previewCard(
+                    title: "Notes",
+                    systemImage: "square.and.pencil",
+                    snippet: snippet,
+                    actionTitle: "Open notes",
+                    action: onOpenNotes)
+            }
+            if let snippet = enhancedSnippet {
+                previewCard(
+                    title: "AI notes",
+                    systemImage: "sparkles",
+                    snippet: snippet,
+                    actionTitle: "View AI notes",
+                    action: onOpenEnhanced)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
     private var summaryCard: some View {
         let summary = meeting.summary?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
                 Label("Summary", systemImage: "sparkles")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary)
                 Spacer()
                 enhanceButton(title: summary.isEmpty ? "Enhance now" : "Re-enhance")
@@ -76,24 +149,31 @@ struct MeetingOverviewView: View {
             } else {
                 MarkdownText(markdown: summary)
                     .font(.system(size: 14))
-                    .lineSpacing(5)
+                    .lineSpacing(6)
                     .foregroundStyle(Theme.textSecondary)
             }
         }
-        .padding(16)
+        .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            Theme.card, in: RoundedRectangle(cornerRadius: Theme.radiusM, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.radiusM, style: .continuous)
-                .stroke(Theme.border, lineWidth: 1))
+        .card(cornerRadius: Theme.radiusL)
     }
 
     private var actionCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Action items")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
+            HStack {
+                Text("Action items")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                Text("\(actionItems.count)")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.textTertiary)
+                Spacer()
+                Button("View all", action: onOpenActionItems)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.accent)
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("View all action items")
+            }
             VStack(alignment: .leading, spacing: 7) {
                 ForEach(Array(actionItems.enumerated()), id: \.offset) { index, item in
                     ActionItemRow(item: item) {
@@ -104,11 +184,36 @@ struct MeetingOverviewView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            Theme.card, in: RoundedRectangle(cornerRadius: Theme.radiusM, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.radiusM, style: .continuous)
-                .stroke(Theme.border, lineWidth: 1))
+        .card(cornerRadius: Theme.radiusL)
+    }
+
+    private func previewCard(
+        title: String,
+        systemImage: String,
+        snippet: String,
+        actionTitle: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label(title, systemImage: systemImage)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                Spacer()
+                Button(actionTitle, action: action)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.accent)
+                    .buttonStyle(.plain)
+            }
+            Text(snippet)
+                .font(.system(size: 13.5))
+                .lineSpacing(4)
+                .foregroundStyle(Theme.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card(cornerRadius: Theme.radiusL)
     }
 
     private func enhanceButton(title: String) -> some View {
@@ -157,7 +262,6 @@ struct MeetingActionItemsView: View {
                 }
                 .padding(.horizontal, 28)
                 .padding(.vertical, 18)
-                .frame(maxWidth: 720, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
@@ -242,7 +346,7 @@ struct MeetingTranscriptView: View {
             Rectangle().fill(Theme.border).frame(height: 1)
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
+                    LazyVStack(alignment: .leading, spacing: 6) {
                         ForEach(filtered) { segment in
                             SegmentRow(
                                 segment: segment,
@@ -475,66 +579,74 @@ struct SegmentRow: View {
     var onPlay: (() -> Void)? = nil
     var onSelect: (() -> Void)? = nil
 
-    private static let palette: [Color] = [.orange, .purple, .teal, .pink, .indigo, .mint]
-
     private var speakerColor: Color {
         if segment.channel == .mic { return Theme.channelMe }
         if segment.speaker == "Them" { return Theme.accent }
-        let hash = segment.speaker.unicodeScalars.reduce(0) {
-            ($0 &* 31 &+ Int($1.value)) & 0x7FFF_FFFF
-        }
-        return Self.palette[hash % Self.palette.count]
+        return Theme.avatarColor(for: segment.speaker)
     }
 
     private var usesRecordedChrome: Bool {
         onPlay != nil || onSelect != nil || isCurrent || isSelected
     }
 
+    private var isActive: Bool { isCurrent || isSelected }
+
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             if let onPlay {
                 Button(action: onPlay) {
-                    Image(systemName: isCurrent ? "play.circle.fill" : "play.circle")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(
-                            isCurrent || isSelected ? Theme.accent : Theme.textTertiary)
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(isActive ? Theme.textPrimary : Theme.textTertiary)
+                        .frame(width: 22, height: 22)
+                        .background(isActive ? Theme.accent : Theme.fillSubtle, in: Circle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(
                     "Play from \(LiveStageFormat.elapsed(Int(segment.startSeconds)))")
             }
 
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
-                    if usesRecordedChrome {
-                        AvatarView(letterSource: segment.speaker, size: 18)
-                    }
+            Text(LiveStageFormat.elapsed(Int(segment.startSeconds.rounded(.down))))
+                .font(.system(size: 12, weight: .medium).monospacedDigit())
+                .foregroundStyle(isActive ? Theme.accent : Theme.textTertiary)
+                .frame(minWidth: 38, alignment: .leading)
+                .padding(.top, 3)
+
+            if usesRecordedChrome {
+                AvatarView(letterSource: segment.speaker, size: 22)
+                    .padding(.top, 1)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
                     Text(segment.speaker)
                         .font(Theme.fontCaption.weight(.semibold))
                         .foregroundStyle(speakerColor)
-                    Text(LiveStageFormat.elapsed(Int(segment.startSeconds.rounded(.down))))
-                        .font(Theme.fontSmall)
+                    Text(TranscriptSource.label(segment.channel))
+                        .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(Theme.textTertiary)
-                        .monospacedDigit()
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Theme.fillSubtle, in: Capsule())
                 }
                 Text(segment.text)
-                    .font(.system(size: 15))
-                    .lineSpacing(7)
+                    .font(.system(size: 14))
+                    .lineSpacing(4)
                     .foregroundStyle(Theme.textPrimary)
                     .multilineTextAlignment(.leading)
                     .textSelection(.enabled)
             }
         }
-        .padding(12)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            (isCurrent || isSelected) ? Theme.accent.opacity(0.08) : Theme.card,
-            in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            isActive ? Theme.accent.opacity(0.08) : Theme.card,
+            in: RoundedRectangle(cornerRadius: Theme.radiusM, style: .continuous))
         .overlay {
             if usesRecordedChrome {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(
-                        (isCurrent || isSelected) ? Theme.accent : Theme.border, lineWidth: 1)
+                RoundedRectangle(cornerRadius: Theme.radiusM, style: .continuous)
+                    .stroke(isActive ? Theme.accent : Theme.border, lineWidth: 1)
             }
         }
         .contentShape(Rectangle())

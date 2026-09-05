@@ -13,10 +13,11 @@ struct RecordingBar: View {
             HStack(spacing: 12) {
                 if isRecordingThisMeeting {
                     Image(systemName: "record.circle.fill")
-                        .foregroundStyle(.red)
+                        .foregroundStyle(Theme.statusListening)
                     if let started = app.recorder.startedAt {
                         RecordingTimer(startedAt: started)
-                            .font(.callout)
+                            .font(.system(size: 13, weight: .medium).monospacedDigit())
+                            .foregroundStyle(Theme.textPrimary)
                     }
                     LevelMeter(label: "Mic", level: app.recorder.micLevel)
                     LevelMeter(label: "System", level: app.recorder.systemLevel)
@@ -24,7 +25,10 @@ struct RecordingBar: View {
                     Button("Stop", systemImage: "stop.fill") {
                         Task { await app.stopRecording() }
                     }
-                    .tint(.red)
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.statusListening)
+                    .controlSize(.small)
+                    .accessibilityLabel("Stop recording")
                 } else {
                     Button {
                         app.startRecording(meetingID: meeting.id)

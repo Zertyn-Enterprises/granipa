@@ -1,5 +1,15 @@
 import SwiftUI
 
+enum PlaybackTransport {
+    static let ringSize: CGFloat = 44
+    static let innerSize: CGFloat = 28
+
+    static func progress(current: TimeInterval, duration: TimeInterval) -> CGFloat {
+        guard duration > 0, duration.isFinite, current.isFinite else { return 0 }
+        return CGFloat(min(1, max(0, current / duration)))
+    }
+}
+
 struct MeetingPlaybackBar: View {
     @Environment(AppState.self) private var app
     @Bindable var playback: MeetingPlaybackController
@@ -28,6 +38,10 @@ struct MeetingPlaybackBar: View {
                 RecordingBar(meeting: meeting)
             }
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card(cornerRadius: Theme.radiusL)
         .task(id: playback.loadedURL?.path) {
             peaks = nil
             guard let url = playback.loadedURL else { return }
@@ -100,11 +114,25 @@ struct MeetingPlaybackBar: View {
         Button {
             playback.togglePlaying()
         } label: {
-            Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
-                .frame(width: 32, height: 32)
-                .background(Theme.accent, in: Circle())
+            ZStack {
+                Circle()
+                    .stroke(Theme.fillSubtle, lineWidth: 3)
+                Circle()
+                    .trim(from: 0, to: progress)
+                    .stroke(
+                        Theme.accent,
+                        style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                    .offset(x: playback.isPlaying ? 0 : 0.5)
+                    .frame(
+                        width: PlaybackTransport.innerSize,
+                        height: PlaybackTransport.innerSize)
+                    .background(Theme.accent, in: Circle())
+            }
+            .frame(width: PlaybackTransport.ringSize, height: PlaybackTransport.ringSize)
         }
         .buttonStyle(.plain)
         .disabled(!canControl)
@@ -179,8 +207,7 @@ struct MeetingPlaybackBar: View {
     }
 
     private var progress: CGFloat {
-        guard playback.duration > 0 else { return 0 }
-        return CGFloat(min(1, max(0, playback.currentTime / playback.duration)))
+        PlaybackTransport.progress(current: playback.currentTime, duration: playback.duration)
     }
 
     private func clock(_ seconds: TimeInterval) -> String {
@@ -241,7 +268,7 @@ struct PlaybackScrubber: View {
                 }
             }
         }
-        .frame(height: 36)
+        .frame(height: 44)
         .opacity(enabled ? 1 : 0.45)
         .allowsHitTesting(enabled)
     }

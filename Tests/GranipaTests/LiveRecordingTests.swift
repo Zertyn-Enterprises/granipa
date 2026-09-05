@@ -91,6 +91,16 @@ import Testing
         let column = ShellLayout.defaultWindowWidth - ShellLayout.sidebarWidth
         #expect(LiveStageLayout.isTwoColumn(width: column))
     }
+
+    @Test func notesSitBesideTranscriptOnlyWhenWideAndTranscriptExists() {
+        #expect(
+            LiveStageLayout.arrangement(width: 872, hasTranscript: true)
+                == .notesBesideTranscript)
+        #expect(LiveStageLayout.arrangement(width: 872, hasTranscript: false) == .stacked)
+        #expect(LiveStageLayout.arrangement(width: 864, hasTranscript: true) == .notesBesideTranscript)
+        #expect(LiveStageLayout.arrangement(width: 863, hasTranscript: true) == .stacked)
+        #expect(LiveStageLayout.arrangement(width: 712, hasTranscript: true) == .stacked)
+    }
 }
 
 @Suite struct MeetingEditorMergeTests {
