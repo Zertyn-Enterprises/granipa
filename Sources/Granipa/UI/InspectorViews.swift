@@ -27,6 +27,54 @@ struct InspectorPane: View {
     }
 }
 
+/// One grouped block of the inspector: a card with a small title row and
+/// hairline-separated content. The pane keeps the only ScrollView.
+private struct InspectorCard<Content: View>: View {
+    let title: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Theme.textSecondary)
+            VStack(alignment: .leading, spacing: 0) { content }
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 11)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.radiusM, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.radiusM, style: .continuous)
+                .stroke(Theme.border, lineWidth: 1))
+    }
+}
+
+private struct InspectorRow: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(label)
+                .foregroundStyle(Theme.textTertiary)
+            Spacer(minLength: 8)
+            Text(value)
+                .foregroundStyle(Theme.textSecondary)
+                .multilineTextAlignment(.trailing)
+                .textSelection(.enabled)
+        }
+        .font(.system(size: 12))
+        .padding(.vertical, 7)
+    }
+}
+
+private struct InspectorHairline: View {
+    var body: some View {
+        Rectangle().fill(Theme.border).frame(height: 1)
+    }
+}
+
 private struct DictationInspectorView: View {
     @Bindable var dictation: DictationController
     let isLive: Bool
@@ -51,16 +99,37 @@ private struct DictationInspectorView: View {
     }
 
     private var idleContent: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Dictation off")
-                .font(Theme.sectionFont)
-                .foregroundStyle(Theme.textPrimary)
-            Text("Hold \(DictationController.shortcutLabel) to dictate.")
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.textSecondary)
+        VStack(alignment: .leading, spacing: Theme.spaceL) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Ready to dictate")
+                    .font(Theme.sectionFont)
+                    .foregroundStyle(Theme.textPrimary)
+                Text("Hold \(DictationController.shortcutLabel) to dictate, or use Record on the Dictation page.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Ready to dictate")
+
+            InspectorCard(title: "Readiness") {
+                InspectorRow(label: "Engine", value: idleEngineLabel)
+                InspectorHairline()
+                InspectorRow(label: "Language", value: languageCode)
+                InspectorHairline()
+                InspectorRow(label: "Auto-save", value: "Saves to history on device")
+                if dictation.meetingIsRecording {
+                    InspectorHairline()
+                    HStack(spacing: 6) {
+                        Circle().fill(Theme.statusLoading).frame(width: 6, height: 6)
+                        Text("Mic in use — meeting recording")
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                    .font(.system(size: 12))
+                    .padding(.vertical, 7)
+                }
+            }
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Dictation off")
     }
 
     private var liveContent: some View {
@@ -69,9 +138,10 @@ private struct DictationInspectorView: View {
                 Circle()
                     .fill(dotColor)
                     .frame(width: 8, height: 8)
-                Text(statusTitle)
+                Text(headline)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 8)
                 Text(engineLabel)
                     .font(.system(size: 10.5, weight: .medium))
@@ -81,7 +151,16 @@ private struct DictationInspectorView: View {
                     .background(Theme.fillSubtle, in: Capsule())
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(statusTitle), \(engineLabel)")
+            .accessibilityLabel("\(headline), \(engineLabel)")
+
+            if showsWaveform {
+                InspectorWaveform(samples: dictation.waveform, active: dictation.phase == .listening)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(
+                        Theme.fillSubtle,
+                        in: RoundedRectangle(cornerRadius: Theme.radiusS, style: .continuous))
+            }
 
             if let elapsed = elapsedLabel {
                 Text(elapsed)
@@ -91,44 +170,32 @@ private struct DictationInspectorView: View {
                     .accessibilityLabel("Elapsed \(elapsed)")
             }
 
-            if showsWaveform {
-                InspectorWaveform(samples: dictation.waveform, active: dictation.phase == .listening)
-            }
-
             HStack(alignment: .top, spacing: 3) {
                 Text(bodyText)
                     .font(.system(size: 15))
                     .foregroundStyle(
                         dictation.preview.isEmpty ? Theme.textSecondary : Theme.textPrimary)
                     .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if dictation.phase == .listening, !dictation.preview.isEmpty {
                     RoundedRectangle(cornerRadius: 1)
                         .fill(Theme.accent)
-                        .frame(width: 2, height: 15)
+                        .frame(width: 2, height: 14)
                         .padding(.top, 3)
                         .accessibilityHidden(true)
                 }
             }
 
-            HStack(spacing: 10) {
+            InspectorCard(title: "Session") {
+                if dictation.engineID == .local {
+                    InspectorRow(label: "Language", value: languageCode)
+                    InspectorHairline()
+                }
                 // preferredLocale() is only the locale actually handed to the
                 // Apple engine; Muse biases from a separate setting, so the
-                // chip would mislabel a Muse session. Hide it there.
-                if dictation.engineID == .local {
-                    Text(languageCode)
-                        .font(.system(size: 10.5, weight: .semibold))
-                        .foregroundStyle(Theme.textSecondary)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(Theme.fillSubtle, in: Capsule())
-                        .accessibilityLabel("Language \(languageCode)")
-                }
-
-                Label("Auto-saves to history", systemImage: "checkmark.shield")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textTertiary)
-                    .labelStyle(.titleAndIcon)
+                // row would mislabel a Muse session. Hide it there.
+                InspectorRow(label: "Auto-save", value: "Saves to history on device")
             }
 
             if case .failed = dictation.phase, dictation.lastFailureRetryable {
@@ -159,6 +226,11 @@ private struct DictationInspectorView: View {
         return locale.language.languageCode?.identifier.uppercased() ?? locale.identifier
     }
 
+    private var idleEngineLabel: String {
+        let raw = UserDefaults.standard.string(forKey: "dictationEngine") ?? "local"
+        return DictationEngineID(rawValue: raw) == .muse ? "Muse cloud" : "On device"
+    }
+
     private var statusTitle: String {
         switch dictation.phase {
         case .preparing: "Preparing"
@@ -168,6 +240,13 @@ private struct DictationInspectorView: View {
         case .failed: "Needs attention"
         case .idle: "Dictation off"
         }
+    }
+
+    private var headline: String {
+        if dictation.phase == .listening, dictation.isToggle {
+            return "Listening — press again to stop"
+        }
+        return statusTitle
     }
 
     private var bodyText: String {
@@ -212,14 +291,120 @@ private struct MeetingInspectorView: View {
     private var talk: SpeakerTalkTime.Report {
         SpeakerTalkTime.report(segments: segments)
     }
+    private var summaryText: String? {
+        guard let summary = meeting.summary?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !summary.isEmpty
+        else { return nil }
+        return summary
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.spaceL) {
-            details
-            if !talk.rows.isEmpty {
-                speakers
+            if let summaryText {
+                InspectorCard(title: "Summary") {
+                    Text(summaryText)
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                        .padding(.vertical, 2)
+                }
             }
-            actions
+
+            InspectorCard(title: "Meeting details") {
+                InspectorRow(
+                    label: "Created",
+                    value: meeting.createdAt.formatted(date: .abbreviated, time: .shortened))
+                InspectorHairline()
+                InspectorRow(
+                    label: "Language",
+                    value: meeting.language == "auto" ? "Auto" : meeting.language)
+                if let folder {
+                    InspectorHairline()
+                    InspectorRow(
+                        label: "Folder",
+                        value: folder.team.map { "\($0) / \(folder.name)" } ?? folder.name)
+                }
+                if let duration = MeetingLibrary.durationLabel(
+                    from: meeting.startedAt, to: meeting.endedAt)
+                {
+                    InspectorHairline()
+                    InspectorRow(label: "Duration", value: duration)
+                }
+                if let event = calendarEvent {
+                    InspectorHairline()
+                    InspectorRow(label: "Calendar", value: event.title)
+                    if let url = event.joinURL {
+                        InspectorHairline()
+                        InspectorRow(label: "Join", value: url.absoluteString)
+                    }
+                } else if let id = meeting.calendarEventID, !id.isEmpty {
+                    InspectorHairline()
+                    InspectorRow(label: "Calendar", value: id)
+                }
+                InspectorHairline()
+                InspectorRow(label: "ID", value: meeting.id)
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Meeting details")
+
+            if !talk.rows.isEmpty {
+                InspectorCard(title: "Speakers") {
+                    HStack(spacing: 8) {
+                        ForEach(talk.rows, id: \.speaker) { row in
+                            HStack(spacing: 5) {
+                                AvatarView(letterSource: row.speaker, size: 16)
+                                Text(row.speaker)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(Theme.textSecondary)
+                                    .lineLimit(1)
+                                Text(percent(row.share))
+                                    .font(.system(size: 10.5, weight: .medium).monospacedDigit())
+                                    .foregroundStyle(Theme.textTertiary)
+                            }
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("\(row.speaker) \(percent(row.share))")
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 7)
+                    stackedBar
+                        .padding(.bottom, 4)
+                    if talk.hasOverlap {
+                        Text("Overlapping speech is counted for each speaker.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+
+            InspectorCard(title: "Quick actions") {
+                actionRow("Export notes", systemImage: "square.and.arrow.up") {
+                    if let db = app.database {
+                        MeetingExporter.exportViaSavePanel(
+                            meeting: meeting, database: db, folder: folder)
+                    }
+                }
+                InspectorHairline()
+                actionRow("Copy transcript", systemImage: "doc.on.doc") {
+                    if let db = app.database {
+                        MeetingExporter.copyTranscript(meeting: meeting, database: db)
+                    }
+                }
+                if let draft = meeting.emailDraft, !draft.isEmpty {
+                    InspectorHairline()
+                    actionRow("Copy email", systemImage: "envelope") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(draft, forType: .string)
+                        ToastController.shared.show("Email copied")
+                    }
+                }
+                InspectorHairline()
+                actionRow("Delete meeting", systemImage: "trash", destructive: true) {
+                    confirmDelete = true
+                }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .task(id: meeting.id) {
@@ -240,64 +425,24 @@ private struct MeetingInspectorView: View {
         }
     }
 
-    private var details: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Meeting details")
-                .font(Theme.sectionFont)
-                .foregroundStyle(Theme.textPrimary)
-            detailRow("Created", meeting.createdAt.formatted(date: .abbreviated, time: .shortened))
-            detailRow(
-                "Language",
-                meeting.language == "auto" ? "Auto" : meeting.language)
-            if let folder {
-                detailRow("Folder", folder.team.map { "\($0) / \(folder.name)" } ?? folder.name)
+    private func actionRow(
+        _ title: String, systemImage: String, destructive: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Label(title, systemImage: systemImage)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(
+                        destructive ? Theme.statusListening.opacity(0.9) : Theme.textSecondary)
+                    .labelStyle(.titleAndIcon)
+                Spacer(minLength: 0)
             }
-            if let duration = MeetingLibrary.durationLabel(
-                from: meeting.startedAt, to: meeting.endedAt)
-            {
-                detailRow("Duration", duration)
-            }
-            if let event = calendarEvent {
-                detailRow("Calendar", event.title)
-                if let url = event.joinURL {
-                    detailRow("Join", url.absoluteString)
-                }
-            } else if let id = meeting.calendarEventID, !id.isEmpty {
-                detailRow("Calendar", id)
-            }
-            detailRow("ID", meeting.id)
+            .contentShape(Rectangle())
+            .padding(.vertical, 7)
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Meeting details")
-    }
-
-    private var speakers: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Speakers")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
-            ForEach(talk.rows, id: \.speaker) { row in
-                HStack(spacing: 8) {
-                    AvatarView(letterSource: row.speaker, size: 22)
-                    Text(row.speaker)
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(Theme.textPrimary)
-                        .lineLimit(1)
-                    Spacer(minLength: 4)
-                    Text(percent(row.share))
-                        .font(.system(size: 11, weight: .medium).monospacedDigit())
-                        .foregroundStyle(Theme.textTertiary)
-                }
-                .accessibilityLabel("\(row.speaker) \(percent(row.share))")
-            }
-            stackedBar
-            if talk.hasOverlap {
-                Text("Overlapping speech is counted for each speaker.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title == "Export notes" ? "Export as Markdown" : title)
     }
 
     private var stackedBar: some View {
@@ -313,61 +458,6 @@ private struct MeetingInspectorView: View {
         .frame(height: 6)
         .clipShape(Capsule())
         .accessibilityHidden(true)
-    }
-
-    private var actions: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Quick actions")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
-            Button {
-                if let db = app.database {
-                    MeetingExporter.exportViaSavePanel(
-                        meeting: meeting, database: db, folder: folder)
-                }
-            } label: {
-                Label("Export notes", systemImage: "square.and.arrow.up")
-            }
-            .accessibilityLabel("Export as Markdown")
-            Button {
-                if let db = app.database {
-                    MeetingExporter.copyTranscript(meeting: meeting, database: db)
-                }
-            } label: {
-                Label("Copy transcript", systemImage: "doc.on.doc")
-            }
-            if let draft = meeting.emailDraft, !draft.isEmpty {
-                Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(draft, forType: .string)
-                    ToastController.shared.show("Email copied")
-                } label: {
-                    Label("Copy email", systemImage: "envelope")
-                }
-            }
-            Button(role: .destructive) {
-                confirmDelete = true
-            } label: {
-                Label("Delete meeting", systemImage: "trash")
-            }
-        }
-        .buttonStyle(.plain)
-        .font(.system(size: 13))
-        .foregroundStyle(Theme.textSecondary)
-        .labelStyle(.titleAndIcon)
-    }
-
-    private func detailRow(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(label)
-                .foregroundStyle(Theme.textTertiary)
-            Spacer(minLength: 8)
-            Text(value)
-                .foregroundStyle(Theme.textSecondary)
-                .multilineTextAlignment(.trailing)
-                .textSelection(.enabled)
-        }
-        .font(.system(size: 12))
     }
 
     private func percent(_ share: Double) -> String {
