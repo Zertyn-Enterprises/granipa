@@ -7,6 +7,13 @@ enum SidebarDestination: String, CaseIterable, Sendable, Hashable {
     case meetings
     case notes
     case files
+    /// Transient in-app Settings. Not persisted. Not a library destination.
+    case settings
+
+    /// The five library destinations shown in the app sidebar.
+    static var appDestinations: [SidebarDestination] {
+        allCases.filter { $0 != .settings }
+    }
 
     var title: String {
         switch self {
@@ -15,6 +22,7 @@ enum SidebarDestination: String, CaseIterable, Sendable, Hashable {
         case .meetings: "Meetings"
         case .notes: "Notes"
         case .files: "Files"
+        case .settings: "Settings"
         }
     }
 
@@ -25,6 +33,7 @@ enum SidebarDestination: String, CaseIterable, Sendable, Hashable {
         case .meetings: "calendar"
         case .notes: "note.text"
         case .files: "folder"
+        case .settings: "gearshape"
         }
     }
 }
@@ -79,6 +88,7 @@ enum AppNavigation {
         windowWidth: CGFloat,
         meetingSelected: Bool = false
     ) -> InspectorContentKind {
+        if destination == .settings { return .none }
         if destination == .dictation {
             if dictationShowsInspector {
                 return windowWidth >= ShellLayout.inspectorBreakWidth ? .dictationLive : .none
@@ -86,6 +96,33 @@ enum AppNavigation {
             return .dictationIdle
         }
         return meetingSelected ? .meeting : .none
+    }
+
+    static func showsAppSidebar(for destination: SidebarDestination) -> Bool {
+        destination != .settings
+    }
+
+    struct SettingsReturn: Equatable, Sendable {
+        var destination: SidebarDestination
+        var selectedMeetingID: String?
+        var selectedFolderID: String?
+
+        static func snapshot(
+            destination: SidebarDestination,
+            selectedMeetingID: String?,
+            selectedFolderID: String?
+        ) -> SettingsReturn? {
+            guard destination != .settings else { return nil }
+            return SettingsReturn(
+                destination: destination,
+                selectedMeetingID: selectedMeetingID,
+                selectedFolderID: selectedFolderID)
+        }
+    }
+
+    static func leaveSettings(_ snapshot: SettingsReturn?) -> SettingsReturn {
+        snapshot
+            ?? SettingsReturn(destination: .home, selectedMeetingID: nil, selectedFolderID: nil)
     }
 }
 

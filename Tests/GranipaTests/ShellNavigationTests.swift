@@ -57,14 +57,74 @@ import Testing
     }
 
     @Test func destinationChromeMatchesTheContract() {
-        #expect(SidebarDestination.allCases.map(\.title) == [
+        // Was five allCases. User added in-app Settings as a transient sixth
+        // destination; the five library destinations stay the app sidebar.
+        #expect(SidebarDestination.appDestinations.map(\.title) == [
             "Home", "Dictation", "Meetings", "Notes", "Files",
+        ])
+        #expect(SidebarDestination.allCases.map(\.title) == [
+            "Home", "Dictation", "Meetings", "Notes", "Files", "Settings",
         ])
         #expect(SidebarDestination.home.icon == "house.fill")
         #expect(SidebarDestination.dictation.icon == "mic.fill")
         #expect(SidebarDestination.meetings.icon == "calendar")
         #expect(SidebarDestination.notes.icon == "note.text")
         #expect(SidebarDestination.files.icon == "folder")
+        #expect(SidebarDestination.settings.icon == "gearshape")
+        #expect(AppNavigation.showsAppSidebar(for: .home))
+        #expect(!AppNavigation.showsAppSidebar(for: .settings))
+    }
+
+    @Test func settingsHidesInspectorAtEveryWidthEvenWithAMeetingSelected() {
+        for width: CGFloat in [960, 1120, 1280, 1440] {
+            #expect(
+                AppNavigation.inspectorKind(
+                    destination: .settings,
+                    dictationShowsInspector: true,
+                    windowWidth: width,
+                    meetingSelected: true) == .none)
+            #expect(
+                AppNavigation.inspectorKind(
+                    destination: .settings,
+                    dictationShowsInspector: false,
+                    windowWidth: width) == .none)
+        }
+    }
+
+    @Test func openingSettingsSnapshotsTheLastAppRouteWithoutClearingIt() {
+        let snap = AppNavigation.SettingsReturn.snapshot(
+            destination: .meetings,
+            selectedMeetingID: "m1",
+            selectedFolderID: "eng")
+        #expect(snap?.destination == .meetings)
+        #expect(snap?.selectedMeetingID == "m1")
+        #expect(snap?.selectedFolderID == "eng")
+    }
+
+    @Test func openingSettingsAgainDoesNotReplaceTheReturnSnapshot() {
+        let first = AppNavigation.SettingsReturn.snapshot(
+            destination: .home, selectedMeetingID: "m1", selectedFolderID: nil)
+        let alreadyThere = AppNavigation.SettingsReturn.snapshot(
+            destination: .settings, selectedMeetingID: "m1", selectedFolderID: nil)
+        #expect(first != nil)
+        #expect(alreadyThere == nil)
+    }
+
+    @Test func leavingSettingsRestoresDestinationMeetingAndFolder() {
+        let snap = AppNavigation.SettingsReturn(
+            destination: .notes, selectedMeetingID: "note-1", selectedFolderID: nil)
+        let restored = AppNavigation.leaveSettings(snap)
+        #expect(restored.destination == .notes)
+        #expect(restored.selectedMeetingID == "note-1")
+        #expect(restored.selectedFolderID == nil)
+        #expect(restored.destination != .settings)
+    }
+
+    @Test func leavingSettingsWithoutASnapshotReturnsHome() {
+        let restored = AppNavigation.leaveSettings(nil)
+        #expect(restored.destination == .home)
+        #expect(restored.selectedMeetingID == nil)
+        #expect(restored.selectedFolderID == nil)
     }
 
     @Test func openingAMeetingKeepsTheSourceDestinationHighlighted() {

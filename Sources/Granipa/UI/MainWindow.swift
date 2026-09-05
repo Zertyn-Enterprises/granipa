@@ -5,10 +5,13 @@ struct MainWindow: View {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.openSettings) private var openSettings
     @AppStorage("onboardingCompleted") private var onboardingCompleted = false
     @State private var windowWidth = ShellLayout.defaultWindowWidth
     @State private var inspectorOverride: Bool?
+    @State private var settingsSession = SettingsSession()
+    @State private var settingsReturn: AppNavigation.SettingsReturn?
+
+    private var showsSettings: Bool { app.sidebarDestination == .settings }
 
     private static func looksLikePermissionIssue(_ message: String) -> Bool {
         let lower = message.lowercased()
@@ -39,15 +42,28 @@ struct MainWindow: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            SidebarView()
-                .frame(width: ShellLayout.sidebarWidth)
-                .background(Theme.bgSidebar)
+            if showsSettings {
+                SettingsSidebar(
+                    selection: settingsSession.section,
+                    isRecording: app.recorder.isRecording,
+                    select: { settingsSession.section = $0 },
+                    onBack: leaveEmbeddedSettings)
+                    .frame(width: ShellLayout.sidebarWidth)
+            } else {
+                SidebarView()
+                    .frame(width: ShellLayout.sidebarWidth)
+                    .background(Theme.bgSidebar)
+            }
 
             Rectangle()
                 .fill(Theme.border)
                 .frame(width: 1)
 
-            contentColumn
+            if showsSettings {
+                SettingsView(session: $settingsSession)
+            } else {
+                contentColumn
+            }
 
             if inspectorPresentation == .column {
                 Rectangle()
@@ -86,6 +102,23 @@ struct MainWindow: View {
             }
         }
         .onPreferenceChange(MainWindowWidthKey.self) { windowWidth = $0 }
+        .background {
+            Button("Settings…") { openEmbeddedSettings() }
+                .keyboardShortcut(",", modifiers: .command)
+                .frame(width: 0, height: 0)
+                .opacity(0)
+                .accessibilityHidden(true)
+        }
+        .onChange(of: app.sidebarDestination) { old, new in
+            if new == .settings,
+                let snap = AppNavigation.SettingsReturn.snapshot(
+                    destination: old,
+                    selectedMeetingID: app.selectedMeetingID,
+                    selectedFolderID: app.selectedFolderID)
+            {
+                settingsReturn = snap
+            }
+        }
         .toolbar {
             if inspectorKind != .none {
                 Button {
@@ -116,7 +149,7 @@ struct MainWindow: View {
             if let error = app.loadError, Self.looksLikePermissionIssue(error) {
                 Button("Open Settings") {
                     app.loadError = nil
-                    openSettings()
+                    openEmbeddedSettings()
                 }
             }
             Button("OK") { app.loadError = nil }
@@ -167,6 +200,8 @@ struct MainWindow: View {
                         FilesLibraryView()
                     case .dictation:
                         DictationHistoryView()
+                    case .settings:
+                        EmptyView()
                     }
                 }
             }
@@ -201,6 +236,17 @@ struct MainWindow: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.border).frame(height: 1)
         }
+    }
+
+    private func openEmbeddedSettings() {
+        app.sidebarDestination = .settings
+    }
+
+    private func leaveEmbeddedSettings() {
+        let restored = AppNavigation.leaveSettings(settingsReturn)
+        app.sidebarDestination = restored.destination
+        app.selectedMeetingID = restored.selectedMeetingID
+        app.selectedFolderID = restored.selectedFolderID
     }
 }
 

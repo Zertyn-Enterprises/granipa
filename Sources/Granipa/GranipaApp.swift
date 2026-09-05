@@ -64,6 +64,9 @@ struct GranipaApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(ShellLayout.clampedDefaultSize(visible: NSScreen.main?.visibleFrame.size))
+        .commands {
+            EmbeddedSettingsCommands(appState: appState)
+        }
 
         #if DEBUG
         MenuBarExtra(isInserted: .constant(!V2FixtureRuntime.isActive)) {
@@ -108,14 +111,24 @@ struct GranipaApp: App {
         .windowResizability(.contentSize)
         .windowBackgroundDragBehavior(.enabled)
         .defaultPosition(.topTrailing)
-
-        Settings {
-            SettingsView()
-                .environment(appState)
-                .tint(Theme.accent)
-        }
     }
 
+}
+
+private struct EmbeddedSettingsCommands: Commands {
+    var appState: AppState
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Commands {
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings…") {
+                appState.sidebarDestination = .settings
+                openWindow(id: "main")
+                NSApp.activate(ignoringOtherApps: true)
+            }
+            .keyboardShortcut(",", modifiers: .command)
+        }
+    }
 }
 
 enum MenuBarStatus: Equatable, Sendable {

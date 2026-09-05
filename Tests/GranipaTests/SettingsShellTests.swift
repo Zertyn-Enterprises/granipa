@@ -50,13 +50,22 @@ import Testing
     }
 
     @Test func windowStaysResponsiveWithoutClipping() {
-        #expect(SettingsLayout.minWindowWidth == 900)
-        #expect(SettingsLayout.idealWindowWidth == 1100)
-        #expect(SettingsLayout.minWindowHeight == 680)
-        #expect(SettingsLayout.minWindowWidth < SettingsLayout.idealWindowWidth)
-        #expect(
-            SettingsLayout.contentMaxWidth
-                <= SettingsLayout.idealWindowWidth - SettingsLayout.sidebarWidth)
+        // Was 900×680 popup Settings scene. Settings now fills the main window
+        // (min 960). Form pages keep a readable column; permissions use the rest.
+        #expect(SettingsLayout.contentMaxWidth == 760)
+        #expect(SettingsLayout.contentMaxWidth < ShellLayout.minWidth)
+        #expect(ShellLayout.minWidth == 960)
+    }
+
+    @Test func honestCaptionsDoNotInventBillingOrIntegrations() {
+        for section in SettingsSection.allCases {
+            let blob = "\(section.title) \(section.caption)".lowercased()
+            #expect(!blob.contains("slack"))
+            #expect(!blob.contains("billing"))
+            #expect(!blob.contains("upgrade"))
+            #expect(!blob.contains("quota"))
+            #expect(!blob.contains("pro plan"))
+        }
     }
 
     @MainActor
@@ -121,5 +130,25 @@ import Testing
         templateDrafts[builtin] = editedTemplate
         #expect(templateDrafts[builtin].prompt == "typed prompt not saved")
         #expect(templateDrafts[builtin].name == builtin.name)
+    }
+
+    @Test func settingsSessionKeepsDraftsWhenTheViewWouldUnmount() {
+        var session = SettingsSession()
+        session.section = .integrations
+        session.dictationKeyDrafts.loadOnce { _ in "keychain-fake" }
+        session.dictationKeyDrafts.museKey = "typed-muse-not-saved"
+        var hook = Webhook.new()
+        hook.url = "https://draft.example/hook"
+        session.webhookDrafts[hook] = hook
+        var template = MeetingTemplate.builtins[0]
+        template.prompt = "typed prompt not saved"
+        session.templateDrafts[MeetingTemplate.builtins[0]] = template
+
+        // Leave Settings unmounts SettingsView; MainWindow keeps the session.
+        session.dictationKeyDrafts.loadOnce { _ in "keychain-fake" }
+        #expect(session.section == .integrations)
+        #expect(session.dictationKeyDrafts.museKey == "typed-muse-not-saved")
+        #expect(session.webhookDrafts[hook].url == "https://draft.example/hook")
+        #expect(session.templateDrafts[MeetingTemplate.builtins[0]].prompt == "typed prompt not saved")
     }
 }

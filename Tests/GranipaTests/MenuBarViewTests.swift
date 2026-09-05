@@ -86,7 +86,7 @@ import Testing
         #expect(menu.contains(".keyboardShortcut(\"e\", modifiers: [.option, .shift])"))
         #expect(menu.contains(".keyboardShortcut(\"h\", modifiers: [.option, .shift])"))
         #expect(menu.contains("Quick note"))
-        #expect(menu.contains("SettingsLink"))
+        #expect(menu.contains("sidebarDestination = .settings"))
         #expect(menu.contains("Setup Guide…"))
         #expect(menu.contains("Quit Grañipa"))
         #expect(app.contains(".menuBarExtraStyle(.menu)"))
@@ -147,6 +147,27 @@ import Testing
         #expect(labelSource.contains("accessibilityLabel"))
         #expect(labelSource.contains("processingMeetingID"))
         #expect(!labelSource.contains("meetings.contains"))
+    }
+
+    /// NEW: Settings must be an embedded main-window destination, not a popup
+    /// Settings scene / SettingsLink. Observed red against 99e7703 (SettingsLink
+    /// in the menu bar, `Settings {` in GranipaApp, `openSettings()` in MainWindow).
+    @Test func settingsOpensEmbeddedInTheMainWindowNotAPopupScene() throws {
+        let menu = try granipaSource("Sources/Granipa/UI/MenuBarView.swift")
+        let app = try granipaSource("Sources/Granipa/GranipaApp.swift")
+        let main = try granipaSource("Sources/Granipa/UI/MainWindow.swift")
+        let sidebar = try granipaSource("Sources/Granipa/UI/SidebarView.swift")
+
+        #expect(!menu.contains("SettingsLink"))
+        #expect(!sidebar.contains("SettingsLink"))
+        #expect(!main.contains("openSettings()"))
+        #expect(!main.contains("@Environment(\\.openSettings)"))
+        #expect(!app.contains("Settings {"))
+        #expect(menu.contains("sidebarDestination = .settings"))
+        #expect(menu.contains(#"openWindow(id: "main")"#))
+        #expect(sidebar.contains("sidebarDestination = .settings"))
+        #expect(app.contains("CommandGroup(replacing: .appSettings)"))
+        #expect(app.contains(".keyboardShortcut(\",\", modifiers: .command)"))
     }
 }
 

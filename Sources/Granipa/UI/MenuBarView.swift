@@ -135,7 +135,11 @@ struct MenuBarView: View {
         } label: {
             Label("Open Grañipa", systemImage: "macwindow")
         }
-        SettingsLink {
+        Button {
+            app.sidebarDestination = .settings
+            openWindow(id: "main")
+            NSApp.activate(ignoringOtherApps: true)
+        } label: {
             Label("Settings", systemImage: "gearshape")
         }
         Button {

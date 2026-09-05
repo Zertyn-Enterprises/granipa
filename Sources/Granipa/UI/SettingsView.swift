@@ -8,7 +8,7 @@ enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
 
     var id: String { rawValue }
 
-    /// Single source for the pane the settings window opens on (the old first tab).
+    /// Single source for the pane Settings opens on (the old first tab).
     static let initialSelection = SettingsSection.general
 
     var title: String {
@@ -32,6 +32,18 @@ enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
         case .ai: "wand.and.stars"
         case .extras: "puzzlepiece"
         case .integrations: "network"
+        }
+    }
+
+    var caption: String {
+        switch self {
+        case .general: "Meeting language, detection, recording"
+        case .dictation: "Hold-to-talk, engine and rewrite"
+        case .shortcuts: "Hotkeys and window actions"
+        case .permissions: "Access and system permissions"
+        case .ai: "Providers and note templates"
+        case .extras: "Clipboard, windows and battery"
+        case .integrations: "Local API and webhooks"
         }
     }
 
@@ -66,15 +78,24 @@ enum SettingsSubPage: String, Hashable, Identifiable {
 }
 
 enum SettingsLayout {
-    static let sidebarWidth: CGFloat = 220
-    static let contentMaxWidth: CGFloat = 720
-    static let minWindowWidth: CGFloat = 900
-    static let idealWindowWidth: CGFloat = 1100
-    static let minWindowHeight: CGFloat = 680
+    /// Readable column for form sections. Permissions fill the remaining width.
+    static let contentMaxWidth: CGFloat = 760
+}
+
+/// Drafts and section selection for the embedded Settings screen. Owned by
+/// MainWindow so leaving Settings unmounts panes but keeps unsaved edits.
+struct SettingsSession {
+    var section = SettingsSection.initialSelection
+    var aiPane = SettingsSubPage.providers
+    var extrasPane = SettingsSubPage.clipboardAndOCR
+    var integrationsPane = SettingsSubPage.api
+    var dictationKeyDrafts = DictationKeyDrafts()
+    var webhookDrafts = EditorDrafts<Webhook>()
+    var templateDrafts = EditorDrafts<MeetingTemplate>()
 }
 
 /// Unsaved Dictation credential drafts, hoisted above the section switch so
-/// navigating away and back keeps what was typed (window lifetime only).
+/// navigating away and back keeps what was typed (main-window lifetime only).
 struct DictationKeyDrafts {
     var museKey = ""
     var keySaved: Bool?
@@ -84,7 +105,7 @@ struct DictationKeyDrafts {
     var customKeySaved: Bool?
     private var loadedFromKeychain = false
 
-    /// Seeds drafts from the keychain once per Settings window; remounts keep edits.
+    /// Seeds drafts from the keychain once per main-window lifetime; remounts keep edits.
     mutating func loadOnce(_ read: (String) -> String?) {
         guard !loadedFromKeychain else { return }
         museKey = read(KeychainStore.museAPIKeyAccount) ?? ""
@@ -95,7 +116,7 @@ struct DictationKeyDrafts {
 }
 
 /// Unsaved editor drafts keyed by item id, hoisted above the pane switches so
-/// section/subpage navigation keeps edits for the lifetime of the Settings window.
+/// section/subpage navigation keeps edits for the lifetime of the main window.
 /// Reads fall back to the persisted item until the user edits.
 struct EditorDrafts<Item: Identifiable> {
     private var drafts: [Item.ID: Item] = [:]
@@ -107,39 +128,22 @@ struct EditorDrafts<Item: Identifiable> {
 }
 
 struct SettingsView: View {
+    @Binding var session: SettingsSession
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var section = SettingsSection.initialSelection
-    @State private var aiPane = SettingsSubPage.providers
-    @State private var extrasPane = SettingsSubPage.clipboardAndOCR
-    @State private var integrationsPane = SettingsSubPage.api
-    // Drafts live here, not in the panes: the switch below destroys pane @State.
-    @State private var dictationKeyDrafts = DictationKeyDrafts()
-    @State private var webhookDrafts = EditorDrafts<Webhook>()
-    @State private var templateDrafts = EditorDrafts<MeetingTemplate>()
 
     var body: some View {
-        HStack(spacing: 0) {
-            SettingsSidebar(selection: section) { section = $0 }
-            Rectangle()
-                .fill(Theme.border)
-                .frame(width: 1)
-            page
-        }
-        .animation(
-            reduceMotion ? nil : .easeOut(duration: Theme.motionNormal), value: section)
-        .frame(
-            minWidth: SettingsLayout.minWindowWidth,
-            idealWidth: SettingsLayout.idealWindowWidth,
-            minHeight: SettingsLayout.minWindowHeight)
-        .tint(Theme.accent)
-        .preferredColorScheme(.dark)
-        .background(Theme.bg)
+        page
+            .animation(
+                reduceMotion ? nil : .easeOut(duration: Theme.motionNormal),
+                value: session.section)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Theme.bg)
     }
 
     // switch keeps only the selected pane instantiated
     @ViewBuilder
     private var page: some View {
-        switch section {
+        switch session.section {
         case .general:
             SettingsPage(
                 title: "General",
@@ -152,7 +156,7 @@ struct SettingsView: View {
                 title: "Dictation",
                 subtitle: "Hold-to-talk dictation: shortcut, language, engine and instant rewrite."
             ) {
-                DictationSettings(drafts: $dictationKeyDrafts)
+                DictationSettings(drafts: $session.dictationKeyDrafts)
             }
         case .shortcuts:
             SettingsPage(
@@ -163,7 +167,6 @@ struct SettingsView: View {
             }
         case .permissions:
             PermissionsSettings()
-                .frame(maxWidth: SettingsLayout.contentMaxWidth, alignment: .leading)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .background(Theme.bg)
                 .transition(.opacity)
@@ -172,9 +175,9 @@ struct SettingsView: View {
                 title: "AI",
                 subtitle: "Notes providers, speaker identification and note templates."
             ) {
-                SettingsSubNav(pages: SettingsSection.ai.subPages, selection: $aiPane)
-                if aiPane == .templates {
-                    TemplateSettings(drafts: $templateDrafts)
+                SettingsSubNav(pages: SettingsSection.ai.subPages, selection: $session.aiPane)
+                if session.aiPane == .templates {
+                    TemplateSettings(drafts: $session.templateDrafts)
                 } else {
                     AISettings()
                 }
@@ -184,10 +187,10 @@ struct SettingsView: View {
                 title: "Extras",
                 subtitle: "Clipboard history, text capture, window snapping and battery."
             ) {
-                SettingsSubNav(pages: SettingsSection.extras.subPages, selection: $extrasPane)
-                if extrasPane == .windows {
+                SettingsSubNav(pages: SettingsSection.extras.subPages, selection: $session.extrasPane)
+                if session.extrasPane == .windows {
                     WindowSettings()
-                } else if extrasPane == .battery {
+                } else if session.extrasPane == .battery {
                     BatterySettings()
                 } else {
                     ProductivitySettings()
@@ -199,9 +202,10 @@ struct SettingsView: View {
                 subtitle: "Local REST API and outgoing webhooks."
             ) {
                 SettingsSubNav(
-                    pages: SettingsSection.integrations.subPages, selection: $integrationsPane)
-                if integrationsPane == .webhooks {
-                    WebhookSettings(drafts: $webhookDrafts)
+                    pages: SettingsSection.integrations.subPages,
+                    selection: $session.integrationsPane)
+                if session.integrationsPane == .webhooks {
+                    WebhookSettings(drafts: $session.webhookDrafts)
                 } else {
                     APISettings()
                 }
@@ -210,23 +214,49 @@ struct SettingsView: View {
     }
 }
 
-private struct SettingsSidebar: View {
+struct SettingsSidebar: View {
     let selection: SettingsSection
+    let isRecording: Bool
     let select: (SettingsSection) -> Void
+    let onBack: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("SETTINGS")
-                .font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(Theme.textTertiary)
-                .tracking(0.8)
-                .padding(.leading, 8)
-                .padding(.top, 18)
-                .padding(.bottom, 8)
+            Color.clear.frame(height: 34)
+
+            Button(action: onBack) {
+                Label("Back to app", systemImage: "chevron.left")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.textSecondary)
+                    .padding(.vertical, 7)
+                    .padding(.horizontal, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .hoverHighlight(cornerRadius: 10)
+            .help("Back to app")
+            .accessibilityLabel("Back to app")
+            .padding(.bottom, 8)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Settings")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                Text("Customize how Grañipa works for you.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 8)
+            .padding(.bottom, 12)
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
 
             ForEach(SettingsSection.allCases) { section in
                 SettingsNavItem(
                     title: section.title,
+                    caption: section.caption,
                     icon: section.icon,
                     isActive: selection == section
                 ) {
@@ -237,6 +267,18 @@ private struct SettingsSidebar: View {
 
             Spacer(minLength: 12)
 
+            if isRecording {
+                HStack(spacing: 7) {
+                    Circle().fill(Theme.statusListening).frame(width: 7, height: 7)
+                    Text("Recording")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.textSecondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 8)
+                .padding(.bottom, 6)
+            }
+
             Text(versionLabel)
                 .font(.system(size: 10.5))
                 .foregroundStyle(Theme.textTertiary)
@@ -244,7 +286,8 @@ private struct SettingsSidebar: View {
                 .padding(.bottom, 6)
         }
         .padding(.horizontal, 10)
-        .frame(width: SettingsLayout.sidebarWidth)
+        .padding(.bottom, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Theme.bgSidebar)
     }
 
@@ -257,6 +300,7 @@ private struct SettingsSidebar: View {
 
 private struct SettingsNavItem: View {
     let title: String
+    let caption: String
     let icon: String
     let isActive: Bool
     let action: () -> Void
@@ -268,10 +312,16 @@ private struct SettingsNavItem: View {
                     .font(Theme.fontCaption.weight(.semibold))
                     .foregroundStyle(isActive ? Theme.accent : Theme.textSecondary)
                     .frame(width: 16)
-                Text(title)
-                    .font(.system(size: 13, weight: isActive ? .semibold : .regular))
-                    .foregroundStyle(isActive ? Theme.textPrimary : Theme.textSecondary)
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.system(size: 13, weight: isActive ? .semibold : .regular))
+                        .foregroundStyle(isActive ? Theme.textPrimary : Theme.textSecondary)
+                        .lineLimit(1)
+                    Text(caption)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textTertiary)
+                        .lineLimit(1)
+                }
                 Spacer(minLength: 0)
             }
             .padding(.vertical, 7)
@@ -312,7 +362,7 @@ struct SettingsPage<Content: View>: View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.system(size: 22, weight: .semibold, design: .serif))
+                    .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary)
                 Text(subtitle)
                     .font(.system(size: 12))

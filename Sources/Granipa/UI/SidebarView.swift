@@ -30,7 +30,7 @@ struct SidebarView: View {
             searchField
                 .padding(.bottom, 10)
 
-            ForEach(SidebarDestination.allCases, id: \.self) { destination in
+            ForEach(SidebarDestination.appDestinations, id: \.self) { destination in
                 SideItem(
                     title: destination.title,
                     icon: destination.icon,
@@ -104,7 +104,9 @@ struct SidebarView: View {
                 .padding(.bottom, 6)
             }
 
-            SettingsLink {
+            Button {
+                app.sidebarDestination = .settings
+            } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "gearshape")
                         .font(.system(size: 13))
