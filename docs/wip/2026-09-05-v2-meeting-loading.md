@@ -79,6 +79,49 @@ or transcript content appears in any log.
 - `git diff --check`: clean. No schema/API/identity/preference changes; no
   dependencies added.
 
+## Integrator audit round — lifecycle fixes (`5a678b4`)
+
+Three findings on `a2e4beb`/`a4f97e6`, fixed in place (same actor design):
+
+1. **Release on every load path.** `load(nil,nil)` and loading a missing path
+   returned before any engine reset; a previously playing file stayed audible
+   under an idle/failed facade. All abandoning paths now call `releaseEngine()`
+   (main-actor delegate detach + chained `engine.reset()`); `stopAndRelease`
+   reuses it; `openCurrentChannel` failures included.
+   Red first, real audio: a 0.2 s tone played out after `load(nil,nil)` /
+   `load(missing)` and its EOF callback flipped the facade to `.ended` —
+   exact failing assertions:
+   `(player.state → .ended) == .idle` and
+   `(player.state → .ended) == (.failed(.missingFile)…)`. Both green after.
+   Missing-file diagnostics stay synchronous; channel behavior covered by the
+   untouched `channelSwitch…` test.
+2. **Tick re-validation.** The tick's three engine awaits are not
+   cancellable; it wrote `currentTime`/`duration` and could declare ended
+   without re-checking cancellation/generation. `startTick` now captures the
+   generation and re-validates `!Task.isCancelled, current == generation,
+   state == .playing` after the awaits before publishing anything.
+   `openCurrentChannel` cancels the tick (covers `selectChannel`).
+3. **Tick after engine.play.** `play()` started the tick before the enqueued
+   `engine.play`, so the tick's first `isPlaying` read could be served first
+   and read as EOF. The tick starts only after `engine.play` succeeded for
+   the same generation with still-playing intent; the button still flips
+   immediately; a start that raced a generation change pauses what it should
+   not have started (the queued replace resets it regardless).
+
+Findings 2 and 3 are unguarded interleavings that usually resolve benignly —
+their exact window is not reachable deterministically from the public API
+(control-flow proof in the commit body), so coverage is the new 3-cycle rapid
+play/pause/seek/channel/stop churn test plus five consecutive real-playback
+suite runs, all green. The churn test also passes against the pre-fix tree;
+it guards the fixed discipline, it is not the red evidence (finding 1's tests
+are). The delegate-hop race window (EOF callback in flight across an abandon)
+predates this lane and is unchanged; deliberately left unguarded so the
+finding-1 tests keep their observable.
+
+Post-fix gates: debug 372 tests / 65 suites; release 350 tests / 63 suites;
+playback suite 5× green; format-lint warning profile identical to `ea6171e`
+baseline; `git diff --check` clean; no new annotations or API surface.
+
 ## Remaining caveats
 
 - Live UI frame-rate was not measured here (root profiles in parallel).
