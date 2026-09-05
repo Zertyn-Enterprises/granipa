@@ -151,6 +151,17 @@ enum DictationLibraryFormat {
         return (title: title, snippet: snippet)
     }
 
+    /// What the card renders: a title line only when more lines follow it —
+    /// a single-paragraph dictation displayed once as the excerpt, never
+    /// repeated as both title and snippet. Copy/paste still use the full text.
+    static func displayParts(_ text: String) -> (title: String?, excerpt: String) {
+        let parts = titleAndSnippet(text)
+        if parts.snippet.isEmpty {
+            return (title: nil, excerpt: parts.title)
+        }
+        return (title: parts.title, excerpt: parts.snippet)
+    }
+
     static func dayGroups(
         from entries: [DictationEntry]
     ) -> [(day: Date, entries: [DictationEntry])] {
@@ -312,58 +323,66 @@ struct DictationEntryCard: View {
     let onPaste: () -> Void
     let onDelete: () -> Void
 
-    private var parts: (title: String, snippet: String) {
-        DictationLibraryFormat.titleAndSnippet(entry.text)
+    private var parts: (title: String?, excerpt: String) {
+        DictationLibraryFormat.displayParts(entry.text)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(parts.title)
-                    .font(.system(size: 14.5, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                    .lineLimit(1)
-                Spacer(minLength: 8)
-                Text(entry.createdAt, format: .dateTime.hour().minute())
-                    .font(Theme.fontSmall)
-                    .foregroundStyle(Theme.textTertiary)
-                    .monospacedDigit()
-            }
+        HStack(alignment: .top, spacing: 10) {
+            appBadge
 
-            if !parts.snippet.isEmpty {
-                Text(parts.snippet)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    if let title = parts.title {
+                        Text(title)
+                            .font(.system(size: 14.5, weight: .semibold))
+                            .foregroundStyle(Theme.textPrimary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
+                    Text(entry.createdAt, format: .dateTime.hour().minute())
+                        .font(Theme.fontSmall)
+                        .foregroundStyle(Theme.textTertiary)
+                        .monospacedDigit()
+                }
+
+                Text(parts.excerpt)
                     .font(.system(size: 13))
                     .foregroundStyle(Theme.textSecondary)
                     .lineLimit(2)
-            }
 
-            HStack(spacing: 8) {
-                if let appName = entry.sourceApp {
-                    HStack(spacing: 4) {
-                        Image(systemName: "macwindow")
-                            .font(.system(size: 9))
+                HStack(spacing: 8) {
+                    if let appName = entry.sourceApp {
                         Text(appName)
                     }
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2)
-                    .background(Theme.fillSubtle, in: Capsule())
+                    Text(DictationLibraryFormat.duration(entry.durationSeconds))
+                    Text("\(entry.wordCount) words")
+                    Spacer(minLength: 8)
+                    Button(action: onCopy) {
+                        Image(systemName: "doc.on.doc")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Theme.textTertiary)
+                            .frame(width: 22, height: 22)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Copy")
+                    .accessibilityLabel("Copy")
+                    Button(action: onPaste) {
+                        Image(systemName: "doc.on.clipboard")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Theme.textTertiary)
+                            .frame(width: 22, height: 22)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Paste to frontmost app")
+                    .accessibilityLabel("Paste")
+                    overflowMenu
                 }
-                Text("\(entry.wordCount) words")
-                Text(DictationLibraryFormat.duration(entry.durationSeconds))
-                Spacer(minLength: 8)
-                Button(action: onCopy) {
-                    Image(systemName: "doc.on.doc")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Theme.textTertiary)
-                        .frame(width: 22, height: 22)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Copy")
-                .accessibilityLabel("Copy")
+                .font(Theme.fontSmall)
+                .foregroundStyle(Theme.textTertiary)
             }
-            .font(Theme.fontSmall)
-            .foregroundStyle(Theme.textTertiary)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -380,6 +399,51 @@ struct DictationEntryCard: View {
             Button("Delete", role: .destructive) { onDelete() }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(parts.title), \(entry.wordCount) words")
+        .accessibilityLabel("\(accessibilityTitle), \(entry.wordCount) words")
+    }
+
+    private var accessibilityTitle: String {
+        parts.title ?? entry.text.replacingOccurrences(of: "\n", with: " ")
+    }
+
+    private var appBadge: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(
+                    entry.sourceApp.map { Theme.avatarColor(for: $0).opacity(0.85) }
+                        ?? Theme.fillSubtle)
+            if let appName = entry.sourceApp, let first = appName.first {
+                Text(String(first).uppercased())
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Theme.textPrimary)
+            } else {
+                Image(systemName: "mic")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textSecondary)
+            }
+        }
+        .frame(width: 30, height: 30)
+        .accessibilityHidden(true)
+    }
+
+    private var overflowMenu: some View {
+        Menu {
+            Button("Copy") { onCopy() }
+            Button("Paste") { onPaste() }
+            Divider()
+            Button("Delete", role: .destructive) { onDelete() }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Theme.textTertiary)
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .buttonStyle(.plain)
+        .help("More actions")
+        .accessibilityLabel("More actions")
     }
 }

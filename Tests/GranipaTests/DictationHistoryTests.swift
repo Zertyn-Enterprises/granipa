@@ -221,6 +221,18 @@ import Testing
         #expect(leading.snippet == "world")
     }
 
+    @Test func singleParagraphDictationsDisplayOnceAsExcerpt() {
+        // A one-line dictation must not repeat itself as title + snippet;
+        // it renders as an excerpt with no separate title line.
+        let single = DictationLibraryFormat.displayParts("ship the card now")
+        #expect(single.title == nil)
+        #expect(single.excerpt == "ship the card now")
+
+        let multi = DictationLibraryFormat.displayParts("Quarter notes\nbuy oats\ncall Iris")
+        #expect(multi.title == "Quarter notes")
+        #expect(multi.excerpt == "buy oats\ncall Iris")
+    }
+
     @Test func pageGateAllowsOnlyTheAppliedQuery() {
         let applied = DictationLibraryQuery(search: "ship", period: .week, sourceApp: "Mail")
 
