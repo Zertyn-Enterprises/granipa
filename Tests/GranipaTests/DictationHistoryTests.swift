@@ -113,4 +113,39 @@ import Testing
                 "Mail", "Safari",
             ])
     }
+
+    @Test func durationLabelsUseClockFormat() {
+        #expect(DictationLibraryFormat.duration(0) == "0:00")
+        #expect(DictationLibraryFormat.duration(8.4) == "0:08")
+        #expect(DictationLibraryFormat.duration(75) == "1:15")
+        #expect(DictationLibraryFormat.duration(3_661) == "1:01:01")
+        #expect(DictationLibraryFormat.duration(-5) == "0:00")
+    }
+
+    @Test func titleIsFirstLineAndSnippetTheRest() {
+        let single = DictationLibraryFormat.titleAndSnippet("ship the card")
+        #expect(single.title == "ship the card")
+        #expect(single.snippet.isEmpty)
+
+        let multi = DictationLibraryFormat.titleAndSnippet("Quarter notes\nbuy oats\ncall Iris")
+        #expect(multi.title == "Quarter notes")
+        #expect(multi.snippet == "buy oats\ncall Iris")
+
+        let leading = DictationLibraryFormat.titleAndSnippet("\n  \nhello\nworld")
+        #expect(leading.title == "hello")
+        #expect(leading.snippet == "world")
+    }
+
+    @Test func dayGroupsSortDaysNewestFirst() throws {
+        let db = try makeDatabase()
+        try seed(db, text: "morning", minutesAgo: 300, sourceApp: nil)
+        try seed(db, text: "afternoon", minutesAgo: 30, sourceApp: nil)
+        try seed(db, text: "yesterday", minutesAgo: 60 * 30, sourceApp: nil)
+
+        let groups = DictationLibraryFormat.dayGroups(
+            from: try db.fetchDictationEntries())
+        #expect(groups.count == 2)
+        #expect(groups[0].entries.map(\.text) == ["afternoon", "morning"])
+        #expect(groups[1].entries.map(\.text) == ["yesterday"])
+    }
 }
