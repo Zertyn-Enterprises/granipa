@@ -4,6 +4,86 @@ import Testing
 
 @testable import Granipa
 
+@Suite struct LiveStageStateTests {
+    @Test func startingMapsToStarting() {
+        #expect(
+            LiveStage.state(isRecording: false, isStarting: true, transcriptionPhase: nil)
+                == .starting)
+        #expect(
+            LiveStage.state(isRecording: false, isStarting: true, transcriptionPhase: .live)
+                == .starting)
+    }
+
+    @Test func recordingMapsNilPreparingAndLiveToRecording() {
+        #expect(
+            LiveStage.state(isRecording: true, isStarting: false, transcriptionPhase: nil)
+                == .recording)
+        #expect(
+            LiveStage.state(isRecording: true, isStarting: false, transcriptionPhase: .live)
+                == .recording)
+        #expect(
+            LiveStage.state(isRecording: true, isStarting: true, transcriptionPhase: .preparing)
+                == .recording)
+    }
+
+    @Test func liveFailureStillCaptures() {
+        let state = LiveStage.state(
+            isRecording: true, isStarting: false, transcriptionPhase: .failed("model missing"))
+        #expect(state == .transcriptionFailed("model missing"))
+        #expect(state?.isCapturing == true)
+    }
+
+    @Test func onlyStartingCapturesNothing() {
+        #expect(LiveStageState.starting.isCapturing == false)
+        #expect(LiveStageState.recording.isCapturing == true)
+    }
+
+    @Test func idleHidesTheStage() {
+        #expect(
+            LiveStage.state(isRecording: false, isStarting: false, transcriptionPhase: .live)
+                == nil)
+    }
+}
+
+@Suite struct LiveStageFormatTests {
+    @Test func elapsedFormatting() {
+        #expect(LiveStageFormat.elapsed(0) == "0:00")
+        #expect(LiveStageFormat.elapsed(9) == "0:09")
+        #expect(LiveStageFormat.elapsed(65) == "1:05")
+        #expect(LiveStageFormat.elapsed(599) == "9:59")
+        #expect(LiveStageFormat.elapsed(3599) == "59:59")
+        #expect(LiveStageFormat.elapsed(3600) == "01:00:00")
+        #expect(LiveStageFormat.elapsed(3661) == "01:01:01")
+        #expect(LiveStageFormat.elapsed(45294) == "12:34:54")
+        #expect(LiveStageFormat.elapsed(-5) == "0:00")
+    }
+}
+
+@Suite struct LevelHistoryTests {
+    @Test func clampsAndKeepsMostRecent() {
+        var history = LevelHistory(capacity: 4)
+        for level in [0.1 as Float, 1.7, -0.2, 0.5, 0.9] {
+            history.append(level)
+        }
+        #expect(history.samples == [1.0, 0.0, 0.5, 0.9])
+    }
+
+    @Test func startsEmpty() {
+        #expect(LevelHistory().samples.isEmpty)
+        #expect(LevelHistory().capacity == 64)
+    }
+}
+
+@Suite struct LiveStageLayoutTests {
+    @Test func twoColumnThreshold() {
+        #expect(!LiveStageLayout.isTwoColumn(width: 712))
+        #expect(!LiveStageLayout.isTwoColumn(width: 732))
+        #expect(!LiveStageLayout.isTwoColumn(width: 879))
+        #expect(LiveStageLayout.isTwoColumn(width: 880))
+        #expect(LiveStageLayout.isTwoColumn(width: 964))
+    }
+}
+
 @Suite struct MeetingEditorMergeTests {
     private func makeDatabase() throws -> AppDatabase {
         try AppDatabase(writer: DatabaseQueue())

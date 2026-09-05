@@ -8,9 +8,14 @@ struct MeetingDetailView: View {
     @State private var saveTask: Task<Void, Never>?
     @State private var renamingSpeaker: String?
     @State private var renameSpeakerTo = ""
+    @FocusState private var notesFocused: Bool
 
     private var isEnhancing: Bool {
         app.enhancingMeetingIDs.contains(meeting.id)
+    }
+
+    private var isLiveStage: Bool {
+        app.recorder.isBusy && app.recorder.meetingID == meeting.id
     }
 
     enum Tab: String, CaseIterable {
@@ -33,16 +38,20 @@ struct MeetingDetailView: View {
         VStack(spacing: 0) {
             header
             Rectangle().fill(Theme.border).frame(height: 1)
-            switch tab {
-            case .notes:
-                notesEditor
-            case .enhanced:
-                EnhancedNotesView(meetingID: meeting.id)
-            case .transcript:
-                transcriptList
+            if isLiveStage {
+                liveContent
+            } else {
+                switch tab {
+                case .notes:
+                    notesEditor
+                case .enhanced:
+                    EnhancedNotesView(meetingID: meeting.id)
+                case .transcript:
+                    transcriptList
+                }
             }
         }
-        .task(id: liveTranscription == nil) { await loadSegments() }
+        .task(id: taskKey) { await loadSegments() }
         .alert("Rename speaker", isPresented: .constant(renamingSpeaker != nil)) {
             TextField("Name", text: $renameSpeakerTo)
             Button("Rename") {
@@ -113,13 +122,15 @@ struct MeetingDetailView: View {
                 .textFieldStyle(.plain)
                 .onChange(of: meeting.title) { scheduleSave() }
 
-            RecordingBar(meeting: meeting)
+            if !isLiveStage {
+                RecordingBar(meeting: meeting)
 
-            tabBar
+                tabBar
+            }
         }
         .padding(.horizontal, 28)
         .padding(.top, 14)
-        .padding(.bottom, 0)
+        .padding(.bottom, isLiveStage ? 14 : 0)
     }
 
     private var folderSection: some View {
@@ -207,27 +218,80 @@ struct MeetingDetailView: View {
         }
     }
 
+    // MARK: - Live stage
+
+    private var liveContent: some View {
+        GeometryReader { proxy in
+            ScrollView {
+                Group {
+                    if LiveStageLayout.isTwoColumn(width: proxy.size.width) {
+                        HStack(alignment: .top, spacing: Theme.spaceL) {
+                            LiveRecordingView(meeting: meeting) { notesFocused = true }
+                                .frame(maxWidth: 460)
+                            liveNotesCard
+                                .frame(maxWidth: .infinity)
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: Theme.spaceL) {
+                            LiveRecordingView(meeting: meeting) { notesFocused = true }
+                                .frame(maxWidth: .infinity)
+                            liveNotesCard
+                        }
+                    }
+                }
+                .padding(Theme.spaceXL)
+                .frame(maxWidth: .infinity)
+            }
+        }
+    }
+
+    private var liveNotesCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Label("Meeting notes", systemImage: "square.and.pencil")
+                .font(Theme.fontCaption.weight(.semibold))
+                .foregroundStyle(Theme.textSecondary)
+                .padding(.horizontal, Theme.spaceL)
+                .padding(.top, Theme.spaceL)
+                .padding(.bottom, 8)
+            notesTextEditor
+                .padding(.horizontal, Theme.spaceL)
+                .padding(.bottom, Theme.spaceL)
+                .frame(height: 260)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            Theme.card, in: RoundedRectangle(cornerRadius: Theme.radiusL, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.radiusL, style: .continuous)
+                .stroke(Theme.border, lineWidth: 1))
+    }
+
     // MARK: - Notes
 
-    private var notesEditor: some View {
+    private var notesTextEditor: some View {
         TextEditor(text: $meeting.notesMarkdown)
             .font(.system(size: 14))
             .lineSpacing(3)
             .foregroundStyle(Theme.textPrimary)
             .scrollContentBackground(.hidden)
-            .padding(.horizontal, 22)
-            .padding(.vertical, 14)
+            .focused($notesFocused)
             .onChange(of: meeting.notesMarkdown) { scheduleSave() }
             .overlay(alignment: .topLeading) {
                 if meeting.notesMarkdown.isEmpty {
                     Text("Type your rough notes here — the AI will expand them after the meeting.")
                         .font(.system(size: 14))
                         .foregroundStyle(Theme.textTertiary)
-                        .padding(.horizontal, 28)
-                        .padding(.vertical, 14)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 8)
                         .allowsHitTesting(false)
                 }
             }
+    }
+
+    private var notesEditor: some View {
+        notesTextEditor
+            .padding(.horizontal, 22)
+            .padding(.vertical, 14)
     }
 
     // MARK: - Transcript
@@ -259,6 +323,17 @@ struct MeetingDetailView: View {
                     Button("Retry") { live.retryIfFailed() }
                         .buttonStyle(.bordered)
                         .tint(.white)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if shown.isEmpty, live == nil, isPostStopProcessing {
+                VStack(spacing: 10) {
+                    ProgressView()
+                    Text("Processing this recording…")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(Theme.textSecondary)
+                    Text("The transcript and AI notes appear when processing finishes.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.textTertiary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if shown.isEmpty && live == nil {
@@ -306,6 +381,25 @@ struct MeetingDetailView: View {
                 }
             }
         }
+    }
+
+    private var isPostStopProcessing: Bool {
+        guard !isLiveStage else { return false }
+        let fresh = app.meetings.first { $0.id == meeting.id } ?? meeting
+        switch app.pipelinePhase(for: fresh) {
+        case .finishing, .transcribing, .enhancing: return true
+        default: return false
+        }
+    }
+
+    /// Reload segments when the live coordinator detaches (stop) and again
+    /// when the pipeline finishes — the local copy can lag both writes.
+    private var taskKey: String {
+        "\(liveTranscription != nil)-\(freshStatus.rawValue)"
+    }
+
+    private var freshStatus: MeetingStatus {
+        app.meetings.first { $0.id == meeting.id }?.status ?? meeting.status
     }
 
     private func loadSegments() async {
