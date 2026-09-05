@@ -82,6 +82,9 @@ final class HotkeyManager: @unchecked Sendable {
     private var eventHandler: EventHandlerRef?
     private var localMonitor: Any?
     private var globalMonitor: Any?
+    #if DEBUG
+        private var testBoundIDs: Set<UInt32> = []
+    #endif
 
     func register(
         id: UInt32, keyCode: UInt32, modifiers: UInt32, handler: @escaping @MainActor () -> Void
@@ -121,6 +124,11 @@ final class HotkeyManager: @unchecked Sendable {
     }
 
     func unregister(id: UInt32) {
+        #if DEBUG
+            let testBound = testBoundIDs.remove(id) != nil
+        #else
+            let testBound = false
+        #endif
         if let ref = hotkeyRefs.removeValue(forKey: id) {
             UnregisterEventHotKey(ref)
         }
@@ -128,7 +136,7 @@ final class HotkeyManager: @unchecked Sendable {
         modifierDown.removeValue(forKey: id)
         keyDown.removeValue(forKey: id)
         handlers.removeValue(forKey: id)
-        if hadModifier {
+        if hadModifier && !testBound {
             refreshModifierMonitors()
         }
     }
@@ -155,7 +163,7 @@ final class HotkeyManager: @unchecked Sendable {
         }
     }
 
-    func handleModifierEvent(_ event: NSEvent) {
+    private func handleModifierEvent(_ event: NSEvent) {
         let code = UInt32(event.keyCode)
         let down = HotkeyBinding.eventReportsModifierDown(
             keyCode: code, flags: event.modifierFlags)
@@ -183,7 +191,7 @@ final class HotkeyManager: @unchecked Sendable {
     }
 
     @MainActor
-    func dispatchHotKey(id: UInt32, released: Bool, timestamp: TimeInterval) {
+    private func dispatchHotKey(id: UInt32, released: Bool, timestamp: TimeInterval) {
         let was = keyDown[id] ?? false
         if released {
             guard was else { return }
@@ -236,4 +244,36 @@ final class HotkeyManager: @unchecked Sendable {
             Unmanaged.passUnretained(self).toOpaque(),
             &eventHandler)
     }
+
+    #if DEBUG
+        /// Binds press/release handlers without Carbon or flagsChanged monitors.
+        func bindForTesting(
+            id: UInt32,
+            keyCode: UInt32,
+            modifiers: UInt32,
+            onPress: @escaping @MainActor (TimeInterval) -> Void,
+            onRelease: (@MainActor (TimeInterval) -> Void)?
+        ) {
+            unregister(id: id)
+            handlers[id] = Handler(onPress: onPress, onRelease: onRelease)
+            testBoundIDs.insert(id)
+            if HotkeyBinding.isModifierOnly(keyCode: keyCode, modifiers: modifiers) {
+                modifierSpecs[id] = ModifierSpec(keyCode: keyCode)
+                modifierDown[id] = false
+                return
+            }
+            keyDown[id] = false
+        }
+
+        func handleModifierEventForTesting(_ event: NSEvent) {
+            handleModifierEvent(event)
+        }
+
+        @MainActor
+        func dispatchHotKeyForTesting(
+            id: UInt32, released: Bool, timestamp: TimeInterval
+        ) {
+            dispatchHotKey(id: id, released: released, timestamp: timestamp)
+        }
+    #endif
 }

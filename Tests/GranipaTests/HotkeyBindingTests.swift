@@ -37,4 +37,27 @@ import Testing
             !HotkeyBinding.eventReportsModifierDown(
                 keyCode: UInt32(kVK_RightCommand), flags: []))
     }
+
+    @Test func flagsChangedKeyEventPreservesRightCommandDeviceBit() throws {
+        let flags = NSEvent.ModifierFlags(
+            rawValue: NSEvent.ModifierFlags.command.rawValue | UInt(NX_DEVICERCMDKEYMASK))
+        let event = try #require(
+            NSEvent.keyEvent(
+                with: .flagsChanged,
+                location: .zero,
+                modifierFlags: flags,
+                timestamp: 12.345,
+                windowNumber: 0,
+                context: nil,
+                characters: "",
+                charactersIgnoringModifiers: "",
+                isARepeat: false,
+                keyCode: UInt16(kVK_RightCommand)))
+        #expect(event.keyCode == UInt16(kVK_RightCommand))
+        #expect(event.timestamp == 12.345)
+        #expect(event.modifierFlags.rawValue & UInt(NX_DEVICERCMDKEYMASK) != 0)
+        #expect(
+            HotkeyBinding.eventReportsModifierDown(
+                keyCode: UInt32(kVK_RightCommand), flags: event.modifierFlags))
+    }
 }
