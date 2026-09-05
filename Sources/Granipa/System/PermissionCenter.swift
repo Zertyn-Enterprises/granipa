@@ -21,7 +21,7 @@ final class PermissionCenter {
     private(set) var screenRecording: PermissionState = .unchecked
     private(set) var probingSystemAudio = false
 
-    static let securityPane = "x-apple.systempreferences:com.apple.preference.security"
+    nonisolated static let securityPane = "x-apple.systempreferences:com.apple.preference.security"
 
     func refresh() async {
         microphone =
