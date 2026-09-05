@@ -23,6 +23,151 @@ struct DictationGestureTests {
         #expect(controller.isToggle)
         #expect(controller.phase == .preparing || controller.phase == .listening)
     }
+
+    @Test func tapStaysListeningAndSecondPressStopsOnce() async {
+        var captures = 0
+        let controller = hookedController(beforeCapture: {
+            captures += 1
+        })
+        defer { controller.cancel() }
+
+        controller.handlePress(at: 1.0)
+        controller.handleRelease(at: 1.05)
+        #expect(await waitUntil { controller.phase == .listening })
+        #expect(controller.isToggle)
+        #expect(captures == 1)
+
+        controller.handlePress(at: 2.0)
+        controller.handleRelease(at: 2.04)
+        #expect(
+            await waitUntil {
+                controller.phase != .listening && controller.phase != .preparing
+            })
+        #expect(controller.phase != .listening)
+        #expect(controller.phase != .preparing)
+        #expect(captures == 1)
+    }
+
+    @Test func holdReleaseBeforeCaptureDoesNotReopenOrFakeRetry() async {
+        let gate = CaptureGate()
+        let controller = hookedController(
+            beforeCapture: { await gate.wait() },
+            transcribe: { chunks in
+                for await _ in chunks {}
+                return ""
+            })
+        defer {
+            gate.open()
+            controller.cancel()
+        }
+
+        controller.handlePress(at: 10.0)
+        #expect(controller.phase == .preparing)
+        controller.handleRelease(at: 10.40)
+        #expect(
+            await waitUntil {
+                controller.phase != .preparing && controller.phase != .listening
+            })
+        gate.open()
+        try? await Task.sleep(for: .milliseconds(40))
+
+        #expect(!controller.hasOpenCapture)
+        #expect(controller.phase != .listening)
+        if case .failed(let message) = controller.phase {
+            #expect(!message.contains("Didn't catch that"))
+        }
+    }
+
+    @Test func secondPressWhilePreparingDoesNotReopenCapture() async {
+        let gate = CaptureGate()
+        let controller = hookedController(beforeCapture: { await gate.wait() })
+        defer {
+            gate.open()
+            controller.cancel()
+        }
+
+        controller.handlePress(at: 3.0)
+        #expect(controller.phase == .preparing)
+        controller.handlePress(at: 3.10)
+        controller.handleRelease(at: 3.12)
+        gate.open()
+        try? await Task.sleep(for: .milliseconds(40))
+
+        #expect(!controller.hasOpenCapture)
+        #expect(controller.phase != .listening)
+    }
+
+    @Test func menuAndRetryLatchUntilStopped() async {
+        let controller = hookedController(
+            captureError: DictationError.audioFormat)
+        defer { controller.cancel() }
+
+        controller.toggleFromMenu()
+        #expect(controller.isToggle)
+        #expect(controller.phase.isActive)
+        #expect(
+            await waitUntil {
+                if case .failed = controller.phase { return true }
+                return false
+            })
+        #expect(controller.lastFailureRetryable)
+
+        controller.retry()
+        #expect(controller.isToggle)
+        #expect(controller.phase == .preparing || controller.phase == .listening)
+        #expect(
+            await waitUntil {
+                if case .failed = controller.phase { return true }
+                return false
+            })
+        if case .failed(let message) = controller.phase {
+            #expect(message == DictationError.audioFormat.errorDescription)
+        }
+    }
+
+    @Test func holdAfterListeningCommitsBufferedText() async {
+        var committed: String?
+        let controller = hookedController(transcribe: { chunks in
+            for await _ in chunks {}
+            return "hello"
+        })
+        controller.onCommitted = { text, _, _ in committed = text }
+        defer { controller.cancel() }
+
+        controller.handlePress(at: 8.0)
+        #expect(await waitUntil { controller.phase == .listening })
+        controller.handleRelease(at: 8.50)
+        #expect(await waitUntil { controller.phase == .done || committed != nil })
+        #expect(committed == "hello")
+        #expect(controller.preview == "hello")
+    }
+
+    @Test func cancelClearsToggleAndDropsStalePreview() async {
+        let controller = hookedController()
+        defer { controller.cancel() }
+
+        controller.toggleFromMenu()
+        #expect(await waitUntil { controller.phase.isActive })
+        let oldGeneration = controller.testSessionGeneration
+        controller.cancel()
+        #expect(controller.phase == .idle)
+        #expect(!controller.isToggle)
+
+        controller.handlePress(at: 9.0)
+        controller.handleRelease(at: 9.05)
+        #expect(await waitUntil { controller.phase.isActive })
+        controller.publishPreviewForTesting("stale", generation: oldGeneration)
+        #expect(controller.preview != "stale")
+    }
+
+    @Test func unmatchedReleaseDoesNotStartASession() {
+        let controller = hookedController()
+        defer { controller.cancel() }
+        controller.handleRelease(at: 1.0)
+        #expect(controller.phase == .idle)
+        #expect(!controller.isToggle)
+        #expect(!controller.hasOpenCapture)
+    }
 }
 
 @Suite(.serialized)
@@ -131,6 +276,23 @@ struct HotkeyDispatchTests {
 }
 
 @MainActor
+private final class CaptureGate {
+    private var opened = false
+
+    func wait() async {
+        while !opened {
+            if Task.isCancelled { return }
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(2))
+        }
+    }
+
+    func open() {
+        opened = true
+    }
+}
+
+@MainActor
 private func hookedController(
     beforeCapture: (@MainActor () async -> Void)? = nil,
     captureError: Error? = nil,
@@ -178,7 +340,7 @@ private func flagsChangedEvent(
 
 @MainActor
 private func waitUntil(
-    timeout: Duration, _ condition: @MainActor () -> Bool
+    timeout: Duration = .milliseconds(800), _ condition: @MainActor () -> Bool
 ) async -> Bool {
     let deadline = ContinuousClock.now + timeout
     while ContinuousClock.now < deadline {
