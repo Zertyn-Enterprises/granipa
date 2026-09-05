@@ -75,6 +75,20 @@ private struct InspectorHairline: View {
     }
 }
 
+/// The engine the idle Readiness card describes: the same configured default
+/// `DictationController.start()` reads, with the same fallback for absent or
+/// unknown values. The Apple-locale Language row is truthful only for the
+/// local engine, so the idle pane guards on this exactly like the live
+/// Session card guards on `dictation.engineID`.
+enum DictationIdleEngine: Equatable {
+    case local
+    case muse
+
+    init(configuredRaw: String?) {
+        self = DictationEngineID(rawValue: configuredRaw ?? "local") == .muse ? .muse : .local
+    }
+}
+
 private struct DictationInspectorView: View {
     @Bindable var dictation: DictationController
     let isLive: Bool
@@ -114,8 +128,10 @@ private struct DictationInspectorView: View {
 
             InspectorCard(title: "Readiness") {
                 InspectorRow(label: "Engine", value: idleEngineLabel)
-                InspectorHairline()
-                InspectorRow(label: "Language", value: languageCode)
+                if idleEngine == .local {
+                    InspectorHairline()
+                    InspectorRow(label: "Language", value: languageCode)
+                }
                 InspectorHairline()
                 InspectorRow(label: "Auto-save", value: "Saves to history on device")
                 if dictation.meetingIsRecording {
@@ -226,9 +242,12 @@ private struct DictationInspectorView: View {
         return locale.language.languageCode?.identifier.uppercased() ?? locale.identifier
     }
 
+    private var idleEngine: DictationIdleEngine {
+        DictationIdleEngine(configuredRaw: UserDefaults.standard.string(forKey: "dictationEngine"))
+    }
+
     private var idleEngineLabel: String {
-        let raw = UserDefaults.standard.string(forKey: "dictationEngine") ?? "local"
-        return DictationEngineID(rawValue: raw) == .muse ? "Muse cloud" : "On device"
+        idleEngine == .muse ? "Muse cloud" : "On device"
     }
 
     private var statusTitle: String {

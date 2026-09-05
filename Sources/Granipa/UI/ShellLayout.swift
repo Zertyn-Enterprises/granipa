@@ -39,14 +39,3 @@ enum ShellLayout {
         return windowWidth >= inspectorBreakWidth ? .column : .overlay
     }
 }
-
-private struct GranipaWindowWidthKey: EnvironmentKey {
-    static let defaultValue: CGFloat = ShellLayout.defaultWindowWidth
-}
-
-extension EnvironmentValues {
-    var granipaWindowWidth: CGFloat {
-        get { self[GranipaWindowWidthKey.self] }
-        set { self[GranipaWindowWidthKey.self] = newValue }
-    }
-}

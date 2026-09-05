@@ -46,10 +46,7 @@ enum DictationHeaderAction: Equatable {
 /// shared destination action.
 struct DictationDestinationHeader: View {
     @Environment(AppState.self) private var app
-    @Environment(\.granipaWindowWidth) private var windowWidth
     @Bindable var dictation: DictationController
-
-    private var compact: Bool { windowWidth < ShellLayout.inspectorBreakWidth }
 
     private var action: DictationHeaderAction {
         DictationHeaderAction.resolve(
@@ -79,41 +76,61 @@ struct DictationDestinationHeader: View {
 
             Spacer(minLength: 12)
 
-            Button {
-                app.createMeeting()
-            } label: {
-                if compact {
-                    Image(systemName: "plus")
-                } else {
-                    Label("Quick note", systemImage: "plus")
-                        .font(.system(size: 14, weight: .medium))
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 14) {
+                    quickNoteButton(labeled: true)
+                    recordButton(labeled: true)
+                }
+                HStack(spacing: 14) {
+                    quickNoteButton(labeled: false)
+                    recordButton(labeled: true)
+                }
+                HStack(spacing: 14) {
+                    quickNoteButton(labeled: false)
+                    recordButton(labeled: false)
                 }
             }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-            .tint(.white)
-            .help("Quick note")
-            .accessibilityLabel("Quick note")
-
-            Button {
-                dictation.toggleFromMenu()
-            } label: {
-                if compact {
-                    Image(systemName: action.systemImage)
-                        .font(.system(size: 15, weight: .semibold))
-                } else {
-                    Label(action.title, systemImage: action.systemImage)
-                        .font(.system(size: 15, weight: .semibold))
-                }
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .tint(Theme.accent)
-            .recordGlow()
-            .disabled(!action.isEnabled)
-            .help(helpText)
-            .accessibilityLabel(action == .stop ? "Stop dictation" : action.title)
+            .layoutPriority(1)
         }
+    }
+
+    private func quickNoteButton(labeled: Bool) -> some View {
+        Button {
+            app.createMeeting()
+        } label: {
+            if labeled {
+                Label("Quick note", systemImage: "plus")
+                    .font(.system(size: 14, weight: .medium))
+            } else {
+                Image(systemName: "plus")
+            }
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.large)
+        .tint(.white)
+        .help("Quick note")
+        .accessibilityLabel("Quick note")
+    }
+
+    private func recordButton(labeled: Bool) -> some View {
+        Button {
+            dictation.toggleFromMenu()
+        } label: {
+            if labeled {
+                Label(action.title, systemImage: action.systemImage)
+                    .font(.system(size: 15, weight: .semibold))
+            } else {
+                Image(systemName: action.systemImage)
+                    .font(.system(size: 15, weight: .semibold))
+            }
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+        .tint(Theme.accent)
+        .recordGlow()
+        .disabled(!action.isEnabled)
+        .help(helpText)
+        .accessibilityLabel(action == .stop ? "Stop dictation" : action.title)
     }
 
     private var helpText: String {

@@ -95,7 +95,6 @@ struct MainWindow: View {
             idealWidth: ShellLayout.defaultWindowWidth,
             minHeight: ShellLayout.minHeight,
             idealHeight: ShellLayout.defaultWindowHeight)
-        .environment(\.granipaWindowWidth, windowWidth)
         .background {
             GeometryReader { proxy in
                 Color.clear.preference(key: MainWindowWidthKey.self, value: proxy.size.width)
