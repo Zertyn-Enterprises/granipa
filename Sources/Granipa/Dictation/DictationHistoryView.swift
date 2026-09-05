@@ -74,7 +74,7 @@ struct DictationHistoryView: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 22) {
-                        DestinationHeader(title: "Dictation")
+                        DictationDestinationHeader(dictation: app.dictation)
                         statsCard
                         toolbar
                         listContent

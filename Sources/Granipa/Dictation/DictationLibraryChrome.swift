@@ -1,5 +1,131 @@
 import SwiftUI
 
+/// What the Dictation page's primary button shows for a controller phase.
+/// Mirrors the menu bar's capture section: stop while live, no dead button
+/// while transcribing, and a mic conflict only disables starting.
+enum DictationHeaderAction: Equatable {
+    case record(disabled: Bool)
+    case stop
+    case transcribing
+
+    static func resolve(phase: DictationPhase, recorderBusy: Bool) -> DictationHeaderAction {
+        switch phase {
+        case .preparing, .listening: .stop
+        case .processing: .transcribing
+        case .idle, .done, .failed: .record(disabled: recorderBusy)
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .record: "Record"
+        case .stop: "Stop"
+        case .transcribing: "Transcribing…"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .record: "record.circle"
+        case .stop: "stop.circle.fill"
+        case .transcribing: "waveform"
+        }
+    }
+
+    var isEnabled: Bool {
+        switch self {
+        case .record(let disabled): !disabled
+        case .stop: true
+        case .transcribing: false
+        }
+    }
+}
+
+/// The Dictation destination header: its primary button drives dictation
+/// (`toggleFromMenu()`), never meeting recording. Quick note keeps the
+/// shared destination action.
+struct DictationDestinationHeader: View {
+    @Environment(AppState.self) private var app
+    @Environment(\.granipaWindowWidth) private var windowWidth
+    @Bindable var dictation: DictationController
+
+    private var compact: Bool { windowWidth < ShellLayout.inspectorBreakWidth }
+
+    private var action: DictationHeaderAction {
+        DictationHeaderAction.resolve(
+            phase: dictation.phase, recorderBusy: app.recorder.isBusy)
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 14) {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Theme.accent.opacity(0.16))
+                .frame(width: 40, height: 40)
+                .overlay {
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Theme.accent)
+                }
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Dictation")
+                    .font(Theme.titleFont)
+                    .foregroundStyle(Theme.textPrimary)
+                Text("Capture your voice. We'll handle the rest.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.textSecondary)
+            }
+
+            Spacer(minLength: 12)
+
+            Button {
+                app.createMeeting()
+            } label: {
+                if compact {
+                    Image(systemName: "plus")
+                } else {
+                    Label("Quick note", systemImage: "plus")
+                        .font(.system(size: 14, weight: .medium))
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .tint(.white)
+            .help("Quick note")
+            .accessibilityLabel("Quick note")
+
+            Button {
+                dictation.toggleFromMenu()
+            } label: {
+                if compact {
+                    Image(systemName: action.systemImage)
+                        .font(.system(size: 15, weight: .semibold))
+                } else {
+                    Label(action.title, systemImage: action.systemImage)
+                        .font(.system(size: 15, weight: .semibold))
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .tint(Theme.accent)
+            .recordGlow()
+            .disabled(!action.isEnabled)
+            .help(helpText)
+            .accessibilityLabel(action == .stop ? "Stop dictation" : action.title)
+        }
+    }
+
+    private var helpText: String {
+        switch action {
+        case .stop: "Stop dictation"
+        case .transcribing: "Transcribing…"
+        case .record(true): "Mic in use — meeting recording"
+        case .record(false): "Record dictation"
+        }
+    }
+}
+
 enum DictationLibraryFormat {
     /// Compact `m:ss` / `h:mm:ss` label from a duration in seconds.
     static func duration(_ seconds: Double) -> String {

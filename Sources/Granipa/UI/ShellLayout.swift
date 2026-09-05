@@ -1,4 +1,5 @@
 import CoreGraphics
+import SwiftUI
 
 enum InspectorPresentation: Equatable, Sendable {
     case hidden
@@ -36,5 +37,16 @@ enum ShellLayout {
         let expanded = userExpanded ?? defaultInspectorExpanded(windowWidth: windowWidth)
         guard expanded else { return .hidden }
         return windowWidth >= inspectorBreakWidth ? .column : .overlay
+    }
+}
+
+private struct GranipaWindowWidthKey: EnvironmentKey {
+    static let defaultValue: CGFloat = ShellLayout.defaultWindowWidth
+}
+
+extension EnvironmentValues {
+    var granipaWindowWidth: CGFloat {
+        get { self[GranipaWindowWidthKey.self] }
+        set { self[GranipaWindowWidthKey.self] = newValue }
     }
 }
