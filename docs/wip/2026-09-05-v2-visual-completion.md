@@ -29,3 +29,19 @@ no new persistence work is included in this pass. No claim of completed V2.
 - No new dependencies; no permanent animated decoration or extra audio polling.
 - Build and full suite on integration; one cross-family review per integrated screen group.
 - Visual/runtime smoke is separate from compilation. Any unavailable gate stays explicit.
+
+## User clarification after this pass started
+
+The user supplied eleven more reference images and explicitly requested tags again,
+live dictation in the contextual panel, and Settings as an in-app screen rather
+than a second window. This supersedes deferral of tags above. Settings entry points
+must converge on the same main-window destination, without duplicate sidebars.
+The references also emphasize decisions/outcomes, owned actions, key moments and
+a chapter timeline. Automatic versus manual moment creation was asked separately;
+video thumbnails remain unsupported by the audio-only capture path.
+
+Implementation order: integrate the in-flight visual groups; embed Settings; add
+real local tags with independent test-author coverage before implementation.
+No new persisted fields are added to Meeting or DictationEntry JSON contracts.
+Migration tests use ephemeral databases only. Applying a new migration to the
+user's actual database remains a human action, not an unattended app launch.
