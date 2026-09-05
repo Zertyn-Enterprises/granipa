@@ -1,5 +1,17 @@
 import SwiftUI
 
+enum LibraryListPhase: Equatable, Sendable {
+    case rows
+    case pending
+    case empty
+
+    static func resolve(isEmpty: Bool, isSearching: Bool, searchInFlight: Bool) -> Self {
+        if !isEmpty { return .rows }
+        if isSearching && searchInFlight { return .pending }
+        return .empty
+    }
+}
+
 enum LibraryCopy {
     static func homeTitle(
         isSearching: Bool,
@@ -67,6 +79,50 @@ enum LibraryCopy {
     }
 }
 
+struct LibraryPendingSearch: View {
+    var body: some View {
+        ProgressView("Searching…")
+            .controlSize(.small)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 48)
+            .foregroundStyle(Theme.textSecondary)
+            .accessibilityLabel("Searching")
+    }
+}
+
+struct LibraryMetaRow: View {
+    var status: String? = nil
+    var folder: String? = nil
+    var duration: String? = nil
+    let date: Date
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let status, !status.isEmpty {
+                Text(status)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.statusListening)
+                    .lineLimit(1)
+            }
+            if let folder, !folder.isEmpty {
+                MetadataBadge(text: folder)
+            }
+            Text(trailingParts.joined(separator: " · "))
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.textTertiary)
+                .lineLimit(1)
+                .monospacedDigit()
+        }
+    }
+
+    private var trailingParts: [String] {
+        var parts: [String] = []
+        if let duration, !duration.isEmpty { parts.append(duration) }
+        parts.append(LibraryCopy.dateLabel(date))
+        return parts
+    }
+}
+
 struct HomeView: View {
     enum Mode {
         case inbox
@@ -77,6 +133,7 @@ struct HomeView: View {
     var mode: Mode = .inbox
     @State private var searchResults: [Meeting] = []
     @State private var searchDebounce: Task<Void, Never>?
+    @State private var searchInFlight = false
 
     private var isSearching: Bool { !app.searchQuery.isEmpty }
 
@@ -107,6 +164,13 @@ struct HomeView: View {
 
     private var usesInboxLayout: Bool { mode == .inbox && activeFolder == nil }
 
+    private var listPhase: LibraryListPhase {
+        LibraryListPhase.resolve(
+            isEmpty: shownMeetings.isEmpty,
+            isSearching: isSearching,
+            searchInFlight: searchInFlight)
+    }
+
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 24) {
@@ -116,11 +180,14 @@ struct HomeView: View {
                     HeroEventCard(event: event)
                 }
 
-                if shownMeetings.isEmpty {
+                switch listPhase {
+                case .pending:
+                    LibraryPendingSearch()
+                case .empty:
                     emptyState
                         .frame(maxWidth: .infinity)
                         .padding(.top, 48)
-                } else {
+                case .rows:
                     ForEach(dayGroups, id: \.day) { group in
                         LazyVStack(alignment: .leading, spacing: 8) {
                             Text(Theme.dayHeader(group.day))
@@ -144,9 +211,11 @@ struct HomeView: View {
             searchDebounce?.cancel()
             guard isSearching, let db = app.database else {
                 searchResults = []
+                searchInFlight = false
                 return
             }
             let query = app.searchQuery
+            searchInFlight = true
             searchDebounce = Task {
                 try? await Task.sleep(for: .milliseconds(200))
                 guard !Task.isCancelled else { return }
@@ -155,6 +224,7 @@ struct HomeView: View {
                 }.value
                 guard !Task.isCancelled, query == app.searchQuery else { return }
                 searchResults = results
+                searchInFlight = false
             }
         }
     }
@@ -269,13 +339,6 @@ private struct HomeMeetingRow: View {
     private var duration: String? {
         MeetingLibrary.durationLabel(from: meeting.startedAt, to: meeting.endedAt)
     }
-    private var meta: [String] {
-        LibraryCopy.metaParts(
-            status: phase.isLive ? phase.label : nil,
-            folder: folder?.name,
-            duration: duration,
-            date: meeting.createdAt)
-    }
 
     var body: some View {
         Button {
@@ -285,10 +348,10 @@ private struct HomeMeetingRow: View {
                 AvatarView(
                     letterSource: meeting.title,
                     fallbackIcon: meeting.audioMicPath != nil || meeting.audioSystemPath != nil
-                        ? "waveform" : "note.text",
+                        ? "waveform" : "square.and.pencil",
                     size: 42)
 
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text(meeting.title)
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(Theme.textPrimary)
@@ -299,12 +362,11 @@ private struct HomeMeetingRow: View {
                             .foregroundStyle(Theme.textSecondary)
                             .lineLimit(2)
                     }
-                    if !meta.isEmpty {
-                        Text(meta.joined(separator: " · "))
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.textTertiary)
-                            .lineLimit(1)
-                    }
+                    LibraryMetaRow(
+                        status: phase.isLive ? phase.label : nil,
+                        folder: folder?.name,
+                        duration: duration,
+                        date: meeting.createdAt)
                 }
 
                 Spacer(minLength: 8)
@@ -318,7 +380,7 @@ private struct HomeMeetingRow: View {
             .padding(.horizontal, 14)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressFadeButtonStyle())
         .card(cornerRadius: Theme.radiusM)
         .hoverHighlight(cornerRadius: Theme.radiusM)
         .contextMenu {

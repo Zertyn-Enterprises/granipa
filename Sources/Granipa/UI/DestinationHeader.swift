@@ -1,16 +1,39 @@
 import SwiftUI
 
+/// Shared title + actions row so Home and Dictation share leading x, type,
+/// and control height. A subtitle, when present, sits under that row.
+struct DestinationChrome<Actions: View>: View {
+    let title: String
+    var subtitle: String? = nil
+    @ViewBuilder var actions: () -> Actions
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .center, spacing: 16) {
+                Text(title)
+                    .font(Theme.titleFont)
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 8)
+                actions()
+                    .layoutPriority(1)
+            }
+            if let subtitle, !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.textSecondary)
+            }
+        }
+    }
+}
+
 struct DestinationHeader: View {
     @Environment(AppState.self) private var app
     let title: String
 
     var body: some View {
-        HStack(alignment: .center, spacing: 16) {
-            Text(title)
-                .font(Theme.titleFont)
-                .foregroundStyle(Theme.textPrimary)
-                .lineLimit(1)
-            Spacer(minLength: 8)
+        DestinationChrome(title: title) {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) {
                     quickNoteButton(labeled: true)
@@ -25,7 +48,6 @@ struct DestinationHeader: View {
                     recordButton(labeled: false)
                 }
             }
-            .layoutPriority(1)
         }
     }
 
@@ -38,6 +60,7 @@ struct DestinationHeader: View {
                     .font(.system(size: 14, weight: .medium))
             } else {
                 Image(systemName: "plus")
+                    .font(.system(size: 14, weight: .semibold))
             }
         }
         .granipaSecondaryControl()
@@ -57,6 +80,7 @@ struct DestinationHeader: View {
                 .font(.system(size: 15, weight: .semibold))
             } else {
                 Image(systemName: "record.circle")
+                    .font(.system(size: 15, weight: .semibold))
             }
         }
         .granipaPrimaryControl()

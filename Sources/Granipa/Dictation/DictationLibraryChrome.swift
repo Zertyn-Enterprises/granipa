@@ -54,43 +54,24 @@ struct DictationDestinationHeader: View {
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 14) {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Theme.accent.opacity(0.16))
-                .frame(width: 40, height: 40)
-                .overlay {
-                    Image(systemName: "mic.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(Theme.accent)
-                }
-                .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Dictation")
-                    .font(Theme.titleFont)
-                    .foregroundStyle(Theme.textPrimary)
-                Text("Capture your voice. We'll handle the rest.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.textSecondary)
-            }
-
-            Spacer(minLength: 12)
-
+        DestinationChrome(
+            title: "Dictation",
+            subtitle: "Capture your voice. We'll handle the rest."
+        ) {
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 14) {
+                HStack(spacing: 8) {
                     quickNoteButton(labeled: true)
                     recordButton(labeled: true)
                 }
-                HStack(spacing: 14) {
+                HStack(spacing: 8) {
                     quickNoteButton(labeled: false)
                     recordButton(labeled: true)
                 }
-                HStack(spacing: 14) {
+                HStack(spacing: 8) {
                     quickNoteButton(labeled: false)
                     recordButton(labeled: false)
                 }
             }
-            .layoutPriority(1)
         }
     }
 
@@ -103,11 +84,10 @@ struct DictationDestinationHeader: View {
                     .font(.system(size: 14, weight: .medium))
             } else {
                 Image(systemName: "plus")
+                    .font(.system(size: 14, weight: .semibold))
             }
         }
-        .buttonStyle(.bordered)
-        .controlSize(.large)
-        .tint(.white)
+        .granipaSecondaryControl()
         .help("Quick note")
         .accessibilityLabel("Quick note")
     }
@@ -124,10 +104,7 @@ struct DictationDestinationHeader: View {
                     .font(.system(size: 15, weight: .semibold))
             }
         }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.large)
-        .tint(Theme.accent)
-        .recordGlow()
+        .granipaPrimaryControl()
         .disabled(!action.isEnabled)
         .help(helpText)
         .accessibilityLabel(action == .stop ? "Stop dictation" : action.title)
@@ -236,25 +213,25 @@ struct DictationStatCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Image(systemName: systemImage)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Theme.accent.opacity(0.9))
-                .frame(width: 22, height: 22)
-                .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                .font(.system(size: 14, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(Theme.accent)
             Text(value)
-                .font(.system(size: 17, weight: .semibold, design: .rounded))
+                .font(.system(size: 22, weight: .semibold, design: .rounded))
                 .foregroundStyle(Theme.textPrimary)
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
             Text(label)
-                .font(.system(size: 10.5))
+                .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Theme.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 11)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.radiusM, style: .continuous))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 14)
+        .background(
+            Theme.card, in: RoundedRectangle(cornerRadius: Theme.radiusM, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: Theme.radiusM, style: .continuous)
                 .stroke(Theme.border, lineWidth: 1))
@@ -345,65 +322,62 @@ struct DictationEntryCard: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            appBadge
-
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    if let title = parts.title {
-                        Text(title)
-                            .font(.system(size: 14.5, weight: .semibold))
-                            .foregroundStyle(Theme.textPrimary)
-                            .lineLimit(1)
-                    }
-                    Spacer(minLength: 8)
-                    Text(entry.createdAt, format: .dateTime.hour().minute())
-                        .font(Theme.fontSmall)
-                        .foregroundStyle(Theme.textTertiary)
-                        .monospacedDigit()
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                if let title = parts.title {
+                    Text(title)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                        .lineLimit(1)
                 }
-
-                Text(parts.excerpt)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.textSecondary)
-                    .lineLimit(2)
-
-                HStack(spacing: 8) {
-                    if let appName = entry.sourceApp {
-                        Text(appName)
-                    }
-                    Text(DictationLibraryFormat.duration(entry.durationSeconds))
-                    Text("\(entry.wordCount) words")
-                    Spacer(minLength: 8)
-                    Button(action: onCopy) {
-                        Image(systemName: "doc.on.doc")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(Theme.textTertiary)
-                            .frame(width: 22, height: 22)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("Copy")
-                    .accessibilityLabel("Copy")
-                    Button(action: onPaste) {
-                        Image(systemName: "doc.on.clipboard")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(Theme.textTertiary)
-                            .frame(width: 22, height: 22)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("Paste to frontmost app")
-                    .accessibilityLabel("Paste")
-                    overflowMenu
-                }
-                .font(Theme.fontSmall)
-                .foregroundStyle(Theme.textTertiary)
+                Spacer(minLength: 8)
+                Text(entry.createdAt, format: .dateTime.hour().minute())
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textTertiary)
+                    .monospacedDigit()
             }
+
+            Text(parts.excerpt)
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(2)
+
+            HStack(spacing: 8) {
+                if let appName = entry.sourceApp {
+                    MetadataBadge(text: appName)
+                }
+                Text(DictationLibraryFormat.duration(entry.durationSeconds))
+                Text("\(entry.wordCount) words")
+                Spacer(minLength: 8)
+                Button(action: onCopy) {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Theme.textTertiary)
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(PressFadeButtonStyle())
+                .help("Copy")
+                .accessibilityLabel("Copy")
+                Button(action: onPaste) {
+                    Image(systemName: "doc.on.clipboard")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Theme.textTertiary)
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(PressFadeButtonStyle())
+                .help("Paste to frontmost app")
+                .accessibilityLabel("Paste")
+                overflowMenu
+            }
+            .font(.system(size: 12))
+            .foregroundStyle(Theme.textTertiary)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.radiusM, style: .continuous))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 14)
+        .background(
+            Theme.card, in: RoundedRectangle(cornerRadius: Theme.radiusM, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: Theme.radiusM, style: .continuous)
                 .stroke(Theme.border, lineWidth: 1))
@@ -421,26 +395,6 @@ struct DictationEntryCard: View {
 
     private var accessibilityTitle: String {
         parts.title ?? entry.text.replacingOccurrences(of: "\n", with: " ")
-    }
-
-    private var appBadge: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(
-                    entry.sourceApp.map { Theme.avatarColor(for: $0).opacity(0.85) }
-                        ?? Theme.fillSubtle)
-            if let appName = entry.sourceApp, let first = appName.first {
-                Text(String(first).uppercased())
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundStyle(Theme.textPrimary)
-            } else {
-                Image(systemName: "mic")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textSecondary)
-            }
-        }
-        .frame(width: 30, height: 30)
-        .accessibilityHidden(true)
     }
 
     private var overflowMenu: some View {

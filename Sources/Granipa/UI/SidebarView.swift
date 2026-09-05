@@ -21,7 +21,7 @@ struct SidebarView: View {
 
     var body: some View {
         @Bindable var app = app
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 4) {
             Color.clear.frame(height: 34)
 
             brand
@@ -46,7 +46,7 @@ struct SidebarView: View {
                 .padding(.bottom, 4)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 4) {
                     ForEach(groupedFolders, id: \.team) { group in
                         if let team = group.team {
                             HStack(spacing: 7) {
@@ -107,10 +107,11 @@ struct SidebarView: View {
             Button {
                 app.sidebarDestination = .settings
             } label: {
-                HStack(spacing: 8) {
+                HStack(spacing: 10) {
                     Image(systemName: "gearshape")
-                        .font(.system(size: 13))
-                        .frame(width: 16)
+                        .font(.system(size: 15, weight: .semibold))
+                        .symbolRenderingMode(.hierarchical)
+                        .frame(width: 22, height: 18)
                     Text("Settings")
                         .font(.system(size: 13))
                     Spacer()
@@ -120,7 +121,7 @@ struct SidebarView: View {
                 .padding(.horizontal, 10)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressFadeButtonStyle())
             .hoverHighlight(cornerRadius: 10)
             .help("Settings")
             .accessibilityLabel("Settings")
@@ -266,11 +267,12 @@ private struct SideItem: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 Image(systemName: icon)
-                    .font(Theme.fontCaption.weight(.semibold))
+                    .font(.system(size: 15, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(iconColor)
-                    .frame(width: 16)
+                    .frame(width: 22, height: 18)
                 Text(title)
                     .font(isActive ? Theme.fontBody.weight(.semibold) : Theme.fontBody)
                     .foregroundStyle(textColor)
@@ -283,12 +285,12 @@ private struct SideItem: View {
                         .monospacedDigit()
                 }
             }
-            .padding(.vertical, 8)
+            .padding(.vertical, 9)
             .padding(.horizontal, 10)
             .padding(.leading, indented ? 14 : 0)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressFadeButtonStyle())
         .background {
             if isActive {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -300,7 +302,7 @@ private struct SideItem: View {
                 Capsule()
                     .fill(Theme.accent)
                     .frame(width: 3)
-                    .padding(.vertical, 7)
+                    .padding(.vertical, 6)
                     .padding(.leading, 1)
             }
         }

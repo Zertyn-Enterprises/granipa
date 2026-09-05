@@ -33,8 +33,24 @@ enum ShellLayout {
         userExpanded: Bool?,
         hasContent: Bool
     ) -> InspectorPresentation {
-        guard hasContent else { return .hidden }
-        let expanded = userExpanded ?? defaultInspectorExpanded(windowWidth: windowWidth)
+        presentation(
+            windowWidth: windowWidth,
+            userExpanded: userExpanded,
+            kind: hasContent ? .meeting : .none)
+    }
+
+    /// Occupancy (`kind`) is separate from docking. Idle Dictation can be
+    /// opened explicitly; it does not inherit the wide-window default used
+    /// by live Dictation and the meeting inspector.
+    static func presentation(
+        windowWidth: CGFloat,
+        userExpanded: Bool?,
+        kind: InspectorContentKind
+    ) -> InspectorPresentation {
+        guard kind.hasContent else { return .hidden }
+        let expanded =
+            userExpanded
+            ?? (kind.expandsByDefault && defaultInspectorExpanded(windowWidth: windowWidth))
         guard expanded else { return .hidden }
         return windowWidth >= inspectorBreakWidth ? .column : .overlay
     }

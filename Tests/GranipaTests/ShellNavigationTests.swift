@@ -160,8 +160,8 @@ import Testing
         #expect(SidebarDestination.home.icon == "house.fill")
         #expect(SidebarDestination.dictation.icon == "mic.fill")
         #expect(SidebarDestination.meetings.icon == "calendar")
-        #expect(SidebarDestination.notes.icon == "note.text")
-        #expect(SidebarDestination.files.icon == "folder")
+        #expect(SidebarDestination.notes.icon == "square.and.pencil")
+        #expect(SidebarDestination.files.icon == "folder.fill")
         #expect(SidebarDestination.settings.icon == "gearshape")
         #expect(AppNavigation.showsAppSidebar(for: .home))
         #expect(!AppNavigation.showsAppSidebar(for: .settings))
@@ -369,7 +369,7 @@ import Testing
                 destination: .dictation,
                 dictationShowsInspector: true,
                 windowWidth: 1120,
-                meetingSelected: true) == .none)
+                meetingSelected: true) == .dictationLive)
     }
 
     @Test func idleDictationInspectorIsAvailableAtEveryWidth() {
@@ -382,27 +382,50 @@ import Testing
         }
     }
 
-    @Test func liveDictationInspectorDocksOnlyWhenWide() {
+    @Test func liveDictationInspectorIsAvailableAtEveryWidth() {
+        for width: CGFloat in [960, 1120, 1279, 1280, 1440] {
+            #expect(
+                AppNavigation.inspectorKind(
+                    destination: .dictation,
+                    dictationShowsInspector: true,
+                    windowWidth: width) == .dictationLive)
+        }
+    }
+
+    @Test func inspectorToggleStaysInLibraryTitlebars() {
+        for destination in SidebarDestination.appDestinations {
+            #expect(AppNavigation.showsInspectorToggle(destination: destination))
+        }
+        #expect(!AppNavigation.showsInspectorToggle(destination: .settings))
+        #expect(AppNavigation.inspectorToggleEnabled(kind: .dictationIdle))
+        #expect(AppNavigation.inspectorToggleEnabled(kind: .dictationLive))
+        #expect(AppNavigation.inspectorToggleEnabled(kind: .meeting))
+        #expect(!AppNavigation.inspectorToggleEnabled(kind: .none))
+    }
+
+    @Test func librarySearchPendingIsNotAnEmptyState() {
         #expect(
-            AppNavigation.inspectorKind(
-                destination: .dictation,
-                dictationShowsInspector: true,
-                windowWidth: 1120) == .none)
+            LibraryListPhase.resolve(isEmpty: false, isSearching: true, searchInFlight: true)
+                == .rows)
         #expect(
-            AppNavigation.inspectorKind(
-                destination: .dictation,
-                dictationShowsInspector: true,
-                windowWidth: 1279) == .none)
+            LibraryListPhase.resolve(isEmpty: true, isSearching: true, searchInFlight: true)
+                == .pending)
         #expect(
-            AppNavigation.inspectorKind(
-                destination: .dictation,
-                dictationShowsInspector: true,
-                windowWidth: 1280) == .dictationLive)
+            LibraryListPhase.resolve(isEmpty: true, isSearching: true, searchInFlight: false)
+                == .empty)
         #expect(
-            AppNavigation.inspectorKind(
-                destination: .dictation,
-                dictationShowsInspector: true,
-                windowWidth: 1440) == .dictationLive)
+            LibraryListPhase.resolve(isEmpty: true, isSearching: false, searchInFlight: false)
+                == .empty)
+    }
+
+    @Test func mainWindowKeepsTheInspectorToggleForLibraryDestinations() throws {
+        let source = try granipaSource("Sources/Granipa/UI/MainWindow.swift")
+        #expect(source.contains("showsInspectorToggle(destination:"))
+        #expect(source.contains("inspectorToggleEnabled(kind:"))
+        #expect(source.contains("kind: inspectorKind"))
+        #expect(!source.contains("if inspectorKind != .none"))
+        #expect(!source.contains("hasContent: inspectorKind != .none"))
+        #expect(!source.contains("value: inspectorPresentation"))
     }
 
     @Test func dictationInspectorPhasesExcludeIdleAndDone() {
@@ -449,4 +472,12 @@ import Testing
             MeetingLibrary.fileLabel(path: path, channel: "Them", status: .present(byteCount: 3))
                 == "Them · mic.m4a · \(size)")
     }
+}
+
+private func granipaSource(_ relativePath: String) throws -> String {
+    let testsFile = URL(fileURLWithPath: #filePath)
+    let repo = testsFile.deletingLastPathComponent().deletingLastPathComponent()
+        .deletingLastPathComponent()
+    return try String(
+        contentsOf: repo.appendingPathComponent(relativePath), encoding: .utf8)
 }

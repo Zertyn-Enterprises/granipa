@@ -3,6 +3,7 @@ import SwiftUI
 struct NotesLibraryView: View {
     @Environment(AppState.self) private var app
     @State private var searchResults: [Meeting] = []
+    @State private var searchInFlight = false
 
     private var isSearching: Bool {
         !app.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -12,15 +13,25 @@ struct NotesLibraryView: View {
         isSearching ? searchResults : MeetingLibrary.notes(in: app.meetings)
     }
 
+    private var listPhase: LibraryListPhase {
+        LibraryListPhase.resolve(
+            isEmpty: shown.isEmpty,
+            isSearching: isSearching,
+            searchInFlight: searchInFlight)
+    }
+
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 24) {
                 DestinationHeader(title: isSearching ? "Search" : "Notes")
 
-                if shown.isEmpty {
+                switch listPhase {
+                case .pending:
+                    LibraryPendingSearch()
+                case .empty:
                     VStack(spacing: 14) {
                         EmptyStateView(
-                            icon: isSearching ? "magnifyingglass" : "note.text",
+                            icon: isSearching ? "magnifyingglass" : "square.and.pencil",
                             title: isSearching
                                 ? "No results for \"\(app.searchQuery)\""
                                 : "No notes yet",
@@ -41,7 +52,7 @@ struct NotesLibraryView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.top, 48)
-                } else {
+                case .rows:
                     ForEach(MeetingLibrary.dayGroups(from: shown), id: \.day) { group in
                         LazyVStack(alignment: .leading, spacing: 8) {
                             Text(Theme.dayHeader(group.day))
@@ -65,8 +76,10 @@ struct NotesLibraryView: View {
             let query = app.searchQuery
             guard isSearching, let db = app.database else {
                 searchResults = []
+                searchInFlight = false
                 return
             }
+            searchInFlight = true
             try? await Task.sleep(for: .milliseconds(200))
             guard !Task.isCancelled else { return }
             let results = await Task.detached(priority: .userInitiated) {
@@ -74,6 +87,7 @@ struct NotesLibraryView: View {
             }.value
             guard !Task.isCancelled else { return }
             searchResults = results
+            searchInFlight = false
         }
     }
 }
@@ -91,21 +105,14 @@ private struct NotesLibraryRow: View {
             notesMarkdown: meeting.notesMarkdown)
             ?? MeetingLibrary.notePreview(meeting)
     }
-    private var meta: [String] {
-        LibraryCopy.metaParts(
-            status: phase.isLive ? phase.label : nil,
-            folder: folder?.name,
-            duration: MeetingLibrary.durationLabel(from: meeting.startedAt, to: meeting.endedAt),
-            date: meeting.createdAt)
-    }
 
     var body: some View {
         Button {
             app.selectedMeetingID = meeting.id
         } label: {
             HStack(alignment: .top, spacing: 14) {
-                AvatarView(letterSource: meeting.title, fallbackIcon: "note.text", size: 42)
-                VStack(alignment: .leading, spacing: 5) {
+                AvatarView(letterSource: meeting.title, fallbackIcon: "square.and.pencil", size: 42)
+                VStack(alignment: .leading, spacing: 6) {
                     Text(meeting.title)
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(Theme.textPrimary)
@@ -114,12 +121,12 @@ private struct NotesLibraryRow: View {
                         .font(.system(size: 13))
                         .foregroundStyle(Theme.textSecondary)
                         .lineLimit(2)
-                    if !meta.isEmpty {
-                        Text(meta.joined(separator: " · "))
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.textTertiary)
-                            .lineLimit(1)
-                    }
+                    LibraryMetaRow(
+                        status: phase.isLive ? phase.label : nil,
+                        folder: folder?.name,
+                        duration: MeetingLibrary.durationLabel(
+                            from: meeting.startedAt, to: meeting.endedAt),
+                        date: meeting.createdAt)
                 }
                 Spacer(minLength: 8)
                 Text(meeting.createdAt, format: .dateTime.hour().minute())
@@ -131,7 +138,7 @@ private struct NotesLibraryRow: View {
             .padding(.horizontal, 14)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressFadeButtonStyle())
         .card(cornerRadius: Theme.radiusM)
         .hoverHighlight(cornerRadius: Theme.radiusM)
         .contextMenu {

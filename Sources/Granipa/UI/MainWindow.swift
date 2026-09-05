@@ -37,7 +37,14 @@ struct MainWindow: View {
         ShellLayout.presentation(
             windowWidth: windowWidth,
             userExpanded: inspectorOverride,
-            hasContent: inspectorKind != .none)
+            kind: inspectorKind)
+    }
+
+    private var inspectorToggleHelp: String {
+        if !AppNavigation.inspectorToggleEnabled(kind: inspectorKind) {
+            return "Inspector unavailable"
+        }
+        return inspectorPresentation == .hidden ? "Show inspector" : "Hide inspector"
     }
 
     var body: some View {
@@ -71,7 +78,6 @@ struct MainWindow: View {
                     .frame(width: 1)
                 InspectorPane(kind: inspectorKind)
                     .frame(width: ShellLayout.inspectorColumnWidth)
-                    .transition(.opacity)
             }
         }
         .overlay(alignment: .trailing) {
@@ -82,12 +88,8 @@ struct MainWindow: View {
                     .overlay(alignment: .leading) {
                         Rectangle().fill(Theme.border).frame(width: 1)
                     }
-                    .transition(.opacity)
             }
         }
-        .animation(
-            reduceMotion ? nil : .easeOut(duration: Theme.motionNormal),
-            value: inspectorPresentation)
         .preferredColorScheme(.dark)
         .tint(Theme.accent)
         .frame(
@@ -119,16 +121,15 @@ struct MainWindow: View {
             }
         }
         .toolbar {
-            if inspectorKind != .none {
+            if AppNavigation.showsInspectorToggle(destination: app.sidebarDestination) {
                 Button {
                     inspectorOverride = inspectorPresentation == .hidden
                 } label: {
                     Image(systemName: "sidebar.trailing")
                 }
-                .help(
-                    inspectorPresentation == .hidden ? "Show inspector" : "Hide inspector")
-                .accessibilityLabel(
-                    inspectorPresentation == .hidden ? "Show inspector" : "Hide inspector")
+                .disabled(!AppNavigation.inspectorToggleEnabled(kind: inspectorKind))
+                .help(inspectorToggleHelp)
+                .accessibilityLabel(inspectorToggleHelp)
             }
         }
         .onChange(of: app.recorder.isRecording) {
@@ -176,7 +177,11 @@ struct MainWindow: View {
                     .transition(
                         reduceMotion
                             ? .opacity
-                            : .move(edge: .top).combined(with: .opacity))
+                            : .move(edge: .top).combined(with: .opacity)
+                    )
+                    .animation(
+                        reduceMotion ? nil : .easeOut(duration: Theme.motionNormal),
+                        value: appName)
             }
             Group {
                 if app.sidebarDestination == .dictation {
@@ -205,9 +210,6 @@ struct MainWindow: View {
                 }
             }
         }
-        .animation(
-            reduceMotion ? nil : .easeOut(duration: Theme.motionNormal),
-            value: app.detector.detectedApp)
         .frame(maxWidth: .infinity)
         .background(Theme.bg)
     }

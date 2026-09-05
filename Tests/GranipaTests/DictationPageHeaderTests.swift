@@ -22,6 +22,21 @@ import Testing
         #expect(!chrome.contains("startRecording()"))
     }
 
+    @Test func dictationHeaderMatchesDestinationChromeAndPrimaryControl() throws {
+        let chrome = try granipaSource("Sources/Granipa/Dictation/DictationLibraryChrome.swift")
+        let header = try granipaSource("Sources/Granipa/UI/DestinationHeader.swift")
+        #expect(header.contains("struct DestinationChrome"))
+        #expect(header.contains("DestinationChrome(title: title)"))
+        #expect(chrome.contains("DestinationChrome("))
+        #expect(chrome.contains("title: \"Dictation\""))
+        #expect(chrome.contains("granipaPrimaryControl()"))
+        #expect(chrome.contains("granipaSecondaryControl()"))
+        #expect(!chrome.contains("frame(width: 40, height: 40)"))
+        #expect(!chrome.contains("mic.fill"))
+        #expect(header.contains("granipaPrimaryControl()"))
+        #expect(header.contains("granipaSecondaryControl()"))
+    }
+
     @Test func headerActionMirrorsMenuBarCaptureStates() {
         func resolve(_ phase: DictationPhase, busy: Bool = false) -> DictationHeaderAction {
             DictationHeaderAction.resolve(phase: phase, recorderBusy: busy)

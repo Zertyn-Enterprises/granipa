@@ -4,6 +4,7 @@ struct FilesLibraryView: View {
     @Environment(AppState.self) private var app
     @State private var fileStatuses: [String: RecordingFileStatus] = [:]
     @State private var searchResults: [Meeting] = []
+    @State private var searchInFlight = false
 
     private var isSearching: Bool {
         !app.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -11,6 +12,13 @@ struct FilesLibraryView: View {
 
     private var shown: [Meeting] {
         isSearching ? searchResults : MeetingLibrary.recordings(in: app.meetings)
+    }
+
+    private var listPhase: LibraryListPhase {
+        LibraryListPhase.resolve(
+            isEmpty: shown.isEmpty,
+            isSearching: isSearching,
+            searchInFlight: searchInFlight)
     }
 
     private var recordingPaths: [String] {
@@ -31,7 +39,10 @@ struct FilesLibraryView: View {
             LazyVStack(alignment: .leading, spacing: 24) {
                 DestinationHeader(title: isSearching ? "Search" : "Files")
 
-                if shown.isEmpty {
+                switch listPhase {
+                case .pending:
+                    LibraryPendingSearch()
+                case .empty:
                     VStack(spacing: 14) {
                         EmptyStateView(
                             icon: isSearching ? "magnifyingglass" : "waveform",
@@ -56,7 +67,7 @@ struct FilesLibraryView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.top, 48)
-                } else {
+                case .rows:
                     Text("Recordings")
                         .font(Theme.sectionFont)
                         .foregroundStyle(Theme.textPrimary)
@@ -92,8 +103,10 @@ struct FilesLibraryView: View {
             let query = app.searchQuery
             guard isSearching, let db = app.database else {
                 searchResults = []
+                searchInFlight = false
                 return
             }
+            searchInFlight = true
             try? await Task.sleep(for: .milliseconds(200))
             guard !Task.isCancelled else { return }
             let results = await Task.detached(priority: .userInitiated) {
@@ -101,6 +114,7 @@ struct FilesLibraryView: View {
             }.value
             guard !Task.isCancelled else { return }
             searchResults = results
+            searchInFlight = false
         }
     }
 }
@@ -129,21 +143,13 @@ private struct FilesLibraryRow: View {
         return lines
     }
 
-    private var meta: [String] {
-        LibraryCopy.metaParts(
-            status: isLive || phase.isLive ? (isLive ? "Recording" : phase.label) : nil,
-            folder: folder?.name,
-            duration: MeetingLibrary.durationLabel(from: meeting.startedAt, to: meeting.endedAt),
-            date: meeting.createdAt)
-    }
-
     var body: some View {
         Button {
             app.selectedMeetingID = meeting.id
         } label: {
             HStack(alignment: .top, spacing: 14) {
                 AvatarView(letterSource: meeting.title, fallbackIcon: "waveform", size: 42)
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text(meeting.title)
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(Theme.textPrimary)
@@ -153,7 +159,7 @@ private struct FilesLibraryRow: View {
                             .font(.system(size: 13))
                             .foregroundStyle(Theme.statusListening)
                     } else if !fileLines.isEmpty {
-                        VStack(alignment: .leading, spacing: 2) {
+                        VStack(alignment: .leading, spacing: 4) {
                             ForEach(Array(fileLines.enumerated()), id: \.offset) { _, line in
                                 Text(line)
                             }
@@ -161,12 +167,12 @@ private struct FilesLibraryRow: View {
                         .font(.system(size: 13))
                         .foregroundStyle(Theme.textSecondary)
                     }
-                    if !meta.isEmpty {
-                        Text(meta.joined(separator: " · "))
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.textTertiary)
-                            .lineLimit(1)
-                    }
+                    LibraryMetaRow(
+                        status: isLive ? nil : (phase.isLive ? phase.label : nil),
+                        folder: folder?.name,
+                        duration: MeetingLibrary.durationLabel(
+                            from: meeting.startedAt, to: meeting.endedAt),
+                        date: meeting.createdAt)
                 }
                 Spacer(minLength: 8)
                 Text(meeting.createdAt, format: .dateTime.hour().minute())
@@ -178,7 +184,7 @@ private struct FilesLibraryRow: View {
             .padding(.horizontal, 14)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressFadeButtonStyle())
         .card(cornerRadius: Theme.radiusM)
         .hoverHighlight(cornerRadius: Theme.radiusM)
         .contextMenu {

@@ -69,6 +69,42 @@ import Testing
                 == .hidden)
     }
 
+    @Test func idleDictationInspectorStaysCollapsedUntilOpened() {
+        for width: CGFloat in [1120, 1279, 1280, 1440] {
+            #expect(
+                ShellLayout.presentation(
+                    windowWidth: width, userExpanded: nil, kind: .dictationIdle) == .hidden)
+        }
+        #expect(
+            ShellLayout.presentation(
+                windowWidth: 1120, userExpanded: true, kind: .dictationIdle) == .overlay)
+        #expect(
+            ShellLayout.presentation(
+                windowWidth: 1280, userExpanded: true, kind: .dictationIdle) == .column)
+        #expect(
+            ShellLayout.presentation(
+                windowWidth: 1440, userExpanded: false, kind: .dictationIdle) == .hidden)
+    }
+
+    @Test func liveAndMeetingInspectorsStillExpandOnWideWindows() {
+        #expect(
+            ShellLayout.presentation(
+                windowWidth: 1280, userExpanded: nil, kind: .dictationLive) == .column)
+        #expect(
+            ShellLayout.presentation(
+                windowWidth: 1440, userExpanded: nil, kind: .meeting) == .column)
+        #expect(
+            ShellLayout.presentation(
+                windowWidth: 1120, userExpanded: nil, kind: .dictationLive) == .hidden)
+        #expect(
+            ShellLayout.presentation(
+                windowWidth: 1120, userExpanded: true, kind: .dictationLive) == .overlay)
+        #expect(!InspectorContentKind.dictationIdle.expandsByDefault)
+        #expect(InspectorContentKind.dictationLive.expandsByDefault)
+        #expect(InspectorContentKind.meeting.expandsByDefault)
+        #expect(!InspectorContentKind.none.expandsByDefault)
+    }
+
     @Test func clampedDefaultSizeFitsVisibleScreenAndKeepsMinimums() {
         let roomy = ShellLayout.clampedDefaultSize(visible: CGSize(width: 1920, height: 1080))
         #expect(roomy.width == 1320)

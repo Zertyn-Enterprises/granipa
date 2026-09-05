@@ -31,8 +31,8 @@ enum SidebarDestination: String, CaseIterable, Sendable, Hashable {
         case .home: "house.fill"
         case .dictation: "mic.fill"
         case .meetings: "calendar"
-        case .notes: "note.text"
-        case .files: "folder"
+        case .notes: "square.and.pencil"
+        case .files: "folder.fill"
         case .settings: "gearshape"
         }
     }
@@ -48,6 +48,17 @@ enum InspectorContentKind: Equatable, Sendable {
     case dictationIdle
     case dictationLive
     case meeting
+
+    var hasContent: Bool { self != .none }
+
+    /// Wide windows open live Dictation and the meeting inspector by default.
+    /// Idle Dictation stays closed until the toolbar toggle is used.
+    var expandsByDefault: Bool {
+        switch self {
+        case .meeting, .dictationLive: true
+        case .none, .dictationIdle: false
+        }
+    }
 }
 
 enum RecordingFileStatus: Equatable, Sendable {
@@ -82,18 +93,25 @@ enum AppNavigation {
         }
     }
 
+    /// Library destinations keep a toolbar occupant so Home and Dictation
+    /// share titlebar geometry. Settings uses a different chrome.
+    static func showsInspectorToggle(destination: SidebarDestination) -> Bool {
+        destination != .settings
+    }
+
+    static func inspectorToggleEnabled(kind: InspectorContentKind) -> Bool {
+        kind.hasContent
+    }
+
     static func inspectorKind(
         destination: SidebarDestination,
         dictationShowsInspector: Bool,
-        windowWidth: CGFloat,
+        windowWidth _: CGFloat,
         meetingSelected: Bool = false
     ) -> InspectorContentKind {
         if destination == .settings { return .none }
         if destination == .dictation {
-            if dictationShowsInspector {
-                return windowWidth >= ShellLayout.inspectorBreakWidth ? .dictationLive : .none
-            }
-            return .dictationIdle
+            return dictationShowsInspector ? .dictationLive : .dictationIdle
         }
         return meetingSelected ? .meeting : .none
     }

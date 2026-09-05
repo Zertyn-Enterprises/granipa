@@ -110,28 +110,96 @@ struct HoverHighlight: ViewModifier {
     }
 }
 
+struct PressFadeButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.72 : 1)
+            .animation(
+                reduceMotion ? nil : .easeOut(duration: Theme.motionFast),
+                value: configuration.isPressed)
+    }
+}
+
+struct GranipaPrimaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(.white.opacity(isEnabled ? 0.96 : 0.7))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .background(
+                Theme.accent.opacity(fillOpacity(pressed: configuration.isPressed)),
+                in: Capsule(style: .continuous)
+            )
+            .shadow(
+                color: isEnabled ? Theme.accentGlow : .clear,
+                radius: 10
+            )
+            .animation(
+                reduceMotion ? nil : .easeOut(duration: Theme.motionFast),
+                value: configuration.isPressed)
+    }
+
+    private func fillOpacity(pressed: Bool) -> Double {
+        if !isEnabled { return 0.45 }
+        return pressed ? 0.82 : 1
+    }
+}
+
+struct GranipaSecondaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(Theme.textPrimary.opacity(isEnabled ? 1 : 0.55))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .background(Theme.fillSubtle, in: Capsule(style: .continuous))
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(Theme.strokeStrong, lineWidth: 1)
+            )
+            .opacity(configuration.isPressed ? 0.85 : 1)
+            .animation(
+                reduceMotion ? nil : .easeOut(duration: Theme.motionFast),
+                value: configuration.isPressed)
+    }
+}
+
 extension View {
     func hoverHighlight(cornerRadius: CGFloat = Theme.radiusS) -> some View {
         modifier(HoverHighlight(cornerRadius: cornerRadius))
     }
 
-    func recordGlow() -> some View {
-        shadow(color: Theme.accentGlow, radius: 10)
-    }
-
     func granipaPrimaryControl() -> some View {
-        self
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .tint(Theme.accent)
-            .recordGlow()
+        buttonStyle(GranipaPrimaryButtonStyle())
     }
 
     func granipaSecondaryControl() -> some View {
-        self
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-            .tint(.white)
+        buttonStyle(GranipaSecondaryButtonStyle())
+    }
+}
+
+/// Real source-app or folder name. Never a synthetic tag or favorite.
+struct MetadataBadge: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(Theme.textSecondary)
+            .lineLimit(1)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Theme.fillSubtle, in: Capsule(style: .continuous))
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(Theme.border, lineWidth: 1))
     }
 }
 
