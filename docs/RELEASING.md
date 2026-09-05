@@ -20,7 +20,7 @@
 
 ## Every release
 
-1. Bump `CFBundleShortVersionString` in `Resources/Info.plist`, merge to `main`, tag.
+1. Bump both `CFBundleShortVersionString` (display version) and `CFBundleVersion` (build number) in `Resources/Info.plist`. The build number must exceed the current appcast `sparkle:version` so Sparkle offers the update. Then merge to `main` and tag.
 2. ```sh
    ./Scripts/release.sh
    ```
