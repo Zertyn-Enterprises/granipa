@@ -199,8 +199,7 @@ struct MeetingOverviewView: View {
                 secondaryCards
                 if isBare {
                     Button("Open notes", action: onOpenNotes)
-                        .buttonStyle(.bordered)
-                        .tint(.white)
+                        .granipaSecondaryControl()
                 }
             }
             .padding(.horizontal, 28)
@@ -354,8 +353,7 @@ struct MeetingOverviewView: View {
             Label(title, systemImage: "wand.and.stars")
                 .font(.system(size: 12, weight: .medium))
         }
-        .buttonStyle(.bordered)
-        .tint(.white)
+        .granipaSecondaryControl()
         .controlSize(.small)
         .disabled(
             OverviewPresentation.enhanceDisabled(
@@ -719,8 +717,7 @@ struct MeetingTranscriptView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 380)
             Button("Retry", action: retry)
-                .buttonStyle(.bordered)
-                .tint(.white)
+                .granipaSecondaryControl()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -739,8 +736,7 @@ struct MeetingTranscriptView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 380)
             Button("Try Again", action: onRetry)
-                .buttonStyle(.bordered)
-                .tint(.white)
+                .granipaSecondaryControl()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

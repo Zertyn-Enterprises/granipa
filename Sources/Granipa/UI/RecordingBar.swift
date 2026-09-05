@@ -36,8 +36,7 @@ struct RecordingBar: View {
                         Label("Record", systemImage: "record.circle")
                             .font(.system(size: 13, weight: .semibold))
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Theme.accent)
+                    .granipaPrimaryControl()
                     .disabled(app.recorder.isBusy)
                     Spacer()
                 }

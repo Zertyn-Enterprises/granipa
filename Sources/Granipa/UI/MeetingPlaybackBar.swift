@@ -197,8 +197,7 @@ struct MeetingPlaybackBar: View {
                 .font(.system(size: 12, weight: .semibold))
                 .labelStyle(.titleAndIcon)
         }
-        .buttonStyle(.bordered)
-        .tint(.white)
+        .granipaPrimaryControl()
         .controlSize(.small)
         .disabled(app.recorder.isBusy)
         .help(app.recorder.isBusy ? "Recording" : "Record")

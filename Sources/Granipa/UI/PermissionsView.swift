@@ -109,7 +109,7 @@ struct PermissionsSettings: View {
                 }
                 .font(.system(size: 12, weight: .semibold))
             }
-            .buttonStyle(.bordered)
+            .granipaSecondaryControl()
             .controlSize(.small)
             .disabled(isRefreshing)
             .accessibilityLabel("Rescan permissions")
@@ -178,7 +178,7 @@ struct PermissionsSettings: View {
             Button("Open System Settings") {
                 openPermissionPane(PermissionCenter.securityPane)
             }
-            .buttonStyle(.bordered)
+            .granipaSecondaryControl()
             .controlSize(.small)
             .accessibilityLabel("Open System Settings")
 
@@ -323,10 +323,8 @@ private struct PermissionHealthStrip: View {
         Button(action: onFix) {
             Text("Fix recommended")
                 .font(.system(size: 12, weight: .semibold))
-                .padding(.horizontal, 4)
         }
-        .buttonStyle(.borderedProminent)
-        .tint(Theme.accent)
+        .granipaPrimaryControl()
         .controlSize(.small)
         .accessibilityLabel("Fix recommended")
         .help("Jump to the first permission that still needs attention.")
