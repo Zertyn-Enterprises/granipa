@@ -73,12 +73,49 @@ enum SettingsLayout {
     static let minWindowHeight: CGFloat = 680
 }
 
+/// Unsaved Dictation credential drafts, hoisted above the section switch so
+/// navigating away and back keeps what was typed (window lifetime only).
+struct DictationKeyDrafts {
+    var museKey = ""
+    var keySaved: Bool?
+    var spaceXAIKey = ""
+    var spaceXAIKeySaved: Bool?
+    var customKey = ""
+    var customKeySaved: Bool?
+    private var loadedFromKeychain = false
+
+    /// Seeds drafts from the keychain once per Settings window; remounts keep edits.
+    mutating func loadOnce(_ read: (String) -> String?) {
+        guard !loadedFromKeychain else { return }
+        museKey = read(KeychainStore.museAPIKeyAccount) ?? ""
+        spaceXAIKey = read(KeychainStore.spaceXAIKeyAccount) ?? ""
+        customKey = read(KeychainStore.rewriteCustomKeyAccount) ?? ""
+        loadedFromKeychain = true
+    }
+}
+
+/// Unsaved editor drafts keyed by item id, hoisted above the pane switches so
+/// section/subpage navigation keeps edits for the lifetime of the Settings window.
+/// Reads fall back to the persisted item until the user edits.
+struct EditorDrafts<Item: Identifiable> {
+    private var drafts: [Item.ID: Item] = [:]
+
+    subscript(item: Item) -> Item {
+        get { drafts[item.id] ?? item }
+        set { drafts[item.id] = newValue }
+    }
+}
+
 struct SettingsView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var section = SettingsSection.initialSelection
     @State private var aiPane = SettingsSubPage.providers
     @State private var extrasPane = SettingsSubPage.clipboardAndOCR
     @State private var integrationsPane = SettingsSubPage.api
+    // Drafts live here, not in the panes: the switch below destroys pane @State.
+    @State private var dictationKeyDrafts = DictationKeyDrafts()
+    @State private var webhookDrafts = EditorDrafts<Webhook>()
+    @State private var templateDrafts = EditorDrafts<MeetingTemplate>()
 
     var body: some View {
         HStack(spacing: 0) {
@@ -115,7 +152,7 @@ struct SettingsView: View {
                 title: "Dictation",
                 subtitle: "Hold-to-talk dictation: shortcut, language, engine and instant rewrite."
             ) {
-                DictationSettings()
+                DictationSettings(drafts: $dictationKeyDrafts)
             }
         case .shortcuts:
             SettingsPage(
@@ -137,7 +174,7 @@ struct SettingsView: View {
             ) {
                 SettingsSubNav(pages: SettingsSection.ai.subPages, selection: $aiPane)
                 if aiPane == .templates {
-                    TemplateSettings()
+                    TemplateSettings(drafts: $templateDrafts)
                 } else {
                     AISettings()
                 }
@@ -164,7 +201,7 @@ struct SettingsView: View {
                 SettingsSubNav(
                     pages: SettingsSection.integrations.subPages, selection: $integrationsPane)
                 if integrationsPane == .webhooks {
-                    WebhookSettings()
+                    WebhookSettings(drafts: $webhookDrafts)
                 } else {
                     APISettings()
                 }
@@ -260,7 +297,7 @@ private struct SettingsNavItem: View {
     }
 }
 
-private struct SettingsPage<Content: View>: View {
+struct SettingsPage<Content: View>: View {
     let title: String
     let subtitle: String
     private let content: Content
@@ -513,12 +550,7 @@ private struct DictationSettings: View {
     @AppStorage("dictationRewrite") private var rewrite = "off"
     @AppStorage("rewriteCustomURL") private var rewriteURL = "http://127.0.0.1:11434/v1"
     @AppStorage("rewriteCustomModel") private var rewriteModel = "llama3.2"
-    @State private var museKey = ""
-    @State private var keySaved: Bool?
-    @State private var spaceXAIKey = ""
-    @State private var spaceXAIKeySaved: Bool?
-    @State private var customKey = ""
-    @State private var customKeySaved: Bool?
+    @Binding var drafts: DictationKeyDrafts
 
     private var probeIDs: [String] {
         LanguageDetection.parseProbeLocales(probeLocalesRaw)
@@ -567,16 +599,16 @@ private struct DictationSettings: View {
             }
             if engine == "muse" {
                 Section("Muse") {
-                    SecureField("Meta API key", text: $museKey)
+                    SecureField("Meta API key", text: $drafts.museKey)
                     Button("Save key") {
-                        keySaved = KeychainStore.set(
-                            museKey, account: KeychainStore.museAPIKeyAccount)
+                        drafts.keySaved = KeychainStore.set(
+                            drafts.museKey, account: KeychainStore.museAPIKeyAccount)
                     }
-                    if keySaved == false {
+                    if drafts.keySaved == false {
                         Text("Could not save the key in Keychain.")
                             .font(.caption)
                             .foregroundStyle(.orange)
-                    } else if keySaved == true {
+                    } else if drafts.keySaved == true {
                         Text("Saved in Keychain.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -609,12 +641,12 @@ private struct DictationSettings: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 if rewrite == "spacexai" {
-                    SecureField("SpaceXAI API key", text: $spaceXAIKey)
+                    SecureField("SpaceXAI API key", text: $drafts.spaceXAIKey)
                     Button("Save SpaceXAI key") {
-                        spaceXAIKeySaved = KeychainStore.set(
-                            spaceXAIKey, account: KeychainStore.spaceXAIKeyAccount)
+                        drafts.spaceXAIKeySaved = KeychainStore.set(
+                            drafts.spaceXAIKey, account: KeychainStore.spaceXAIKeyAccount)
                     }
-                    if spaceXAIKeySaved == false {
+                    if drafts.spaceXAIKeySaved == false {
                         Text("Could not save the key in Keychain.")
                             .font(.caption)
                             .foregroundStyle(.orange)
@@ -626,10 +658,10 @@ private struct DictationSettings: View {
                 if rewrite == "custom" {
                     TextField("Base URL", text: $rewriteURL)
                     TextField("Model", text: $rewriteModel)
-                    SecureField("API key (optional)", text: $customKey)
+                    SecureField("API key (optional)", text: $drafts.customKey)
                     Button("Save endpoint key") {
-                        customKeySaved = KeychainStore.set(
-                            customKey, account: KeychainStore.rewriteCustomKeyAccount)
+                        drafts.customKeySaved = KeychainStore.set(
+                            drafts.customKey, account: KeychainStore.rewriteCustomKeyAccount)
                     }
                     Text("OpenAI-compatible /v1/chat/completions. Example: Ollama or llama.cpp on your Mac Mini (http://192.168.x.x:11434/v1), or a VPS.")
                         .font(.caption)
@@ -640,9 +672,7 @@ private struct DictationSettings: View {
         .formStyle(.grouped)
         }
         .onAppear {
-            museKey = KeychainStore.get(account: KeychainStore.museAPIKeyAccount) ?? ""
-            spaceXAIKey = KeychainStore.get(account: KeychainStore.spaceXAIKeyAccount) ?? ""
-            customKey = KeychainStore.get(account: KeychainStore.rewriteCustomKeyAccount) ?? ""
+            drafts.loadOnce { KeychainStore.get(account: $0) }
             applyShortcut()
         }
     }
@@ -1214,6 +1244,7 @@ private struct APISettings: View {
 
 private struct WebhookSettings: View {
     @Environment(AppState.self) private var app
+    @Binding var drafts: EditorDrafts<Webhook>
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1228,7 +1259,7 @@ private struct WebhookSettings: View {
                 ScrollView {
                     VStack(spacing: 8) {
                         ForEach(app.webhooks) { webhook in
-                            WebhookEditor(webhook: webhook)
+                            WebhookEditor(webhook: draftBinding(webhook))
                         }
                     }
                     .padding(8)
@@ -1247,11 +1278,17 @@ private struct WebhookSettings: View {
             .padding(12)
         }
     }
+
+    private func draftBinding(_ webhook: Webhook) -> Binding<Webhook> {
+        Binding(
+            get: { drafts[webhook] },
+            set: { drafts[webhook] = $0 })
+    }
 }
 
 private struct WebhookEditor: View {
     @Environment(AppState.self) private var app
-    @State var webhook: Webhook
+    @Binding var webhook: Webhook
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -1295,6 +1332,7 @@ private struct WebhookEditor: View {
 
 private struct TemplateSettings: View {
     @Environment(AppState.self) private var app
+    @Binding var drafts: EditorDrafts<MeetingTemplate>
     @State private var editing: MeetingTemplate?
 
     var body: some View {
@@ -1318,7 +1356,7 @@ private struct TemplateSettings: View {
             .frame(height: 120)
             Divider()
             if let template = editing {
-                TemplateEditor(template: template) { updated in
+                TemplateEditor(template: draftBinding(template)) { updated in
                     app.saveTemplate(updated)
                     editing = updated
                 } onDelete: {
@@ -1347,10 +1385,16 @@ private struct TemplateSettings: View {
             .padding(8)
         }
     }
+
+    private func draftBinding(_ template: MeetingTemplate) -> Binding<MeetingTemplate> {
+        Binding(
+            get: { drafts[template] },
+            set: { drafts[template] = $0 })
+    }
 }
 
 private struct TemplateEditor: View {
-    @State var template: MeetingTemplate
+    @Binding var template: MeetingTemplate
     let onSave: (MeetingTemplate) -> Void
     let onDelete: () -> Void
 
