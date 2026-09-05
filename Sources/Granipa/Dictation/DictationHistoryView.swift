@@ -221,9 +221,10 @@ struct DictationHistoryView: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .background(
+                Theme.card, in: RoundedRectangle(cornerRadius: Theme.radiusS, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: Theme.radiusS, style: .continuous)
                     .stroke(Theme.border, lineWidth: 1))
 
             appFilterMenu
@@ -246,20 +247,23 @@ struct DictationHistoryView: View {
                     Text(name).tag(String?.some(name))
                 }
             }
+            .pickerStyle(.inline)
         } label: {
             HStack(spacing: 5) {
                 Image(systemName: "line.3.horizontal.decrease.circle")
                     .font(.system(size: 11.5))
                 Text(appFilter ?? "All apps")
                     .lineLimit(1)
+                    .frame(maxWidth: 140, alignment: .leading)
             }
             .font(.system(size: 12.5, weight: .medium))
             .foregroundStyle(appFilter == nil ? Theme.textSecondary : Theme.accent)
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .background(
+                Theme.card, in: RoundedRectangle(cornerRadius: Theme.radiusS, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: Theme.radiusS, style: .continuous)
                     .stroke(Theme.border, lineWidth: 1))
         }
         .menuStyle(.borderlessButton)
@@ -404,11 +408,11 @@ struct DictationHistoryView: View {
         let filter = appFilter
         let offset = entries.count
         loadTask = Task {
+            defer { loadingMore = false }
             let snapshot = await Self.fetch(
                 search: search, since: since, sourceApp: filter,
                 limit: Self.pageSize, offset: offset, database: app.database)
             guard !Task.isCancelled else { return }
-            loadingMore = false
             if let snapshot {
                 loadFailed = false
                 entries.append(contentsOf: snapshot.entries)
