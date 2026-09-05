@@ -157,9 +157,11 @@ final class MeetingPlaybackController {
         state = .paused
         tickTask?.cancel()
         tickTask = nil
+        // Keep the last tick's time: it is what the user saw when pressing
+        // pause, and reading the engine clock back would race the tick's
+        // own staleness. The next play or seek resyncs.
         enqueue { engine in
             await engine.pause()
-            self.currentTime = await engine.currentTime()
         }
     }
 
