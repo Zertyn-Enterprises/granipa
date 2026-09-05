@@ -47,7 +47,7 @@ struct PermissionsSettings: View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Permissions")
-                    .font(.system(size: 22, weight: .semibold, design: .serif))
+                    .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary)
                 Text("Grant the permissions Grañipa needs to capture and transcribe meetings.")
                     .font(.system(size: 12))
