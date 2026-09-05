@@ -128,11 +128,15 @@ import Testing
             "fixture-folder-personal": 1,
         ])
 
+        let notesIDs = Set(
+            meetings.filter {
+                !$0.notesMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }.map(\.id))
         #expect(
-            Set(MeetingLibrary.notes(in: meetings).map(\.id))
-                == ["fixture-mtg-sync", "fixture-mtg-quicknote", "fixture-mtg-interview"])
-        #expect(
-            Set(MeetingLibrary.recordings(in: meetings).map(\.id)) == Self.recordedMeetingIDs)
+            notesIDs == ["fixture-mtg-sync", "fixture-mtg-quicknote", "fixture-mtg-interview"])
+        let recordingIDs = Set(
+            meetings.filter { $0.audioMicPath != nil || $0.audioSystemPath != nil }.map(\.id))
+        #expect(recordingIDs == Self.recordedMeetingIDs)
     }
 
     @Test func shellSeedSearchMatchesTheRealDatabaseSemantics() throws {
@@ -260,7 +264,7 @@ import Testing
 
     // MARK: onboarding defaults
 
-    @Test func onboardingIsCompletedOnlyInTheInjectedDefaultsDomain() {
+    @Test func onboardingIsCompletedInTheInjectedDefaultsDomain() {
         guard let suite = UserDefaults(suiteName: "v2-fixture-tests") else {
             Issue.record("defaults suite could not be created")
             return

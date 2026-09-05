@@ -58,6 +58,11 @@ if [ ! -x "$BIN" ]; then
   exit 1
 fi
 
+if ! strings "$BIN" | grep -F -- '--v2-fixture' >/dev/null; then
+  echo "ERROR: $APP has no Debug --v2-fixture seam. Rebuild debug (./Scripts/bundle.sh / --build)." >&2
+  exit 1
+fi
+
 ROOT="$(mktemp -d /private/tmp/granipa-v2-fixture.XXXXXX)"
 cleanup() {
   # Delete only the exact directory this run created, and only if it still

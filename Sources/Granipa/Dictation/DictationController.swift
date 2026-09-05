@@ -97,6 +97,9 @@ final class DictationController {
     }
 
     private func start() {
+        #if DEBUG
+        if V2FixtureRuntime.isActive { return }
+        #endif
         hideTask?.cancel()
         pressStartedAt = .now
         isToggle = false

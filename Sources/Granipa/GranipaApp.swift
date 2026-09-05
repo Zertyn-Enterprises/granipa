@@ -6,15 +6,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         subsystem: "com.zertyn.granipa", category: "lifecycle")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        #if DEBUG
+        if V2FixtureRuntime.isActive {
+            os_signpost(.event, log: Self.lifecycleLog, name: "appReady")
+            return
+        }
+        #endif
         AppRelocator.offerMoveIfNeeded()
         os_signpost(.event, log: Self.lifecycleLog, name: "appReady")
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        #if DEBUG
+        if V2FixtureRuntime.isActive { return }
+        #endif
         BatteryService.shared.stop()
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
+        #if DEBUG
+        if V2FixtureRuntime.isActive { return }
+        #endif
         BatteryHelperClient.shared.invalidateStatusCache()
     }
 }
@@ -52,12 +64,29 @@ struct GranipaApp: App {
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: ShellLayout.defaultWindowWidth, height: 720)
 
+        #if DEBUG
+        MenuBarExtra(isInserted: .constant(!V2FixtureRuntime.isActive)) {
+            if V2FixtureRuntime.isActive {
+                EmptyView()
+            } else {
+                MenuBarView()
+                    .environment(appState)
+            }
+        } label: {
+            if V2FixtureRuntime.isActive {
+                EmptyView()
+            } else {
+                MenuBarLabel(app: appState)
+            }
+        }
+        #else
         MenuBarExtra {
             MenuBarView()
                 .environment(appState)
         } label: {
             MenuBarLabel(app: appState)
         }
+        #endif
 
         Window("Welcome to Grañipa", id: "onboarding") {
             OnboardingView()

@@ -331,6 +331,9 @@ final class AppState {
     }
 
     func startRecording(meetingID: String? = nil) {
+        #if DEBUG
+        if V2FixtureRuntime.isActive { return }
+        #endif
         guard database != nil else { return }
         guard recordingStartTask == nil, !recorder.isBusy else { return }
         let targetID: String

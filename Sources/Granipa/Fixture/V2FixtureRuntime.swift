@@ -17,6 +17,20 @@ enum V2FixtureLaunch: Equatable, Sendable {
 enum V2FixtureRuntime {
     static let flag = "--v2-fixture"
 
+    /// True only for an honored `--v2-fixture` launch. Computed from the same
+    /// argv/environment `GranipaApp.init` already resolves — not a mutable flag.
+    static var isActive: Bool {
+        isActive(
+            resolve(
+                arguments: CommandLine.arguments,
+                environment: ProcessInfo.processInfo.environment))
+    }
+
+    static func isActive(_ launch: V2FixtureLaunch) -> Bool {
+        if case .run = launch { return true }
+        return false
+    }
+
     static let isolationRefusal =
         "Fixture mode needs a throwaway home directory under /private/tmp "
         + "(CFFIXED_USER_HOME, see Scripts/v2-fixture.sh); refusing to start."
