@@ -100,20 +100,15 @@ struct MeetingDetailView: View {
 
     init(meeting: Meeting, preferNotes: Bool = false) {
         _meeting = State(initialValue: meeting)
-        _tab = State(initialValue: Self.initialTab(for: meeting, preferNotes: preferNotes))
+        _tab = State(initialValue: Self.initialTab(preferNotes: preferNotes))
     }
 
-    /// Landing tab when someone opens a meeting from the library.
-    static func initialTab(for meeting: Meeting, preferNotes: Bool) -> Tab {
-        if preferNotes {
-            return .notes
-        }
-        if meeting.audioMicPath != nil || meeting.audioSystemPath != nil
-            || meeting.status == .recording
-        {
-            return .transcript
-        }
-        return .notes
+    /// Landing tab when someone opens a meeting from the library. Everything
+    /// starts on Overview; only the Notes library routes straight to Notes.
+    /// Meeting fields no longer matter: audio/no-audio both land on Overview,
+    /// and while a recording is live the stage replaces tab content anyway.
+    static func initialTab(preferNotes: Bool) -> Tab {
+        preferNotes ? .notes : .overview
     }
 
     var body: some View {

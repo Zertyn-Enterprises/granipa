@@ -93,6 +93,18 @@ import Testing
     }
 }
 
+@Suite struct MeetingDetailInitialTabTests {
+    @Test func normalEntryLandsOnOverviewWhetherOrNotAudioExists() {
+        // Covers completed meetings with mic+system audio, mic-only audio,
+        // and no audio at all: all used to divert to Transcript or Notes.
+        #expect(MeetingDetailView.initialTab(preferNotes: false) == .overview)
+    }
+
+    @Test func notesLibraryRouteStillLandsOnNotes() {
+        #expect(MeetingDetailView.initialTab(preferNotes: true) == .notes)
+    }
+}
+
 @Suite struct PlaybackTransportTests {
     @Test func progressClampsAndRejectsNonFiniteDuration() {
         #expect(PlaybackTransport.progress(current: 5, duration: 10) == 0.5)
