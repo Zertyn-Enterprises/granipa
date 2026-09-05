@@ -27,12 +27,17 @@ import Testing
     }
 
     @Test func retryOrNewPressStartsAFreshSession() {
+        // Two presses can share a wall-clock instant, so the reset is driven by
+        // known-distinct dates instead of `.now`.
         let clock = DictationSessionClock()
-        clock.track(.preparing)
+        let firstPress = Date(timeIntervalSinceReferenceDate: 100)
+        let retryPress = Date(timeIntervalSinceReferenceDate: 200)
+        clock.track(.preparing, now: firstPress)
         let first = clock.sessionStartedAt
         clock.track(.failed("boom"))
-        clock.track(.preparing)
+        clock.track(.preparing, now: retryPress)
         #expect(clock.sessionStartedAt != first)
+        #expect(clock.sessionStartedAt == retryPress)
     }
 
     @Test func elapsedLabelFormatsClockDigitsAndClamps() {

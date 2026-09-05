@@ -40,9 +40,9 @@ final class DictationSessionClock {
 
     /// A session begins when the phase enters `.preparing` (fresh press or retry);
     /// `.listening`/`.processing` continue it; terminal phases freeze the value.
-    func track(_ phase: DictationPhase) {
+    func track(_ phase: DictationPhase, now: Date = .now) {
         if phase == .preparing {
-            sessionStartedAt = .now
+            sessionStartedAt = now
         }
     }
 
