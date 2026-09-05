@@ -37,6 +37,42 @@ enum DictationLibraryFormat {
     }
 }
 
+/// The (search, period, app) selection a history snapshot was fetched under,
+/// plus the `since` cutoff frozen when the query was built. The rows on
+/// screen, their paging cursor and any page must describe the same selection,
+/// so that triple is the identity the list pages under — never `since`, which
+/// `.week` re-derives from `.now` on every read.
+struct DictationLibraryQuery: Equatable, Sendable {
+    var search: String
+    var period: DictationPeriod
+    var sourceApp: String?
+    var since: Date?
+
+    init(search: String, period: DictationPeriod, sourceApp: String?) {
+        self.search = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.period = period
+        self.sourceApp = sourceApp
+        self.since = period.since
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.search == rhs.search && lhs.period == rhs.period
+            && lhs.sourceApp == rhs.sourceApp
+    }
+
+    /// The query a page of the rows on screen runs under: the applied one —
+    /// carrying the cutoff those rows were fetched with — when the current
+    /// selection still matches it, nil otherwise. After a filter or period
+    /// change, while the reload is pending or still inside the search debounce,
+    /// the rows belong to the previous query and the reload must replace them.
+    static func pageQuery(
+        applied: DictationLibraryQuery?, current: DictationLibraryQuery
+    ) -> DictationLibraryQuery? {
+        guard let applied, applied == current else { return nil }
+        return applied
+    }
+}
+
 struct DictationStatCell: View {
     let value: String
     let label: String

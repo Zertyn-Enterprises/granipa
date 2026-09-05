@@ -221,6 +221,59 @@ import Testing
         #expect(leading.snippet == "world")
     }
 
+    @Test func pageGateAllowsOnlyTheAppliedQuery() {
+        let applied = DictationLibraryQuery(search: "ship", period: .week, sourceApp: "Mail")
+
+        #expect(DictationLibraryQuery.pageQuery(applied: applied, current: applied) != nil)
+        #expect(DictationLibraryQuery.pageQuery(applied: nil, current: applied) == nil)
+        #expect(DictationLibraryQuery.pageQuery(
+            applied: applied,
+            current: DictationLibraryQuery(search: "shipped", period: .week, sourceApp: "Mail"))
+            == nil)
+        #expect(DictationLibraryQuery.pageQuery(
+            applied: applied,
+            current: DictationLibraryQuery(search: "ship", period: .all, sourceApp: "Mail"))
+            == nil)
+        #expect(DictationLibraryQuery.pageQuery(
+            applied: applied,
+            current: DictationLibraryQuery(search: "ship", period: .week, sourceApp: "Safari"))
+            == nil)
+        #expect(DictationLibraryQuery.pageQuery(
+            applied: applied,
+            current: DictationLibraryQuery(search: "ship", period: .week, sourceApp: nil))
+            == nil)
+    }
+
+    @Test func pageGateNormalizesSearchWhitespace() {
+        // During the debounce the field can hold " ship " while the applied
+        // query trimmed it; both describe the same query, so paging must pass.
+        let applied = DictationLibraryQuery(search: "ship", period: .all, sourceApp: nil)
+        let typedNow = DictationLibraryQuery(search: " ship ", period: .all, sourceApp: nil)
+        #expect(applied == typedNow)
+        #expect(DictationLibraryQuery.pageQuery(applied: applied, current: typedNow) != nil)
+    }
+
+    @Test func weekPagesWithTheOriginalBoundAsNowRolls() {
+        // `.week` re-reads `.now` on every `since` access, so the query a
+        // reload applied and the one loadMore builds moments later carry
+        // different cutoffs. Identity is the period selection, so paging must
+        // still pass — under the applied cutoff, never the re-derived one.
+        let applied = DictationLibraryQuery(search: "", period: .week, sourceApp: nil)
+        Thread.sleep(forTimeInterval: 0.05)
+        let current = DictationLibraryQuery(search: "", period: .week, sourceApp: nil)
+
+        #expect(applied.since != current.since)
+        let page = DictationLibraryQuery.pageQuery(applied: applied, current: current)
+        #expect(page != nil)
+        #expect(page?.since == applied.since)
+        #expect(page?.since != current.since)
+
+        #expect(DictationLibraryQuery.pageQuery(
+            applied: applied,
+            current: DictationLibraryQuery(search: "", period: .all, sourceApp: nil))
+            == nil)
+    }
+
     @Test func dayGroupsSortDaysNewestFirst() throws {
         let db = try makeDatabase()
         try seed(db, text: "morning", minutesAgo: 300, sourceApp: nil)

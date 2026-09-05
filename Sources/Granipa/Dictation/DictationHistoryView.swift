@@ -41,6 +41,7 @@ struct DictationHistoryView: View {
     @State private var loadingMore = false
     @State private var loadTask: Task<Void, Never>?
     @State private var searchDebounce: Task<Void, Never>?
+    @State private var appliedQuery: DictationLibraryQuery?
     @State private var targetApp: String?
     @FocusState private var searchFocused: Bool
 
@@ -393,30 +394,35 @@ struct DictationHistoryView: View {
 
     private func reload() {
         loadTask?.cancel()
-        let search = trimmedSearch
-        let since = period.since
-        let filter = appFilter
+        let query = DictationLibraryQuery(
+            search: trimmedSearch, period: period, sourceApp: appFilter)
         let keeping = max(Self.pageSize, entries.count)
         loadTask = Task {
             let snapshot = await Self.fetch(
-                search: search, since: since, sourceApp: filter,
+                search: query.search, since: query.since, sourceApp: query.sourceApp,
                 limit: keeping, database: app.database)
             guard !Task.isCancelled else { return }
-            apply(snapshot, failureMeansFailed: app.database != nil)
+            apply(snapshot, failureMeansFailed: app.database != nil, query: query)
         }
     }
 
     private func loadMore() {
         guard !loadingMore, entries.count < total, let oldest = entries.last else { return }
+        // The rows on screen still belong to the previous query (the reload after
+        // a filter/search change is pending or still debounced); paging would mix
+        // queries past the old cursor, and the reload must survive to replace them.
+        // The applied query is the one that pages, so its frozen `since` bounds
+        // the fetch — `.week` re-derives a later cutoff on every read.
+        let current = DictationLibraryQuery(
+            search: trimmedSearch, period: period, sourceApp: appFilter)
+        guard let query = DictationLibraryQuery.pageQuery(applied: appliedQuery, current: current)
+        else { return }
         loadTask?.cancel()
         loadingMore = true
-        let search = trimmedSearch
-        let since = period.since
-        let filter = appFilter
         loadTask = Task {
             defer { loadingMore = false }
             let snapshot = await Self.fetch(
-                search: search, since: since, sourceApp: filter,
+                search: query.search, since: query.since, sourceApp: query.sourceApp,
                 limit: Self.pageSize,
                 before: (createdAt: oldest.createdAt, id: oldest.id),
                 database: app.database)
@@ -433,11 +439,16 @@ struct DictationHistoryView: View {
         }
     }
 
-    private func apply(_ snapshot: DictationLibrarySnapshot?, failureMeansFailed: Bool) {
+    private func apply(
+        _ snapshot: DictationLibrarySnapshot?,
+        failureMeansFailed: Bool,
+        query: DictationLibraryQuery
+    ) {
         guard let snapshot else {
             if failureMeansFailed { loadFailed = true }
             return
         }
+        appliedQuery = query
         loadFailed = false
         loadMoreFailed = false
         entries = snapshot.entries
