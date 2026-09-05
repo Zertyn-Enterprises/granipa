@@ -168,6 +168,16 @@ enum TestMeetingAudio {
         #expect(ended)
         #expect(player.currentTime >= player.duration - 0.05)
 
+        // A real EOF leaves a live player: restarting must make actual
+        // engine progress again, not just flip the facade.
+        player.play()
+        for _ in 0..<40 {
+            if player.currentTime > 0, player.state == .playing { break }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        #expect(player.state == .playing)
+        #expect(player.currentTime > 0)
+
         player.stopAndRelease()
         #expect(player.state == .idle)
         #expect(player.loadedURL == nil)
@@ -224,6 +234,36 @@ enum TestMeetingAudio {
         #expect(!player.isPlaying)
         try await waitUntil(player) { $0 == .ready }
         #expect(player.loadedURL?.path == system.path)
+        // The mic file (0.3 s) was playing when the switch happened; if the
+        // engine had not stopped it, its EOF would flip this facade.
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(player.state == .ready)
+    }
+
+    @Test @MainActor
+    func selectingAVanishedChannelFailsReleasesAndKeepsTheDiagnostic() async throws {
+        let mic = tempURL("vanished-mic")
+        let system = tempURL("vanished-system")
+        defer {
+            try? FileManager.default.removeItem(at: mic)
+            try? FileManager.default.removeItem(at: system)
+        }
+        try TestMeetingAudio.writeTone(to: mic, seconds: 0.3, frequency: 440)
+        try TestMeetingAudio.writeTone(to: system, seconds: 0.5, frequency: 660)
+
+        let player = MeetingPlaybackController()
+        player.load(micPath: mic.path, systemPath: system.path, preferred: .mic)
+        try await waitUntil(player) { $0 == .ready }
+        #expect(player.channel == .mic)
+        player.play()
+        #expect(player.state == .playing)
+
+        try FileManager.default.removeItem(at: system)
+        player.selectChannel(.system)
+        #expect(player.state == .failed(.missingFile))
+        try await Task.sleep(for: .milliseconds(600))
+        #expect(player.state == .failed(.missingFile))
+        #expect(player.loadedURL == nil)
     }
 
     @Test @MainActor func seekClampsAndLoadWithoutPathsStaysIdle() {

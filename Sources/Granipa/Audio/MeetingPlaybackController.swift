@@ -215,9 +215,6 @@ final class MeetingPlaybackController {
         micPath = nil
         systemPath = nil
         availableChannels = []
-        loadedURL = nil
-        currentTime = 0
-        duration = 0
         state = .idle
         releaseEngine()
     }
@@ -285,13 +282,16 @@ final class MeetingPlaybackController {
     }
 
     /// Abandons the current player on every path that will not replace it:
-    /// detaches the delegate on the main actor, then stops and releases the
-    /// engine's player through the command chain. Without this, loading
-    /// nil/nil or a missing path left a playing file audible under an
-    /// idle/failed facade.
+    /// detaches the delegate and clears the loaded-file facade on the main
+    /// actor, then stops and releases the engine's player through the
+    /// command chain. Without this, loading nil/nil or a missing path left a
+    /// playing file audible under an idle/failed facade.
     private func releaseEngine() {
         delegateBox?.controller = nil
         delegateBox = nil
+        loadedURL = nil
+        duration = 0
+        currentTime = 0
         enqueue { engine in
             await engine.reset()
         }
