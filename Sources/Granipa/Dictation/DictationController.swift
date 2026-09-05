@@ -34,21 +34,21 @@ final class DictationController {
     private let museEngine = MuseDictationEngine()
     @ObservationIgnored private let waveformGate = LevelGate(minInterval: 0.08)
     #if DEBUG
-    @ObservationIgnored var testHooks: DictationTestHooks?
+        @ObservationIgnored var testHooks: DictationTestHooks?
     #endif
 
     private init() {}
 
     #if DEBUG
-    init(testHooks: DictationTestHooks) {
-        self.testHooks = testHooks
-    }
+        init(testHooks: DictationTestHooks) {
+            self.testHooks = testHooks
+        }
 
-    var testSessionGeneration: Int { sessionGeneration }
+        var testSessionGeneration: Int { sessionGeneration }
 
-    func publishPreviewForTesting(_ text: String, generation: Int) {
-        publishPreview(text, generation: generation)
-    }
+        func publishPreviewForTesting(_ text: String, generation: Int) {
+            publishPreview(text, generation: generation)
+        }
     #endif
 
     static var shortcutLabel: String {
@@ -140,9 +140,9 @@ final class DictationController {
             guard let self else { return }
             do {
                 #if DEBUG
-                if let beforeCapture = self.testHooks?.beforeCapture {
-                    await beforeCapture()
-                }
+                    if let beforeCapture = self.testHooks?.beforeCapture {
+                        await beforeCapture()
+                    }
                 #endif
                 guard !Task.isCancelled, generation == self.sessionGeneration,
                     self.phase == .preparing
@@ -181,12 +181,12 @@ final class DictationController {
 
     private func prepareEngine() async throws {
         #if DEBUG
-        if testHooks != nil {
-            if let prepare = testHooks?.prepareEngine {
-                try await prepare()
+            if testHooks != nil {
+                if let prepare = testHooks?.prepareEngine {
+                    try await prepare()
+                }
+                return
             }
-            return
-        }
         #endif
         switch engineID {
         case .local:
@@ -203,14 +203,14 @@ final class DictationController {
 
     private var presentsChrome: Bool {
         #if DEBUG
-        if testHooks != nil { return testHooks?.presentsOverlay == true }
+            if testHooks != nil { return testHooks?.presentsOverlay == true }
         #endif
         return true
     }
 
     private var shouldPaste: Bool {
         #if DEBUG
-        if testHooks != nil { return testHooks?.pastes == true }
+            if testHooks != nil { return testHooks?.pastes == true }
         #endif
         return true
     }
@@ -218,14 +218,14 @@ final class DictationController {
     func beginCapture() throws -> AsyncStream<AudioChunk> {
         if meetingIsRecording { throw DictationError.micBusy }
         #if DEBUG
-        if testHooks != nil {
-            if let error = testHooks?.captureError { throw error }
-            let (stream, continuation) = AsyncStream.makeStream(
-                of: AudioChunk.self, bufferingPolicy: .unbounded)
-            chunkContinuation = continuation
-            captureGeneration = sessionGeneration
-            return stream
-        }
+            if testHooks != nil {
+                if let error = testHooks?.captureError { throw error }
+                let (stream, continuation) = AsyncStream.makeStream(
+                    of: AudioChunk.self, bufferingPolicy: .unbounded)
+                chunkContinuation = continuation
+                captureGeneration = sessionGeneration
+                return stream
+            }
         #endif
         let (stream, continuation) = AsyncStream.makeStream(
             of: AudioChunk.self,
@@ -261,13 +261,13 @@ final class DictationController {
         chunks: AsyncStream<AudioChunk>, generation: Int
     ) async throws -> String {
         #if DEBUG
-        if let transcribe = testHooks?.transcribe {
-            return try await transcribe(chunks)
-        }
-        if testHooks != nil {
-            for await _ in chunks {}
-            return ""
-        }
+            if let transcribe = testHooks?.transcribe {
+                return try await transcribe(chunks)
+            }
+            if testHooks != nil {
+                for await _ in chunks {}
+                return ""
+            }
         #endif
         let locale = Self.preferredLocale()
         switch engineID {
@@ -362,7 +362,7 @@ final class DictationController {
 
     private func rewriteIfNeeded(_ text: String) async -> String {
         #if DEBUG
-        if testHooks != nil { return text }
+            if testHooks != nil { return text }
         #endif
         let provider = UserDefaults.standard.string(forKey: "dictationRewrite") ?? "off"
         guard provider != "off" else { return text }
@@ -505,12 +505,12 @@ extension DictationError {
 }
 
 #if DEBUG
-struct DictationTestHooks {
-    var beforeCapture: (@MainActor () async -> Void)?
-    var captureError: Error?
-    var prepareEngine: (@MainActor () async throws -> Void)?
-    var transcribe: (@MainActor (AsyncStream<AudioChunk>) async throws -> String)?
-    var presentsOverlay = false
-    var pastes = false
-}
+    struct DictationTestHooks {
+        var beforeCapture: (@MainActor () async -> Void)?
+        var captureError: Error?
+        var prepareEngine: (@MainActor () async throws -> Void)?
+        var transcribe: (@MainActor (AsyncStream<AudioChunk>) async throws -> String)?
+        var presentsOverlay = false
+        var pastes = false
+    }
 #endif
