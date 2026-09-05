@@ -15,6 +15,7 @@ enum TranscriptQuery {
         speaker: String?
     ) -> [TranscriptSegment] {
         let needle = normalizedQuery(query)
+        if needle.isEmpty, speaker == nil { return segments }
         return segments.filter { segment in
             if let speaker, segment.speaker != speaker { return false }
             if needle.isEmpty { return true }

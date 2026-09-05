@@ -176,6 +176,7 @@ struct MeetingTranscriptView: View {
     let onRename: (String) -> Void
 
     @FocusState private var searchFocused: Bool
+    @State private var talkReport: SpeakerTalkTime.Report?
 
     private var shown: [TranscriptSegment] {
         live.map(\.liveSegments) ?? segments
@@ -224,6 +225,14 @@ struct MeetingTranscriptView: View {
             } else {
                 populated
             }
+        }
+        .task(id: shown) {
+            let source = shown
+            let report = await Task.detached(priority: .utility) {
+                SpeakerTalkTime.report(segments: source)
+            }.value
+            guard !Task.isCancelled else { return }
+            talkReport = report
         }
     }
 
@@ -364,8 +373,7 @@ struct MeetingTranscriptView: View {
 
     @ViewBuilder
     private var talkStrip: some View {
-        let report = SpeakerTalkTime.report(segments: shown)
-        if !report.rows.isEmpty {
+        if let report = talkReport, !report.rows.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
                 GeometryReader { geo in
                     HStack(spacing: 1) {
