@@ -2,6 +2,24 @@ import AppKit
 import Foundation
 import ServiceManagement
 
+/// Injected SMAppService boundary so focused tests can observe the
+/// unregister→register lifecycle without touching real service registration.
+@MainActor
+struct BatteryHelperServiceLifecycle: Sendable {
+    let status: @MainActor @Sendable () -> SMAppService.Status
+    let unregister: @MainActor @Sendable () async throws -> Void
+    let register: @MainActor @Sendable () throws -> Void
+    let openApproval: @MainActor @Sendable () -> Void
+
+    static let live = Self(
+        status: { SMAppService.daemon(plistName: batteryHelperPlistName).status },
+        unregister: {
+            try await SMAppService.daemon(plistName: batteryHelperPlistName).unregister()
+        },
+        register: { try SMAppService.daemon(plistName: batteryHelperPlistName).register() },
+        openApproval: { SMAppService.openSystemSettingsLoginItems() })
+}
+
 @MainActor
 final class BatteryHelperClient {
     static let shared = BatteryHelperClient()
@@ -37,17 +55,72 @@ final class BatteryHelperClient {
     }
 
     func install() throws -> BatteryHelperInstallOutcome {
-        guard helperBinaryURL != nil else { throw BatteryHelperError.missingBinary }
-        guard Bundle.main.bundleURL.path.hasPrefix("/Applications/") else {
-            throw BatteryHelperError.install(
-                "Move Grañipa to Applications before installing the battery helper.")
-        }
+        try validateHelperBundle(performing: "installing")
         resetConnection()
         invalidateStatusCache()
-        if let outcome = try registerSMAppService() {
+        if let outcome = try registerSMAppService(BatteryHelperServiceLifecycle.live) {
             return outcome
         }
         throw BatteryHelperError.install("macOS could not register the battery helper.")
+    }
+
+    /// Repair replaces a possibly broken registration: unregister whatever
+    /// macOS holds, then register the current bundle. A register failure
+    /// surfaces the underlying error; "not registered" is claimed only when
+    /// a status check confirmed it.
+    func repair() async throws {
+        try validateHelperBundle(performing: "repairing")
+        resetConnection()
+        defer { invalidateStatusCache() }
+        try await performRepair(BatteryHelperServiceLifecycle.live)
+    }
+
+    func performRepair(_ lifecycle: BatteryHelperServiceLifecycle) async throws {
+        switch lifecycle.status() {
+        case .notRegistered, .notFound:
+            break
+        default:
+            do {
+                try await lifecycle.unregister()
+            } catch {
+                throw BatteryHelperError.install(
+                    "Could not remove the previous battery helper registration: \(error.localizedDescription)")
+            }
+        }
+        do {
+            try lifecycle.register()
+        } catch {
+            if lifecycle.status() == .requiresApproval {
+                lifecycle.openApproval()
+                throw BatteryHelperError.needsApproval
+            }
+            throw BatteryHelperError.install(
+                "Repair failed: \(error.localizedDescription)")
+        }
+        switch lifecycle.status() {
+        case .enabled:
+            return
+        case .requiresApproval:
+            lifecycle.openApproval()
+            throw BatteryHelperError.needsApproval
+        case .notRegistered, .notFound:
+            throw Self.repairNotRegistered
+        @unknown default:
+            throw BatteryHelperError.install(
+                "Repair failed — macOS reported an unknown registration state. Try again.")
+        }
+    }
+
+    /// Thrown only where a status check confirmed the registration is gone.
+    private static let repairNotRegistered = BatteryHelperError.install(
+        "Repair failed — the battery helper is not registered. Try again.")
+
+    private func validateHelperBundle(performing action: String) throws {
+        guard helperBinaryURL != nil else { throw BatteryHelperError.missingBinary }
+        guard Bundle.main.bundleURL.path.hasPrefix("/Applications/") else {
+            throw BatteryHelperError.install(
+                "Move Grañipa to Applications before \(action) the battery helper.")
+        }
     }
 
     func apply(
@@ -83,25 +156,26 @@ final class BatteryHelperClient {
         return result.wait(timeout: timeout)
     }
 
-    private func registerSMAppService() throws -> BatteryHelperInstallOutcome? {
-        let service = SMAppService.daemon(plistName: batteryHelperPlistName)
+    func registerSMAppService(
+        _ lifecycle: BatteryHelperServiceLifecycle
+    ) throws -> BatteryHelperInstallOutcome? {
         do {
-            try service.register()
+            try lifecycle.register()
         } catch {
-            if service.status == .enabled {
+            if lifecycle.status() == .enabled {
                 return .enabled
             }
-            if service.status == .requiresApproval {
-                SMAppService.openSystemSettingsLoginItems()
+            if lifecycle.status() == .requiresApproval {
+                lifecycle.openApproval()
                 return .needsApproval
             }
             return nil
         }
-        switch service.status {
+        switch lifecycle.status() {
         case .enabled:
             return .enabled
         case .requiresApproval:
-            SMAppService.openSystemSettingsLoginItems()
+            lifecycle.openApproval()
             return .needsApproval
         case .notRegistered, .notFound:
             return nil

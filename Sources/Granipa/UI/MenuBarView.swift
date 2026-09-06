@@ -226,10 +226,11 @@ private struct BatteryMenuSection: View {
         if battery.canControl {
             Button(
                 battery.helperEnabled
-                    ? "Reinstall battery helper…" : "Install battery helper…"
+                    ? "Repair battery helper…" : "Install battery helper…"
             ) {
-                battery.installHelper()
+                Task { await battery.repairHelper() }
             }
+            .disabled(battery.helperBusy)
         }
         if let message = battery.controlMessage {
             Text(message)

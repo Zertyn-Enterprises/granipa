@@ -121,7 +121,9 @@ import Testing
         #expect(menu.contains("startCalibration()"))
         #expect(menu.contains("stopCalibration()"))
         #expect(menu.contains("magSafeLED"))
-        #expect(menu.contains("installHelper()"))
+        // UI helper clicks go through repair (unregister+register), not plain
+        // install; the auto-install prompt remains installHelper's only caller.
+        #expect(menu.contains("repairHelper()"))
         #expect(menu.contains("controlMessage"))
         #expect(menu.contains("BatteryMenuHeadline.text(for:"))
         #expect(!menu.contains(#"Text("\(snap.percent)% · \(snap.menuBarText)")"#))

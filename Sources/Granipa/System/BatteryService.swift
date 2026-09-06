@@ -58,7 +58,9 @@ final class BatteryService {
     private var holdStartedAt: Date?
     private var didOfferHelperInstall = false
 
-    private init() {
+    /// Internal so focused tests can build isolated instances instead of
+    /// mutating `shared` from parallel suites.
+    init() {
         limiterEnabled =
             UserDefaults.standard.object(forKey: "batteryLimiterEnabled") as? Bool ?? false
         let stored = UserDefaults.standard.object(forKey: "batteryChargeLimit") as? Int
@@ -201,6 +203,25 @@ final class BatteryService {
                 controlMessage =
                     "Turn on Grañipa Battery in System Settings → General → Login Items, then toggle Limit charging again."
             }
+        } catch {
+            controlMessage = error.localizedDescription
+        }
+    }
+
+    private(set) var helperBusy = false
+
+    var performHelperRepair: @MainActor @Sendable () async throws -> Void = {
+        try await BatteryHelperClient.shared.repair()
+    }
+
+    func repairHelper() async {
+        guard !helperBusy else { return }
+        helperBusy = true
+        controlMessage = "Repairing the battery helper…"
+        defer { helperBusy = false }
+        do {
+            try await performHelperRepair()
+            controlMessage = "Battery helper registered."
         } catch {
             controlMessage = error.localizedDescription
         }

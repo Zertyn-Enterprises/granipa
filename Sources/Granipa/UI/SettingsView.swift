@@ -1155,7 +1155,12 @@ private struct BatterySettings: View {
                     Section("Battery helper") {
                         LabeledContent(
                             "Status",
-                            value: battery.helperEnabled ? "Installed" : "Not installed")
+                            value: battery.helperEnabled ? "Registered" : "Not registered")
+                        Text(
+                            "Registration reflects macOS Login Items state; it does not confirm the helper is running."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                         if let message = battery.controlMessage {
                             Text(message)
                                 .font(.caption)
@@ -1163,10 +1168,11 @@ private struct BatterySettings: View {
                         }
                         Button(
                             battery.helperEnabled
-                                ? "Reinstall battery helper…" : "Install battery helper…"
+                                ? "Repair battery helper…" : "Install battery helper…"
                         ) {
-                            battery.installHelper()
+                            Task { await battery.repairHelper() }
                         }
+                        .disabled(battery.helperBusy)
                         Text(
                             "Charge-limit writes need a root helper. One admin password. Same pattern as AlDente."
                         )
