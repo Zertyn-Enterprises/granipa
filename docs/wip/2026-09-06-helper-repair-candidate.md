@@ -37,6 +37,18 @@ source contract to the intended repair action, not to hide a regression.
 
 ## Still required
 
+Local candidate 2.0.1 (build 7) was bundled successfully after commit 94a5e76.
+Host `codesign --verify --deep --strict --verbose=2` passed, including the helper
+and Sparkle. The designated requirement retains Developer ID team R4V252C833.
+An initial sandbox verification reported an invalid signature; verification in
+the host security context succeeded. The helper executable is present.
+
+Auto-review rejected running release.sh because Apple notarization transfers the
+artifact externally and requires explicit authorization. Only bundle.sh was run
+after that rejection: no notarization, publication or installed-app replacement.
+The prior local bundle is backed up at
+`/private/tmp/granipa-helper-candidate-backup.ljRpdY/Grañipa.app`.
+
 Install the signed candidate only after normal app closure can be verified. Run
 Repair battery helper, approve Login Items if macOS requests it, and verify the
 registered parent bundle matches the candidate and no longer fails to spawn.
