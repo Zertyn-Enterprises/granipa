@@ -66,7 +66,8 @@ final class BatteryHelperClient {
 
     /// Repair replaces a possibly broken registration: unregister whatever
     /// macOS holds, then register the current bundle. A register failure
-    /// surfaces the underlying error; "not registered" is claimed only when
+    /// surfaces the underlying error, except missing admin approval which
+    /// surfaces as needsApproval; "not registered" is claimed only when
     /// a status check confirmed it.
     func repair() async throws {
         try validateHelperBundle(performing: "repairing")
@@ -90,6 +91,10 @@ final class BatteryHelperClient {
         do {
             try lifecycle.register()
         } catch {
+            if Self.isApprovalDenied(error) {
+                lifecycle.openApproval()
+                throw BatteryHelperError.needsApproval
+            }
             if lifecycle.status() == .requiresApproval {
                 lifecycle.openApproval()
                 throw BatteryHelperError.needsApproval
@@ -114,6 +119,17 @@ final class BatteryHelperClient {
     /// Thrown only where a status check confirmed the registration is gone.
     private static let repairNotRegistered = BatteryHelperError.install(
         "Repair failed — the battery helper is not registered. Try again.")
+
+    /// SMAppService can report missing admin approval as a register error —
+    /// code 1 "Operation not permitted" (Apple DTS thread 802443) or
+    /// kSMErrorLaunchDeniedByUser — while status still reads .notRegistered.
+    /// Only those route to the Login Items approval pane; other errors stay
+    /// real failures.
+    private static func isApprovalDenied(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        guard nsError.domain == SMAppServiceErrorDomain else { return false }
+        return nsError.code == 1 || nsError.code == Int(kSMErrorLaunchDeniedByUser)
+    }
 
     private func validateHelperBundle(performing action: String) throws {
         guard helperBinaryURL != nil else { throw BatteryHelperError.missingBinary }
@@ -162,6 +178,10 @@ final class BatteryHelperClient {
         do {
             try lifecycle.register()
         } catch {
+            if Self.isApprovalDenied(error) {
+                lifecycle.openApproval()
+                return .needsApproval
+            }
             if lifecycle.status() == .enabled {
                 return .enabled
             }

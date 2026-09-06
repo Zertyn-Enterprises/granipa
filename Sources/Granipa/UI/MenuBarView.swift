@@ -232,7 +232,7 @@ private struct BatteryMenuSection: View {
             }
             .disabled(battery.helperBusy)
         }
-        if let message = battery.controlMessage {
+        if let message = battery.helperSetupMessage ?? battery.controlMessage {
             Text(message)
                 .font(.caption)
                 .foregroundStyle(.secondary)

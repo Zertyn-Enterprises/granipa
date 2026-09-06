@@ -25,7 +25,7 @@ enum BatteryHelperError: LocalizedError, Equatable {
         case .missingBinary:
             "GranipaBatteryHelper is missing from the app bundle. Rebuild with Scripts/bundle.sh."
         case .needsApproval:
-            "Turn on Grañipa Battery in System Settings → General → Login Items, then toggle Limit charging again."
+            "Turn on Grañipa in System Settings → General → Login Items, then toggle Limit charging again."
         case .install(let message):
             message
         }

@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import Observation
 import os
+import ServiceManagement
 
 @MainActor
 @Observable
@@ -181,7 +182,7 @@ final class BatteryService {
         let alert = NSAlert()
         alert.messageText = "Install battery helper?"
         alert.informativeText =
-            "macOS blocks charge-limit writes from the app. A one-time admin password installs a root helper so the \(limit)% limit actually applies."
+            "macOS blocks charge-limit writes from the app. Install registers a root helper that you approve in System Settings → General → Login Items, so the \(limit)% limit actually applies."
         alert.addButton(withTitle: "Install…")
         alert.addButton(withTitle: "Later")
         NSApp.activate(ignoringOtherApps: true)
@@ -191,6 +192,8 @@ final class BatteryService {
     }
 
     func installHelper() {
+        guard !helperBusy else { return }
+        helperSetupMessage = nil
         do {
             switch try BatteryHelperClient.shared.install() {
             case .enabled:
@@ -200,15 +203,18 @@ final class BatteryService {
                     tick()
                 }
             case .needsApproval:
-                controlMessage =
-                    "Turn on Grañipa Battery in System Settings → General → Login Items, then toggle Limit charging again."
+                helperSetupMessage = BatteryHelperError.needsApproval.errorDescription
             }
         } catch {
-            controlMessage = error.localizedDescription
+            helperSetupMessage = error.localizedDescription
         }
     }
 
     private(set) var helperBusy = false
+
+    /// Outcome of the last helper install/repair, kept apart from
+    /// controlMessage so the 5-second charge tick cannot erase it.
+    private(set) var helperSetupMessage: String?
 
     var performHelperRepair: @MainActor @Sendable () async throws -> Void = {
         try await BatteryHelperClient.shared.repair()
@@ -217,14 +223,21 @@ final class BatteryService {
     func repairHelper() async {
         guard !helperBusy else { return }
         helperBusy = true
+        helperSetupMessage = "Repairing the battery helper…"
         controlMessage = "Repairing the battery helper…"
         defer { helperBusy = false }
         do {
             try await performHelperRepair()
             controlMessage = "Battery helper registered."
+            helperSetupMessage = nil
         } catch {
             controlMessage = error.localizedDescription
+            helperSetupMessage = error.localizedDescription
         }
+    }
+
+    func openHelperApproval() {
+        SMAppService.openSystemSettingsLoginItems()
     }
 
     func restoreCharging() {
@@ -365,6 +378,12 @@ final class BatteryService {
                 Task { @MainActor in
                     guard let self else { return }
                     self.controlMessage = ok ? nil : (err ?? "Helper write failed")
+                    // A helper reply is a real result, so unlike the generic
+                    // direct-SMC path it may replace the setup message; an
+                    // in-flight install/repair still owns it.
+                    if !self.helperBusy {
+                        self.helperSetupMessage = ok ? nil : (err ?? "Helper write failed")
+                    }
                     if !ok, self.lastAction == action, self.lastActionUsedHelper == true {
                         self.lastAction = nil
                         self.lastActionUsedHelper = nil
@@ -391,7 +410,7 @@ final class BatteryService {
             Self.log.error("SMC write not privileged action=\(String(describing: action))")
             if action != .charge {
                 controlMessage =
-                    "macOS blocked the charge-limit write. Install the battery helper (admin password once) so the \(limit)% limit can apply."
+                    "macOS blocked the charge-limit write. Install the battery helper and approve it in System Settings → General → Login Items so the \(limit)% limit can apply."
                 offerHelperInstallIfNeeded()
             }
             return false

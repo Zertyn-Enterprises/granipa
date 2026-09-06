@@ -1161,10 +1161,15 @@ private struct BatterySettings: View {
                         )
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        if let message = battery.controlMessage {
+                        if let message = battery.helperSetupMessage ?? battery.controlMessage {
                             Text(message)
                                 .font(.caption)
                                 .foregroundStyle(.orange)
+                        }
+                        if battery.helperSetupMessage != nil {
+                            Button("Open Login Items…") {
+                                battery.openHelperApproval()
+                            }
                         }
                         Button(
                             battery.helperEnabled
@@ -1174,7 +1179,7 @@ private struct BatterySettings: View {
                         }
                         .disabled(battery.helperBusy)
                         Text(
-                            "Charge-limit writes need a root helper. One admin password. Same pattern as AlDente."
+                            "Charge-limit writes need a root helper. After installing, approve Grañipa in System Settings → General → Login Items."
                         )
                         .font(.caption)
                         .foregroundStyle(.secondary)
