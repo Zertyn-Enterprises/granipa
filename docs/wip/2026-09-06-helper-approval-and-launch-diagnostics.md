@@ -104,3 +104,20 @@ per-app recovery for this Mac. Global reset is not an approved automatic remedy.
   for build 8; no attempt to bypass that decision. Installed build 7 remains intact.
 - No main merge or publication. This is a verified app-flow correction and a
   locally signed candidate, NOT a verified resolution of the OS launch failure.
+
+## Build 8 notarization after explicit approval
+
+- The user explicitly approved notarizing and testing build 8. Apple accepted
+  submission `89606c75-71ac-4f9a-81bf-85d30b9c31aa`.
+- The isolated candidate at
+  `/private/tmp/granipa-build8-notary.2XWEKe/Grañipa.app` is version 2.0.1 / 8.
+  Staple validation and host deep/strict signature verification passed.
+  Gatekeeper returned `accepted`, source `Notarized Developer ID`.
+- Before replacement, the installed build-7 helper still had EX_CONFIG (78),
+  857 runs and `needs LWCR update`; notarization acceptance is not proof of
+  helper recovery. No public release was made.
+- Installed Grañipa was still running. The guarded normal-quit probe could not
+  confirm idle capture from Settings; after Back to app reached Home, Dictation
+  navigation returned no actionable control. The replacement command stopped
+  before backup/move/copy. Build 7 was left intact and the user was asked to
+  close Grañipa normally. Build-8 runtime testing awaits that safe closure.
