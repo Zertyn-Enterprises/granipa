@@ -51,3 +51,21 @@ Apple references:
 - https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements/
 - https://developer.apple.com/documentation/servicemanagement/smappservice/register()
 - https://developer.apple.com/documentation/ServiceManagement/SMAppService/unregister%28%29
+
+## Follow-up: TCC mismatch confirmed, 2026-09-06
+
+User confirmed all permissions failed after Check for Updates. Read-only unified
+logs from tccd at 07:20 show `Failed to match existing code requirement` for
+kTCCServiceScreenCapture, kTCCServiceAudioCapture and kTCCServiceAccessibility.
+The logged requirements compare Apple Development (the prior internal-build
+identity) against Developer ID (the installed public V2 identity). This explains
+these three observed failures even though public 1.0.4 and V2 have matching DRs:
+the retained TCC requirement was not the public-release requirement. Other
+permission classes have not been independently confirmed from the retrieved log.
+
+The installed app passes codesign validation against the old public release DR;
+both public releases have identical audio-input and calendar entitlements.
+No TCC data or permissions were modified. The next signing repair now has direct
+runtime evidence: prevent internal builds from silently changing identity under
+the production bundle ID. Existing mismatched consents cannot be silently granted
+by the app. Do not claim this establishes a general Sparkle public-update defect.
