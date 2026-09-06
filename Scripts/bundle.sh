@@ -3,11 +3,41 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 CONFIG="${1:-debug}"
-# Ad-hoc signing ("-") changes the CDHash every build, which resets the
-# system-audio TCC grant. Default to the first real identity if one exists.
-SIGN_ID="${CODESIGN_ID:-$(security find-identity -v -p codesigning 2>/dev/null \
-  | awk -F'"' '/Apple Development|Developer ID Application/ {print $2; exit}')}"
-SIGN_ID="${SIGN_ID:--}"
+TEAM="R4V252C833"
+
+# Signing policy, both configs: a "Developer ID Application" certificate of
+# team R4V252C833. Ad-hoc signing resets the system-audio TCC grant every
+# rebuild, and no other identity can notarize. CODESIGN_ID (exact name or
+# hash) must resolve to such a certificate in the keychain; any other or
+# missing identity is a hard error BEFORE building or deleting the previous
+# bundle, and signing itself never falls back to ad-hoc.
+resolve_sign_id() {
+  # `security find-identity` lines look like: '  1) HASH "NAME"'.
+  local listing
+  listing="$(security find-identity -v -p codesigning 2>/dev/null || true)"
+  printf '%s\n' "$listing" | awk -F'"' -v want="${CODESIGN_ID:-}" -v team="($TEAM)" '
+    $2 ~ /^Developer ID Application: / &&
+    substr($2, length($2) - length(team) + 1) == team {
+      hash = $1
+      sub(/^.*\) /, "", hash)
+      sub(/[ \t]+$/, "", hash)
+      if (want == "" || $2 == want || hash == want) {
+        print (want == "" ? $2 : want)
+        exit
+      }
+    }'
+}
+
+SIGN_ID="$(resolve_sign_id)"
+if [ -z "$SIGN_ID" ]; then
+  if [ -n "${CODESIGN_ID:-}" ]; then
+    echo "ERROR: CODESIGN_ID '$CODESIGN_ID' is not a 'Developer ID Application' certificate of team $TEAM." >&2
+  else
+    echo "ERROR: no 'Developer ID Application' certificate of team $TEAM in the keychain." >&2
+  fi
+  exit 1
+fi
+echo "Signing with: $SIGN_ID"
 
 swift build -c "$CONFIG"
 BIN_DIR="$(swift build -c "$CONFIG" --show-bin-path)"
@@ -33,21 +63,17 @@ if [ -n "$SPARKLE_SRC" ]; then
     "$APP/Contents/MacOS/Granipa" 2>/dev/null || true
 fi
 
-# Hardened runtime + entitlements are required for notarization. Ad-hoc
-# signatures have no Team ID, so library validation rejects embedded Sparkle.
-# Sparkle's nested executables must be signed before the framework and the app.
-# Secure timestamps need a real certificate, so ad-hoc skips them.
+# Hardened runtime + entitlements are required for notarization. Sparkle's
+# nested executables must be signed before the framework and the app; the
+# first codesign failure aborts the build.
 sign_bundle() {
   local id="$1"; shift
-  local options=(--force)
-  if [ "$id" != "-" ]; then
-    options+=(--options runtime)
-  fi
+  local options=(--force --options runtime)
   local fw="$APP/Contents/Frameworks/Sparkle.framework"
   if [ -d "$fw" ]; then
     find "$fw" \( -name "*.xpc" -o -name "Autoupdate" -o -name "Updater.app" \) -print0 \
       | while IFS= read -r -d '' item; do
-        codesign "${options[@]}" "$@" --sign "$id" "$item"
+        codesign "${options[@]}" "$@" --sign "$id" "$item" || exit 1
       done
     codesign "${options[@]}" "$@" --sign "$id" "$fw"
   fi
@@ -58,13 +84,7 @@ sign_bundle() {
     "$@" --sign "$id" "$APP"
 }
 
-if [ "$SIGN_ID" = "-" ]; then
-  sign_bundle -
-elif ! sign_bundle "$SIGN_ID" --timestamp 2>/dev/null; then
-  echo "WARN: signing with '$SIGN_ID' failed (locked keychain?); using ad-hoc signature."
-  echo "      Ad-hoc builds re-prompt for audio permissions after every rebuild."
-  sign_bundle -
-fi
+sign_bundle "$SIGN_ID" --timestamp
 
 codesign --verify --deep --strict "$APP"
 echo "Built $APP"

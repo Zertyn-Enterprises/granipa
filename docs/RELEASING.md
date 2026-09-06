@@ -27,6 +27,10 @@
    This builds, signs (Developer ID + hardened runtime, Sparkle framework
    included), notarizes, staples, zips, and generates `build/appcast.xml`
    (signed with your Sparkle key).
+   Signing requires a Developer ID Application certificate for team
+   `R4V252C833`; `Scripts/bundle.sh` validates the identity (override with
+   `CODESIGN_ID`, given as exact certificate name or hash) before building
+   and fails hard otherwise — there is no ad-hoc fallback.
 3. Publish — **the appcast must be attached to the release** so the stable
    `releases/latest/download/appcast.xml` URL serves it:
    ```sh
