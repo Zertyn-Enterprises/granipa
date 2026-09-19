@@ -23,7 +23,7 @@ Requires macOS 26+ and the Xcode 26 toolchain. There is no Xcode project — thi
 
 ## Architecture
 
-See [CLAUDE.md](CLAUDE.md) for the module map. The short version: `AppState` (MainActor) orchestrates; `Audio/` captures two channels; `Transcription/` runs SpeechAnalyzer sessions; `LLM/` shells out to subscription CLIs (never API keys); `API/` is a hand-rolled HTTP server with pure, unit-tested routing.
+See [AGENTS.md](AGENTS.md) for the module map (`CLAUDE.md` is a symlink). The short version: `AppState` (MainActor) orchestrates; `Audio/` captures two channels; `Transcription/` runs SpeechAnalyzer sessions; `Dictation/` is hold-to-talk; `LLM/` shells out to subscription CLIs (never API keys); `API/` is a hand-rolled HTTP server with pure, unit-tested routing. Product state: [CONTEXT.md](CONTEXT.md).
 
 ## Conventions
 

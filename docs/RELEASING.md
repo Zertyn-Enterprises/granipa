@@ -20,7 +20,7 @@
 
 ## Every release
 
-1. Bump both `CFBundleShortVersionString` (display version) and `CFBundleVersion` (build number) in `Resources/Info.plist`. The build number must exceed the current appcast `sparkle:version` so Sparkle offers the update. Then merge to `main` and tag.
+1. Bump both `CFBundleShortVersionString` (display version) and `CFBundleVersion` (build number) in `Resources/Info.plist`. The build number must exceed the current appcast `sparkle:version` so Sparkle offers the update. Merge that commit to `main`, then tag the same commit. A GitHub Release without that merge leaves `git clone` and the repo homepage on the previous default-branch version, while Sparkle users already get the new zip from `releases/latest`.
 2. ```sh
    ./Scripts/release.sh
    ```

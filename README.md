@@ -21,7 +21,7 @@ Grañipa records your meetings (no bot joins the call), transcribes them live on
 
 > Built as a personal replacement for Granola ($14/month), Raycast clipboard history, TextSniper, and Rectangle — in one native app.
 
-> 🚧 **Beta** — currently in internal testing. The v1.0 public release (with a notarized download, demo video and screenshots) is around the corner. Found a bug? [Open an issue](../../issues).
+> Current public release: **[2.0.0](../../releases/tag/v2.0.0)** (notarized, Apple Silicon, macOS 26+). Found a bug? [Open an issue](../../issues).
 
 First launch is a 3-step tour (welcome, permissions, AI & shortcuts). Cloud engines (Muse, rewrite) stay off until you turn them on in Settings.
 
@@ -117,7 +117,7 @@ The bundle script signs with your first Apple Development certificate if you hav
 
 On the first recording per language, macOS downloads the speech model once. On the first multi-speaker meeting, the diarization models (~20 MB) download once from HuggingFace; everything runs offline afterwards.
 
-Settings live under six tabs: General, Dictation, Permissions, AI, Extras, Integrations.
+Settings live under seven sections: General, Dictation, Shortcuts, Permissions, AI, Extras, Integrations.
 
 ## REST API
 
@@ -150,17 +150,17 @@ valid = hmac.compare_digest(expected, request.headers["X-Granipa-Signature"])
 
 ```sh
 swift build        # compile
-swift test         # 64 tests: storage, API, webhooks, language detection, window math…
+swift test         # swift-testing: storage, API, dictation, meetings, battery helper…
 ./Scripts/bundle.sh  # debug .app bundle
 ```
 
-Architecture notes for contributors (and AI agents) live in [CLAUDE.md](CLAUDE.md). PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+Architecture notes: [AGENTS.md](AGENTS.md) (`CLAUDE.md` is a symlink). Product state: [CONTEXT.md](CONTEXT.md). PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Roadmap
 
 - **Ask your notes** — chat with one meeting or your whole archive, answered by your local AI CLI.
 - **⌥Space command palette** — meetings, clipboard, snippets and actions in one launcher.
-- Configurable shortcuts · light mode · audio language ID for any-language detection.
+- Light mode · audio language ID for any-language detection.
 - **Windows support** — [vote and discuss here](../../issues/11).
 
 ## FAQ
