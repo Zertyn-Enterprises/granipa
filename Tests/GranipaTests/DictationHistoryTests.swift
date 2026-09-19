@@ -1,0 +1,589 @@
+import Foundation
+import GRDB
+import Testing
+
+@testable import Granipa
+
+@Suite struct DictationHistoryTests {
+    private func makeDatabase() throws -> AppDatabase {
+        try AppDatabase(writer: DatabaseQueue())
+    }
+
+    @Test func wordCountSplitsOnWhitespace() {
+        #expect(DictationStats.wordCount(in: "") == 0)
+        #expect(DictationStats.wordCount(in: "  hola  mundo\n") == 2)
+        #expect(DictationStats.wordCount(in: "one") == 1)
+    }
+
+    @Test func timeSavedIsTypingAtFortyWPM() {
+        let stats = DictationStats(words: 6_906, durationSeconds: 60, apps: 6)
+        #expect(abs(stats.timeSavedSeconds - (6_906 / 40 * 60)) < 0.01)
+        #expect(stats.savedLabel() == "2.9 hours")
+        #expect(stats.averageWPM == 6906)
+    }
+
+    @Test func insertFetchSearchAndStats() throws {
+        let db = try makeDatabase()
+        let first = DictationEntry.new(
+            text: "hello world", durationSeconds: 2, sourceApp: "Safari")
+        var second = DictationEntry.new(
+            text: "otra nota", durationSeconds: 4, sourceApp: "Mail")
+        second.createdAt = Date.now.addingTimeInterval(-8_000)
+        try db.insertDictationEntry(first)
+        try db.insertDictationEntry(second)
+
+        let all = try db.fetchDictationEntries()
+        #expect(all.count == 2)
+
+        let search = try db.fetchDictationEntries(search: "HELLO")
+        #expect(search.count == 1)
+        #expect(search[0].text == "hello world")
+        #expect(search[0].wordCount == 2)
+
+        let stats = try db.dictationStats()
+        #expect(stats.words == 4)
+        #expect(stats.apps == 2)
+        #expect(abs(stats.durationSeconds - 6) < 0.001)
+
+        try db.deleteDictationEntry(id: first.id)
+        #expect(try db.fetchDictationEntries().count == 1)
+    }
+
+    @Test func statsSinceFiltersOldEntries() throws {
+        let db = try makeDatabase()
+        var old = DictationEntry.new(text: "ayer", durationSeconds: 10, sourceApp: "X")
+        old.createdAt = Date.now.addingTimeInterval(-86_400 * 3)
+        try db.insertDictationEntry(old)
+        try db.insertDictationEntry(
+            DictationEntry.new(text: "hoy dos", durationSeconds: 5, sourceApp: "Y"))
+
+        let recent = try db.dictationStats(since: Calendar.current.startOfDay(for: .now))
+        #expect(recent.words == 2)
+        #expect(recent.apps == 1)
+    }
+
+    private func seed(
+        _ db: AppDatabase, text: String, minutesAgo: Double, sourceApp: String?
+    ) throws {
+        var entry = DictationEntry.new(text: text, durationSeconds: 1, sourceApp: sourceApp)
+        entry.createdAt = Date.now.addingTimeInterval(-minutesAgo * 60)
+        try db.insertDictationEntry(entry)
+    }
+
+    @Test func pagingUsesOffsetAndKeepsNewestFirst() throws {
+        let db = try makeDatabase()
+        for index in 0..<7 {
+            try seed(db, text: "entry \(index)", minutesAgo: Double(index), sourceApp: nil)
+        }
+
+        let firstPage = try db.fetchDictationEntries(limit: 5)
+        let secondPage = try db.fetchDictationEntries(limit: 5, offset: 5)
+        #expect(firstPage.map(\.text) == (0..<5).map { "entry \($0)" })
+        #expect(secondPage.map(\.text) == ["entry 5", "entry 6"])
+        #expect(try db.dictationEntryCount() == 7)
+    }
+
+    @Test func sourceAppFilterComposesWithSearchAndCount() throws {
+        let db = try makeDatabase()
+        try seed(db, text: "ship the card", minutesAgo: 1, sourceApp: "Safari")
+        try seed(db, text: "ship the docs", minutesAgo: 2, sourceApp: "Mail")
+        try seed(db, text: "unrelated", minutesAgo: 3, sourceApp: "Safari")
+        try seed(db, text: "ship in secret", minutesAgo: 4, sourceApp: nil)
+
+        let safariShips = try db.fetchDictationEntries(search: "ship", sourceApp: "Safari")
+        #expect(safariShips.map(\.text) == ["ship the card"])
+
+        #expect(try db.dictationEntryCount(search: "ship") == 3)
+        #expect(try db.dictationEntryCount(sourceApp: "Mail") == 1)
+        #expect(try db.dictationEntryCount(search: "ship", sourceApp: "Mail") == 1)
+        #expect(try db.dictationEntryCount() == 4)
+    }
+
+    @Test func librarySnapshotPagesPastNewerInsertsWithoutRepeats() throws {
+        let db = try makeDatabase()
+        for index in 0..<7 {
+            try seed(db, text: "entry \(index)", minutesAgo: Double(index) + 1, sourceApp: nil)
+        }
+
+        let page1 = try db.fetchDictationLibrarySnapshot(limit: 5)
+        #expect(page1.entries.map(\.text) == (0..<5).map { "entry \($0)" })
+        #expect(page1.total == 7)
+
+        // Three dictations are saved while the list is mounted.
+        for index in 0..<3 {
+            try seed(db, text: "new \(index)", minutesAgo: 0.1 * Double(index + 1), sourceApp: nil)
+        }
+
+        let oldest = try #require(page1.entries.last)
+        let page2 = try db.fetchDictationLibrarySnapshot(
+            limit: 5, before: (createdAt: oldest.createdAt, id: oldest.id))
+        let page1IDs = Set(page1.entries.map(\.id))
+        #expect(page2.entries.map(\.text) == ["entry 5", "entry 6"])
+        #expect(page2.entries.allSatisfy { !page1IDs.contains($0.id) })
+        #expect(page2.total == 10)
+    }
+
+    @Test func librarySnapshotCursorIgnoresDeletedShownRows() throws {
+        let db = try makeDatabase()
+        for index in 0..<7 {
+            try seed(db, text: "entry \(index)", minutesAgo: Double(index) + 1, sourceApp: nil)
+        }
+
+        let page1 = try db.fetchDictationLibrarySnapshot(limit: 5)
+        for row in page1.entries.prefix(2) {
+            try db.deleteDictationEntry(id: row.id)
+        }
+
+        let oldest = try #require(page1.entries.last)
+        let page2 = try db.fetchDictationLibrarySnapshot(
+            limit: 5, before: (createdAt: oldest.createdAt, id: oldest.id))
+        #expect(page2.entries.map(\.text) == ["entry 5", "entry 6"])
+        #expect(page2.total == 5)
+    }
+
+    @Test func librarySnapshotTiebreaksIdenticalCreatedAtByID() throws {
+        let db = try makeDatabase()
+        let sameInstant = Date.now.addingTimeInterval(-120)
+        for index in 0..<5 {
+            var entry = DictationEntry.new(
+                text: "tie \(index)", durationSeconds: 1, sourceApp: nil)
+            entry.createdAt = sameInstant
+            try db.insertDictationEntry(entry)
+        }
+
+        var seen = Set<String>()
+        var cursor: (createdAt: Date, id: String)?
+        var pages = 0
+        while seen.count < 5 {
+            let page = try db.fetchDictationLibrarySnapshot(limit: 2, before: cursor)
+            #expect(!page.entries.isEmpty)
+            for pair in zip(page.entries, page.entries.dropFirst()) {
+                #expect(pair.0.id > pair.1.id)
+            }
+            seen.formUnion(page.entries.map(\.id))
+            guard let oldest = page.entries.last else { break }
+            cursor = (createdAt: oldest.createdAt, id: oldest.id)
+            pages += 1
+            if pages > 5 {
+                Issue.record("keyset paging did not terminate")
+                break
+            }
+        }
+        #expect(seen.count == 5)
+        #expect(pages == 3)
+    }
+
+    @Test func librarySnapshotCountsAndStatsMatchTheSameRead() throws {
+        let db = try makeDatabase()
+        try seed(db, text: "a b", minutesAgo: 1, sourceApp: "Safari")
+        try seed(db, text: "c", minutesAgo: 2, sourceApp: "Mail")
+        try seed(db, text: "d e", minutesAgo: 3, sourceApp: "Safari")
+
+        let snapshot = try db.fetchDictationLibrarySnapshot(limit: 2)
+        #expect(snapshot.entries.count == 2)
+        #expect(snapshot.total == 3)
+        #expect(snapshot.stats.words == 5)
+        #expect(snapshot.stats.apps == 2)
+        #expect(snapshot.sourceApps == ["Mail", "Safari"])
+    }
+
+    @Test func sourceAppsListDistinctNonNullWithinWindow() throws {
+        let db = try makeDatabase()
+        try seed(db, text: "a", minutesAgo: 1, sourceApp: "Safari")
+        try seed(db, text: "b", minutesAgo: 2, sourceApp: "Mail")
+        try seed(db, text: "c", minutesAgo: 3, sourceApp: "Safari")
+        try seed(db, text: "d", minutesAgo: 4, sourceApp: nil)
+        try seed(db, text: "old", minutesAgo: 60_000, sourceApp: "TextEdit")
+
+        #expect(try db.dictationSourceApps() == ["Mail", "Safari", "TextEdit"])
+        #expect(
+            try db.dictationSourceApps(since: Date.now.addingTimeInterval(-3_600)) == [
+                "Mail", "Safari",
+            ])
+    }
+
+    @Test func durationLabelsUseClockFormat() {
+        #expect(DictationLibraryFormat.duration(0) == "0:00")
+        #expect(DictationLibraryFormat.duration(8.4) == "0:08")
+        #expect(DictationLibraryFormat.duration(75) == "1:15")
+        #expect(DictationLibraryFormat.duration(3_661) == "1:01:01")
+        #expect(DictationLibraryFormat.duration(-5) == "0:00")
+    }
+
+    @Test func titleIsFirstLineAndSnippetTheRest() {
+        let single = DictationLibraryFormat.titleAndSnippet("ship the card")
+        #expect(single.title == "ship the card")
+        #expect(single.snippet.isEmpty)
+
+        let multi = DictationLibraryFormat.titleAndSnippet("Quarter notes\nbuy oats\ncall Iris")
+        #expect(multi.title == "Quarter notes")
+        #expect(multi.snippet == "buy oats\ncall Iris")
+
+        let leading = DictationLibraryFormat.titleAndSnippet("\n  \nhello\nworld")
+        #expect(leading.title == "hello")
+        #expect(leading.snippet == "world")
+    }
+
+    @Test func singleParagraphDictationsDisplayOnceAsExcerpt() {
+        // A one-line dictation must not repeat itself as title + snippet;
+        // it renders as an excerpt with no separate title line.
+        let single = DictationLibraryFormat.displayParts("ship the card now")
+        #expect(single.title == nil)
+        #expect(single.excerpt == "ship the card now")
+
+        let multi = DictationLibraryFormat.displayParts("Quarter notes\nbuy oats\ncall Iris")
+        #expect(multi.title == "Quarter notes")
+        #expect(multi.excerpt == "buy oats\ncall Iris")
+    }
+
+    @Test func pageGateAllowsOnlyTheAppliedQuery() {
+        let applied = DictationLibraryQuery(search: "ship", period: .week, sourceApp: "Mail")
+
+        #expect(DictationLibraryQuery.pageQuery(applied: applied, current: applied) != nil)
+        #expect(DictationLibraryQuery.pageQuery(applied: nil, current: applied) == nil)
+        #expect(
+            DictationLibraryQuery.pageQuery(
+                applied: applied,
+                current: DictationLibraryQuery(search: "shipped", period: .week, sourceApp: "Mail"))
+                == nil)
+        #expect(
+            DictationLibraryQuery.pageQuery(
+                applied: applied,
+                current: DictationLibraryQuery(search: "ship", period: .all, sourceApp: "Mail"))
+                == nil)
+        #expect(
+            DictationLibraryQuery.pageQuery(
+                applied: applied,
+                current: DictationLibraryQuery(search: "ship", period: .week, sourceApp: "Safari"))
+                == nil)
+        #expect(
+            DictationLibraryQuery.pageQuery(
+                applied: applied,
+                current: DictationLibraryQuery(search: "ship", period: .week, sourceApp: nil))
+                == nil)
+    }
+
+    @Test func pageGateNormalizesSearchWhitespace() {
+        // During the debounce the field can hold " ship " while the applied
+        // query trimmed it; both describe the same query, so paging must pass.
+        let applied = DictationLibraryQuery(search: "ship", period: .all, sourceApp: nil)
+        let typedNow = DictationLibraryQuery(search: " ship ", period: .all, sourceApp: nil)
+        #expect(applied == typedNow)
+        #expect(DictationLibraryQuery.pageQuery(applied: applied, current: typedNow) != nil)
+    }
+
+    @Test func weekPagesWithTheOriginalBoundAsNowRolls() {
+        // `.week` re-reads `.now` on every `since` access, so the query a
+        // reload applied and the one loadMore builds moments later carry
+        // different cutoffs. Identity is the period selection, so paging must
+        // still pass — under the applied cutoff, never the re-derived one.
+        let applied = DictationLibraryQuery(search: "", period: .week, sourceApp: nil)
+        Thread.sleep(forTimeInterval: 0.05)
+        let current = DictationLibraryQuery(search: "", period: .week, sourceApp: nil)
+
+        #expect(applied.since != current.since)
+        let page = DictationLibraryQuery.pageQuery(applied: applied, current: current)
+        #expect(page != nil)
+        #expect(page?.since == applied.since)
+        #expect(page?.since != current.since)
+
+        #expect(
+            DictationLibraryQuery.pageQuery(
+                applied: applied,
+                current: DictationLibraryQuery(search: "", period: .all, sourceApp: nil))
+                == nil)
+    }
+
+    @Test func dayGroupsSortDaysNewestFirst() throws {
+        let db = try makeDatabase()
+        try seed(db, text: "morning", minutesAgo: 300, sourceApp: nil)
+        try seed(db, text: "afternoon", minutesAgo: 30, sourceApp: nil)
+        try seed(db, text: "yesterday", minutesAgo: 60 * 30, sourceApp: nil)
+
+        let groups = DictationLibraryFormat.dayGroups(
+            from: try db.fetchDictationEntries())
+        #expect(groups.count == 2)
+        #expect(groups[0].entries.map(\.text) == ["afternoon", "morning"])
+        #expect(groups[1].entries.map(\.text) == ["yesterday"])
+    }
+}
+
+/// Load-lifecycle contract of the history list, driven with real snapshots
+/// from an ephemeral database: a first load must never pose as an empty
+/// library, a failed refresh must keep the last-good rows, and a straggler
+/// fetch for a superseded query must not overwrite the rows on screen.
+@Suite struct DictationLibraryModelTests {
+    private func makeDatabase() throws -> AppDatabase {
+        try AppDatabase(writer: DatabaseQueue())
+    }
+
+    private func seed(
+        _ db: AppDatabase, text: String, minutesAgo: Double, sourceApp: String?
+    ) throws {
+        var entry = DictationEntry.new(text: text, durationSeconds: 1, sourceApp: sourceApp)
+        entry.createdAt = Date.now.addingTimeInterval(-minutesAgo * 60)
+        try db.insertDictationEntry(entry)
+    }
+
+    private func snapshot(
+        _ db: AppDatabase, query: DictationLibraryQuery, limit: Int = 50
+    ) throws -> DictationLibrarySnapshot {
+        try db.fetchDictationLibrarySnapshot(
+            search: query.search.isEmpty ? nil : query.search,
+            since: query.since,
+            sourceApp: query.sourceApp,
+            limit: limit)
+    }
+
+    @Test func firstFetchShowsLoadingUntilTheSnapshotApplies() throws {
+        let db = try makeDatabase()
+        try seed(db, text: "hello", minutesAgo: 1, sourceApp: "Safari")
+        var model = DictationLibraryModel()
+        let query = DictationLibraryQuery(search: "", period: .all, sourceApp: nil)
+
+        model.begin(query)
+        // Before the first snapshot lands the list has no verdict: an empty
+        // library or zeroed metrics would be phantom data.
+        #expect(model.isFirstLoad)
+        #expect(!model.showsEmptyState)
+        #expect(model.showsPlaceholderStats)
+
+        model.succeed(try snapshot(db, query: query), query: query)
+        #expect(!model.isFirstLoad)
+        #expect(!model.showsEmptyState)
+        #expect(!model.showsPlaceholderStats)
+        #expect(model.entries.count == 1)
+        #expect(model.stats.words == 1)
+    }
+
+    @Test func emptyVerdictAppearsOnlyAfterAFetchSucceeds() throws {
+        let db = try makeDatabase()
+        var model = DictationLibraryModel()
+        let query = DictationLibraryQuery(search: "", period: .all, sourceApp: nil)
+
+        model.begin(query)
+        #expect(!model.showsEmptyState)
+
+        model.succeed(try snapshot(db, query: query), query: query)
+        #expect(model.showsEmptyState)
+        #expect(model.entries.isEmpty)
+    }
+
+    @Test func lateSnapshotForASupersededQueryIsDropped() throws {
+        let db = try makeDatabase()
+        try seed(db, text: "alpha", minutesAgo: 2, sourceApp: nil)
+        try seed(db, text: "beta", minutesAgo: 1, sourceApp: nil)
+        var model = DictationLibraryModel()
+        let all = DictationLibraryQuery(search: "", period: .all, sourceApp: nil)
+
+        model.begin(all)
+        model.succeed(try snapshot(db, query: all), query: all)
+        #expect(model.entries.count == 2)
+
+        // The user narrows the search; a re-fetch of the old query (now
+        // seeing an extra row committed meanwhile) resolves late.
+        let narrowed = DictationLibraryQuery(search: "gamma", period: .all, sourceApp: nil)
+        model.begin(narrowed)
+        try seed(db, text: "late commit", minutesAgo: 0.1, sourceApp: nil)
+        let straggler = try snapshot(db, query: all)
+        #expect(straggler.entries.count == 3)
+
+        model.succeed(straggler, query: all)
+        #expect(model.entries.count == 2, "a superseded query must not replace rows")
+        #expect(model.appliedQuery == all)
+
+        model.succeed(try snapshot(db, query: narrowed), query: narrowed)
+        #expect(model.appliedQuery == narrowed)
+        #expect(model.showsEmptyState)
+    }
+
+    @Test func failedRefreshKeepsLastGoodRowsAndReportsInline() throws {
+        let db = try makeDatabase()
+        try seed(db, text: "kept", minutesAgo: 1, sourceApp: "Safari")
+        var model = DictationLibraryModel()
+        let query = DictationLibraryQuery(search: "", period: .all, sourceApp: nil)
+
+        model.begin(query)
+        model.succeed(try snapshot(db, query: query), query: query)
+        let goodStats = model.stats
+
+        let next = DictationLibraryQuery(search: "", period: .today, sourceApp: nil)
+        model.begin(next)
+        model.fail(query: next)
+
+        #expect(!model.isRefreshing)
+        #expect(model.showsRefreshError)
+        #expect(!model.showsFullScreenError, "rows exist — a full-screen error would drop them")
+        #expect(model.entries.count == 1)
+        #expect(model.stats == goodStats)
+
+        model.begin(next)
+        model.succeed(try snapshot(db, query: next), query: next)
+        #expect(!model.showsRefreshError)
+    }
+
+    @Test func failedFirstLoadShowsFullScreenErrorUntilRetrySucceeds() throws {
+        let db = try makeDatabase()
+        try seed(db, text: "recovered", minutesAgo: 1, sourceApp: nil)
+        var model = DictationLibraryModel()
+        let query = DictationLibraryQuery(search: "", period: .all, sourceApp: nil)
+
+        model.begin(query)
+        model.fail(query: query)
+        #expect(model.showsFullScreenError)
+        #expect(!model.showsEmptyState)
+        #expect(!model.isFirstLoad)
+
+        // Retry goes through the loading state again before it can recover.
+        model.begin(query)
+        #expect(model.isFirstLoad)
+        model.succeed(try snapshot(db, query: query), query: query)
+        #expect(!model.showsFullScreenError)
+        #expect(model.entries.count == 1)
+    }
+
+    @Test func sameQueryReloadRefreshesWithoutLosingRows() throws {
+        let db = try makeDatabase()
+        try seed(db, text: "hello", minutesAgo: 1, sourceApp: nil)
+        var model = DictationLibraryModel()
+        let query = DictationLibraryQuery(search: "", period: .all, sourceApp: nil)
+
+        model.begin(query)
+        model.succeed(try snapshot(db, query: query), query: query)
+        model.begin(query)
+        // A reload under the same query keeps the rows on screen up while
+        // flagging the refresh, instead of flashing an empty or loading list.
+        #expect(model.isRefreshing)
+        #expect(!model.isFirstLoad)
+        #expect(!model.showsEmptyState)
+        #expect(model.entries.count == 1)
+    }
+
+    @Test func deletingAShownRowAdjustsTheShownCount() throws {
+        let db = try makeDatabase()
+        for index in 0..<3 {
+            try seed(db, text: "entry \(index)", minutesAgo: Double(index) + 1, sourceApp: nil)
+        }
+        var model = DictationLibraryModel()
+        let query = DictationLibraryQuery(search: "", period: .all, sourceApp: nil)
+        model.begin(query)
+        model.succeed(try snapshot(db, query: query), query: query)
+        #expect(model.total == 3)
+
+        try db.deleteDictationEntry(id: model.entries[1].id)
+        model.removeEntry(id: model.entries[1].id)
+        #expect(model.entries.count == 2)
+        #expect(model.total == 2)
+
+        model.begin(query)
+        model.succeed(try snapshot(db, query: query), query: query)
+        #expect(model.entries.count == 2)
+        #expect(model.total == 2)
+    }
+}
+
+/// Presentation selection for the list area — the wiring between the load
+/// model and what renders. In particular: a last-good EMPTY snapshot must
+/// still show its in-flight progress and inline refresh failure, and the
+/// empty copy must describe the applied query, never the live filter fields.
+@Suite struct DictationHistoryListStateTests {
+    private func appliedEmpty(
+        search: String = "old", sourceApp: String? = nil
+    ) -> DictationLibraryModel {
+        var model = DictationLibraryModel()
+        let query = DictationLibraryQuery(search: search, period: .all, sourceApp: sourceApp)
+        model.begin(query)
+        model.succeed(
+            DictationLibrarySnapshot(
+                entries: [], total: 0, stats: .empty, sourceApps: []),
+            query: query)
+        return model
+    }
+
+    private func appliedRows() -> DictationLibraryModel {
+        var model = DictationLibraryModel()
+        let query = DictationLibraryQuery(search: "", period: .all, sourceApp: nil)
+        model.begin(query)
+        model.succeed(
+            DictationLibrarySnapshot(
+                entries: [DictationEntry.new(text: "row", durationSeconds: 1, sourceApp: nil)],
+                total: 1,
+                stats: DictationStats(words: 1, durationSeconds: 1, apps: 1),
+                sourceApps: []),
+            query: query)
+        return model
+    }
+
+    @Test func refreshOverAnEmptyLastGoodSnapshotStillShowsProgress() {
+        var model = appliedEmpty()
+        model.begin(DictationLibraryQuery(search: "new", period: .all, sourceApp: nil))
+        let state = DictationHistoryListState.resolve(model: model, pendingInputs: true)
+        #expect(state.banner == .updating)
+        #expect(state.content == .empty(search: "old", sourceApp: nil))
+    }
+
+    @Test func refreshFailureOverAnEmptyLastGoodSnapshotShowsInlineRetry() {
+        var model = appliedEmpty()
+        let retryable = DictationLibraryQuery(search: "new", period: .all, sourceApp: nil)
+        model.begin(retryable)
+        model.fail(query: retryable)
+        let state = DictationHistoryListState.resolve(model: model, pendingInputs: true)
+        #expect(state.banner == .refreshFailed)
+        #expect(
+            state.content == .empty(search: "old", sourceApp: nil),
+            "an applied empty verdict stays content — never a full-screen error")
+    }
+
+    @Test func changedFiltersShowProgressBeforeAnyFetchBegins() {
+        // The debounce window: inputs differ from the applied query but no
+        // fetch is in flight. The shown rows/empty still belong to the old
+        // query, so the UI must mark the transition immediately.
+        var model = appliedRows()
+        model.abandonInFlight()
+        let state = DictationHistoryListState.resolve(model: model, pendingInputs: true)
+        #expect(state.banner == .updating)
+        #expect(state.content == .rows)
+
+        let settled = DictationHistoryListState.resolve(model: model, pendingInputs: false)
+        #expect(settled.banner == .none)
+        #expect(settled.content == .rows)
+    }
+
+    @Test func emptyCopyIsFrozenToTheAppliedQuery() {
+        // The applied query searched "old" and found nothing; the live field
+        // has moved on. The empty copy must not claim the new input's
+        // results are what's missing.
+        let model = appliedEmpty(search: "old")
+        let state = DictationHistoryListState.resolve(model: model, pendingInputs: true)
+        #expect(state.content == .empty(search: "old", sourceApp: nil))
+
+        let filtered = appliedEmpty(search: "", sourceApp: "Mail")
+        let filteredState = DictationHistoryListState.resolve(
+            model: filtered, pendingInputs: true)
+        #expect(filteredState.content == .empty(search: "", sourceApp: "Mail"))
+    }
+
+    @Test func firstLoadAndFullScreenErrorCarryNoBanner() {
+        var loading = DictationLibraryModel()
+        loading.begin(DictationLibraryQuery(search: "", period: .all, sourceApp: nil))
+        #expect(
+            DictationHistoryListState.resolve(model: loading, pendingInputs: true)
+                == DictationHistoryListState(content: .loading, banner: .none))
+
+        var failed = DictationLibraryModel()
+        let query = DictationLibraryQuery(search: "", period: .all, sourceApp: nil)
+        failed.begin(query)
+        failed.fail(query: query)
+        #expect(
+            DictationHistoryListState.resolve(model: failed, pendingInputs: true)
+                == DictationHistoryListState(content: .fullScreenError, banner: .none))
+    }
+
+    @Test func rowsWithAnInFlightReloadShowProgress() {
+        var model = appliedRows()
+        model.begin(DictationLibraryQuery(search: "", period: .all, sourceApp: nil))
+        let state = DictationHistoryListState.resolve(model: model, pendingInputs: false)
+        #expect(state.content == .rows)
+        #expect(state.banner == .updating)
+    }
+}

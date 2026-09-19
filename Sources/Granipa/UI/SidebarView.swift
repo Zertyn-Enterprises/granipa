@@ -2,40 +2,51 @@ import SwiftUI
 
 struct SidebarView: View {
     @Environment(AppState.self) private var app
+    @FocusState private var searchFocused: Bool
     @State private var showNewFolder = false
     @State private var newFolderName = ""
     @State private var newFolderTeam = ""
     @State private var renamingFolder: Folder?
     @State private var renameText = ""
 
-    private var isHomeActive: Bool {
-        app.selectedMeetingID == nil && app.selectedFolderID == nil
+    private var highlight: SidebarHighlight {
+        AppNavigation.highlight(
+            destination: app.sidebarDestination,
+            selectedFolderID: app.selectedFolderID)
+    }
+
+    private var folderCounts: [String: Int] {
+        MeetingLibrary.folderCounts(from: app.meetings)
     }
 
     var body: some View {
         @Bindable var app = app
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 4) {
             Color.clear.frame(height: 34)
+
+            brand
+                .padding(.bottom, 12)
 
             searchField
                 .padding(.bottom, 10)
 
-            SideItem(title: "Home", icon: "house", isActive: isHomeActive) {
-                app.selectedMeetingID = nil
-                app.selectedFolderID = nil
-                app.searchQuery = ""
+            ForEach(SidebarDestination.appDestinations, id: \.self) { destination in
+                SideItem(
+                    title: destination.title,
+                    icon: destination.icon,
+                    isActive: highlight == .destination(destination)
+                ) {
+                    app.reveal(destination)
+                }
+                .accessibilityLabel(destination.title)
             }
 
-            Text("SPACES")
-                .font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(Theme.textTertiary)
-                .tracking(0.8)
+            collectionsHeader
                 .padding(.top, 18)
                 .padding(.bottom, 4)
-                .padding(.leading, 8)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 4) {
                     ForEach(groupedFolders, id: \.team) { group in
                         if let team = group.team {
                             HStack(spacing: 7) {
@@ -52,12 +63,14 @@ struct SidebarView: View {
                             SideItem(
                                 title: folder.name,
                                 icon: "folder",
-                                isActive: app.selectedFolderID == folder.id,
-                                indented: group.team != nil
+                                isActive: highlight == .folder(folder.id),
+                                indented: group.team != nil,
+                                quiet: true,
+                                accessory: "\(folderCounts[folder.id, default: 0])"
                             ) {
-                                app.selectedFolderID = folder.id
-                                app.selectedMeetingID = nil
+                                app.revealFolder(id: folder.id)
                             }
+                            .accessibilityLabel(folder.name)
                             .contextMenu {
                                 Button("Rename") {
                                     renameText = folder.name
@@ -72,6 +85,7 @@ struct SidebarView: View {
                     SideItem(title: "Add folder", icon: "folder.badge.plus", isActive: false, dimmed: true) {
                         showNewFolder = true
                     }
+                    .accessibilityLabel("Add folder")
                     .padding(.top, 4)
                 }
             }
@@ -80,7 +94,7 @@ struct SidebarView: View {
 
             if app.recorder.isRecording {
                 HStack(spacing: 7) {
-                    Circle().fill(.red).frame(width: 7, height: 7)
+                    Circle().fill(Theme.statusListening).frame(width: 7, height: 7)
                     Text("Recording")
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.textSecondary)
@@ -90,17 +104,27 @@ struct SidebarView: View {
                 .padding(.bottom, 6)
             }
 
-            SettingsLink {
-                Label("Settings", systemImage: "gearshape")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.textSecondary)
-                    .padding(.vertical, 6)
-                    .padding(.horizontal, 8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
+            Button {
+                app.sidebarDestination = .settings
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 15, weight: .semibold))
+                        .symbolRenderingMode(.hierarchical)
+                        .frame(width: 22, height: 18)
+                    Text("Settings")
+                        .font(.system(size: 13))
+                    Spacer()
+                }
+                .foregroundStyle(Theme.textSecondary)
+                .padding(.vertical, 8)
+                .padding(.horizontal, 10)
+                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .hoverHighlight()
+            .buttonStyle(PressFadeButtonStyle())
+            .hoverHighlight(cornerRadius: 10)
+            .help("Settings")
+            .accessibilityLabel("Settings")
         }
         .padding(.horizontal, 10)
         .padding(.bottom, 10)
@@ -128,6 +152,43 @@ struct SidebarView: View {
         }
     }
 
+    private var brand: some View {
+        HStack(spacing: 8) {
+            GranipaBrandMark()
+            Text("Grañipa")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+        }
+        .padding(.horizontal, 8)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityLabel("Grañipa")
+    }
+
+    private var collectionsHeader: some View {
+        HStack(spacing: 8) {
+            Text("COLLECTIONS")
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(Theme.textTertiary)
+                .tracking(0.8)
+            Spacer(minLength: 0)
+            Button {
+                showNewFolder = true
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Add folder")
+            .accessibilityLabel("Add folder")
+        }
+        .padding(.leading, 8)
+        .padding(.trailing, 4)
+    }
+
     private var searchField: some View {
         @Bindable var app = app
         return HStack(spacing: 6) {
@@ -138,6 +199,8 @@ struct SidebarView: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.textPrimary)
+                .focused($searchFocused)
+                .accessibilityLabel("Search Grañipa")
             if !app.searchQuery.isEmpty {
                 Button {
                     app.searchQuery = ""
@@ -147,11 +210,27 @@ struct SidebarView: View {
                         .foregroundStyle(Theme.textTertiary)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            } else if !searchFocused {
+                Text("⌘K")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.textTertiary)
+                    .accessibilityHidden(true)
             }
         }
-        .padding(.vertical, 6)
-        .padding(.horizontal, 8)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .background(Theme.fillSubtle, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Theme.border, lineWidth: 1))
+        .background {
+            Button("Search Grañipa") { searchFocused = true }
+                .keyboardShortcut("k", modifiers: .command)
+                .frame(width: 0, height: 0)
+                .opacity(0)
+                .accessibilityHidden(true)
+        }
     }
 
     private var groupedFolders: [(team: String?, folders: [Folder])] {
@@ -162,39 +241,83 @@ struct SidebarView: View {
     }
 }
 
+private struct GranipaBrandMark: View {
+    var body: some View {
+        HStack(alignment: .center, spacing: 2) {
+            Capsule().fill(Theme.accent).frame(width: 2.5, height: 7)
+            Capsule().fill(Theme.accent).frame(width: 2.5, height: 13)
+            Capsule().fill(Theme.accent).frame(width: 2.5, height: 9)
+            Capsule().fill(Theme.accent).frame(width: 2.5, height: 15)
+        }
+        .frame(width: 20, height: 16)
+        .accessibilityHidden(true)
+    }
+}
+
 private struct SideItem: View {
     let title: String
     let icon: String
     let isActive: Bool
     var indented = false
     var dimmed = false
+    var quiet = false
+    var iconTint: Color?
+    var accessory: String? = nil
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 Image(systemName: icon)
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(dimmed ? Theme.textTertiary : Theme.textSecondary)
-                    .frame(width: 16)
+                    .font(.system(size: 15, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(iconColor)
+                    .frame(width: 22, height: 18)
                 Text(title)
-                    .font(.system(size: 13, weight: isActive ? .semibold : .regular))
-                    .foregroundStyle(
-                        dimmed
-                            ? Theme.textTertiary
-                            : (isActive ? Theme.textPrimary : Theme.textSecondary))
+                    .font(isActive ? Theme.fontBody.weight(.semibold) : Theme.fontBody)
+                    .foregroundStyle(textColor)
                     .lineLimit(1)
                 Spacer(minLength: 0)
+                if let accessory {
+                    Text(accessory)
+                        .font(.system(size: 12))
+                        .foregroundStyle(isActive ? Theme.textSecondary : Theme.textTertiary)
+                        .monospacedDigit()
+                }
             }
-            .padding(.vertical, 5.5)
-            .padding(.horizontal, 8)
+            .padding(.vertical, 9)
+            .padding(.horizontal, 10)
             .padding(.leading, indented ? 14 : 0)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .background(
-            isActive ? Color.white.opacity(0.08) : .clear,
-            in: RoundedRectangle(cornerRadius: 7))
-        .hoverHighlight(cornerRadius: 7)
+        .buttonStyle(PressFadeButtonStyle())
+        .background {
+            if isActive {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Theme.accent.opacity(0.14))
+            }
+        }
+        .overlay(alignment: .leading) {
+            if isActive {
+                Capsule()
+                    .fill(Theme.accent)
+                    .frame(width: 3)
+                    .padding(.vertical, 6)
+                    .padding(.leading, 1)
+            }
+        }
+        .hoverHighlight(cornerRadius: 10)
+        .accessibilityAddTraits(isActive ? .isSelected : [])
+    }
+
+    private var iconColor: Color {
+        if let iconTint { return iconTint }
+        if dimmed || (quiet && !isActive) { return Theme.textTertiary }
+        return isActive ? Theme.accent : Theme.textSecondary
+    }
+
+    private var textColor: Color {
+        if dimmed || (quiet && !isActive) { return Theme.textTertiary }
+        return isActive ? Theme.textPrimary : Theme.textSecondary
     }
 }

@@ -14,7 +14,7 @@ enum OCRService {
         let text = await recognizeText(in: path)
         await MainActor.run {
             guard let text, !text.isEmpty else {
-                ToastController.shared.show("No text found")
+                ToastController.shared.show("No text found", style: .warning)
                 return
             }
             let pasteboard = NSPasteboard.general

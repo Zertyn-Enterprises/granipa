@@ -1,29 +1,399 @@
+import Carbon.HIToolbox
 import ServiceManagement
 import Speech
 import SwiftUI
 
-struct SettingsView: View {
-    var body: some View {
-        TabView {
-            GeneralSettings()
-                .tabItem { Label("General", systemImage: "gearshape") }
-            PermissionsSettings()
-                .tabItem { Label("Permissions", systemImage: "lock.shield") }
-            AISettings()
-                .tabItem { Label("AI", systemImage: "wand.and.stars") }
-            TemplateSettings()
-                .tabItem { Label("Templates", systemImage: "doc.text") }
-            ProductivitySettings()
-                .tabItem { Label("Productivity", systemImage: "doc.on.clipboard") }
-            WindowSettings()
-                .tabItem { Label("Windows", systemImage: "macwindow.on.rectangle") }
-            APISettings()
-                .tabItem { Label("API", systemImage: "network") }
-            WebhookSettings()
-                .tabItem { Label("Webhooks", systemImage: "arrow.up.right.square") }
+enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
+    case general, dictation, shortcuts, permissions, ai, extras, integrations
+
+    var id: String { rawValue }
+
+    /// Single source for the pane Settings opens on (the old first tab).
+    static let initialSelection = SettingsSection.general
+
+    var title: String {
+        switch self {
+        case .general: "General"
+        case .dictation: "Dictation"
+        case .shortcuts: "Shortcuts"
+        case .permissions: "Permissions"
+        case .ai: "AI"
+        case .extras: "Extras"
+        case .integrations: "Integrations"
         }
-        .frame(width: 560, height: 460)
-        .preferredColorScheme(.dark)
+    }
+
+    var icon: String {
+        switch self {
+        case .general: "gearshape"
+        case .dictation: "mic"
+        case .shortcuts: "keyboard"
+        case .permissions: "lock.shield"
+        case .ai: "wand.and.stars"
+        case .extras: "puzzlepiece"
+        case .integrations: "network"
+        }
+    }
+
+    var caption: String {
+        switch self {
+        case .general: "Meeting language, detection, recording"
+        case .dictation: "Hold-to-talk, engine and rewrite"
+        case .shortcuts: "Hotkeys and window actions"
+        case .permissions: "Access and system permissions"
+        case .ai: "Providers and note templates"
+        case .extras: "Clipboard, windows and battery"
+        case .integrations: "Local API and webhooks"
+        }
+    }
+
+    var subPages: [SettingsSubPage] {
+        switch self {
+        case .ai: [.providers, .templates]
+        case .extras: [.clipboardAndOCR, .windows, .battery]
+        case .integrations: [.api, .webhooks]
+        case .general, .dictation, .shortcuts, .permissions: []
+        }
+    }
+}
+
+enum SettingsSubPage: String, Hashable, Identifiable {
+    case providers, templates
+    case clipboardAndOCR, windows, battery
+    case api, webhooks
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .providers: "Providers"
+        case .templates: "Templates"
+        case .clipboardAndOCR: "Clipboard & OCR"
+        case .windows: "Windows"
+        case .battery: "Battery"
+        case .api: "API"
+        case .webhooks: "Webhooks"
+        }
+    }
+}
+
+enum SettingsLayout {
+    /// Readable column for form sections. Permissions fill the remaining width.
+    static let contentMaxWidth: CGFloat = 760
+}
+
+/// Drafts and section selection for the embedded Settings screen. Owned by
+/// MainWindow so leaving Settings unmounts panes but keeps unsaved edits.
+struct SettingsSession {
+    var section = SettingsSection.initialSelection
+    var aiPane = SettingsSubPage.providers
+    var extrasPane = SettingsSubPage.clipboardAndOCR
+    var integrationsPane = SettingsSubPage.api
+    var dictationKeyDrafts = DictationKeyDrafts()
+    var webhookDrafts = EditorDrafts<Webhook>()
+    var templateDrafts = EditorDrafts<MeetingTemplate>()
+}
+
+/// Unsaved Dictation credential drafts, hoisted above the section switch so
+/// navigating away and back keeps what was typed (main-window lifetime only).
+struct DictationKeyDrafts {
+    var museKey = ""
+    var keySaved: Bool?
+    var spaceXAIKey = ""
+    var spaceXAIKeySaved: Bool?
+    var customKey = ""
+    var customKeySaved: Bool?
+    private var loadedFromKeychain = false
+
+    /// Seeds drafts from the keychain once per main-window lifetime; remounts keep edits.
+    mutating func loadOnce(_ read: (String) -> String?) {
+        guard !loadedFromKeychain else { return }
+        museKey = read(KeychainStore.museAPIKeyAccount) ?? ""
+        spaceXAIKey = read(KeychainStore.spaceXAIKeyAccount) ?? ""
+        customKey = read(KeychainStore.rewriteCustomKeyAccount) ?? ""
+        loadedFromKeychain = true
+    }
+}
+
+/// Unsaved editor drafts keyed by item id, hoisted above the pane switches so
+/// section/subpage navigation keeps edits for the lifetime of the main window.
+/// Reads fall back to the persisted item until the user edits.
+struct EditorDrafts<Item: Identifiable> {
+    private var drafts: [Item.ID: Item] = [:]
+
+    subscript(item: Item) -> Item {
+        get { drafts[item.id] ?? item }
+        set { drafts[item.id] = newValue }
+    }
+}
+
+struct SettingsView: View {
+    @Binding var session: SettingsSession
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        page
+            .animation(
+                reduceMotion ? nil : .easeOut(duration: Theme.motionNormal),
+                value: session.section)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Theme.bg)
+    }
+
+    // switch keeps only the selected pane instantiated
+    @ViewBuilder
+    private var page: some View {
+        switch session.section {
+        case .general:
+            SettingsPage(
+                title: "General",
+                subtitle: "Meeting language, detection, recording and startup."
+            ) {
+                GeneralSettings()
+            }
+        case .dictation:
+            SettingsPage(
+                title: "Dictation",
+                subtitle: "Hold-to-talk dictation: shortcut, language, engine and instant rewrite."
+            ) {
+                DictationSettings(drafts: $session.dictationKeyDrafts)
+            }
+        case .shortcuts:
+            SettingsPage(
+                title: "Shortcuts",
+                subtitle: "Rebind the macro key and every productivity or window shortcut."
+            ) {
+                ShortcutsSettings()
+            }
+        case .permissions:
+            PermissionsSettings()
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(Theme.bg)
+                .transition(.opacity)
+        case .ai:
+            SettingsPage(
+                title: "AI",
+                subtitle: "Notes providers, speaker identification and note templates."
+            ) {
+                SettingsSubNav(pages: SettingsSection.ai.subPages, selection: $session.aiPane)
+                if session.aiPane == .templates {
+                    TemplateSettings(drafts: $session.templateDrafts)
+                } else {
+                    AISettings()
+                }
+            }
+        case .extras:
+            SettingsPage(
+                title: "Extras",
+                subtitle: "Clipboard history, text capture, window snapping and battery."
+            ) {
+                SettingsSubNav(pages: SettingsSection.extras.subPages, selection: $session.extrasPane)
+                if session.extrasPane == .windows {
+                    WindowSettings()
+                } else if session.extrasPane == .battery {
+                    BatterySettings()
+                } else {
+                    ProductivitySettings()
+                }
+            }
+        case .integrations:
+            SettingsPage(
+                title: "Integrations",
+                subtitle: "Local REST API and outgoing webhooks."
+            ) {
+                SettingsSubNav(
+                    pages: SettingsSection.integrations.subPages,
+                    selection: $session.integrationsPane)
+                if session.integrationsPane == .webhooks {
+                    WebhookSettings(drafts: $session.webhookDrafts)
+                } else {
+                    APISettings()
+                }
+            }
+        }
+    }
+}
+
+struct SettingsSidebar: View {
+    let selection: SettingsSection
+    let isRecording: Bool
+    let select: (SettingsSection) -> Void
+    let onBack: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Color.clear.frame(height: 34)
+
+            Button(action: onBack) {
+                Label("Back to app", systemImage: "chevron.left")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.textSecondary)
+                    .padding(.vertical, 7)
+                    .padding(.horizontal, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .hoverHighlight(cornerRadius: 10)
+            .help("Back to app")
+            .accessibilityLabel("Back to app")
+            .padding(.bottom, 8)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Settings")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                Text("Customize how Grañipa works for you.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 8)
+            .padding(.bottom, 12)
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
+
+            ForEach(SettingsSection.allCases) { section in
+                SettingsNavItem(
+                    title: section.title,
+                    caption: section.caption,
+                    icon: section.icon,
+                    isActive: selection == section
+                ) {
+                    select(section)
+                }
+                .accessibilityLabel(section.title)
+            }
+
+            Spacer(minLength: 12)
+
+            if isRecording {
+                HStack(spacing: 7) {
+                    Circle().fill(Theme.statusListening).frame(width: 7, height: 7)
+                    Text("Recording")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.textSecondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 8)
+                .padding(.bottom, 6)
+            }
+
+            Text(versionLabel)
+                .font(.system(size: 10.5))
+                .foregroundStyle(Theme.textTertiary)
+                .padding(.leading, 8)
+                .padding(.bottom, 6)
+        }
+        .padding(.horizontal, 10)
+        .padding(.bottom, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Theme.bgSidebar)
+    }
+
+    private var versionLabel: String {
+        let version =
+            Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        return version.map { "Grañipa \($0)" } ?? "Grañipa"
+    }
+}
+
+private struct SettingsNavItem: View {
+    let title: String
+    let caption: String
+    let icon: String
+    let isActive: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(Theme.fontCaption.weight(.semibold))
+                    .foregroundStyle(isActive ? Theme.accent : Theme.textSecondary)
+                    .frame(width: 16)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.system(size: 13, weight: isActive ? .semibold : .regular))
+                        .foregroundStyle(isActive ? Theme.textPrimary : Theme.textSecondary)
+                        .lineLimit(1)
+                    Text(caption)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textTertiary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 7)
+            .padding(.horizontal, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background {
+            if isActive {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Theme.accent.opacity(0.10))
+            }
+        }
+        .overlay(alignment: .leading) {
+            if isActive {
+                Capsule()
+                    .fill(Theme.accent)
+                    .frame(width: 3, height: 16)
+            }
+        }
+        .hoverHighlight(cornerRadius: 10)
+        .accessibilityAddTraits(isActive ? [.isSelected] : [])
+    }
+}
+
+struct SettingsPage<Content: View>: View {
+    let title: String
+    let subtitle: String
+    private let content: Content
+
+    init(title: String, subtitle: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.subtitle = subtitle
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                Text(subtitle)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .combine)
+
+            content
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(16)
+        .frame(maxWidth: SettingsLayout.contentMaxWidth, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Theme.bg)
+        .transition(.opacity)
+    }
+}
+
+private struct SettingsSubNav: View {
+    let pages: [SettingsSubPage]
+    @Binding var selection: SettingsSubPage
+
+    var body: some View {
+        Picker("Section", selection: $selection) {
+            ForEach(pages) { page in
+                Text(page.title).tag(page)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
     }
 }
 
@@ -31,6 +401,9 @@ private struct GeneralSettings: View {
     @Environment(AppState.self) private var app
     @AppStorage("defaultLocale") private var defaultLocale = "auto"
     @AppStorage("echoCancellation") private var echoCancellation = true
+    @AppStorage("liveMeetingASR") private var liveMeetingASR = false
+    @AppStorage("meetingCaptionsEnabled") private var meetingCaptions = true
+    @AppStorage("meetingSystemEngine") private var meetingSystemEngine = "local"
     @AppStorage("meetingDetectionEnabled") private var meetingDetection = true
     @AppStorage("autoStopMode") private var autoStopMode = "ask"
     @AppStorage("audioRetentionDays") private var audioRetentionDays = 0
@@ -79,11 +452,34 @@ private struct GeneralSettings: View {
                                 !probeSelection.contains(id)
                                     && probeSelection.count >= LanguageDetection.maxProbeLocales)
                     }
-                    Text("Each recording probes your selected languages in parallel for the first seconds and keeps the one that matches what it hears. Each language downloads its on-device model once.")
+                    Text("Each recording probes these languages for the first seconds and keeps the best match. Each language downloads its on-device model once.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
+            Toggle("Live transcription during meetings", isOn: $liveMeetingASR)
+                .onChange(of: liveMeetingASR) { syncLiveCaptionsOverlay() }
+            Text("Streams speech while you record. Off by default — meetings still transcribe after you stop.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Toggle("Live captions during meetings", isOn: $meetingCaptions)
+                .disabled(!liveMeetingASR)
+                .onChange(of: meetingCaptions) { syncLiveCaptionsOverlay() }
+            Text(
+                liveMeetingASR
+                    ? "Floating overlay of what's being said. Stays on this Mac."
+                    : "Needs live transcription. The overlay has nothing to show until then."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            Picker("Them (computer audio)", selection: $meetingSystemEngine) {
+                Text("On-device (Apple)").tag("local")
+                Text("Muse (computer audio only)").tag("muse")
+            }
+            .disabled(!liveMeetingASR)
+            Text(computerAudioHelp)
+            .font(.caption)
+            .foregroundStyle(.secondary)
             Toggle("Detect meetings automatically", isOn: $meetingDetection)
                 .onChange(of: meetingDetection) {
                     meetingDetection ? app.detector.start() : app.detector.stop()
@@ -110,7 +506,7 @@ private struct GeneralSettings: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Toggle("Echo cancellation (mic)", isOn: $echoCancellation)
-            Text("Keep this on if you use speakers; it stops other participants' voices from bleeding into your mic channel.")
+            Text("Stops other participants' voices from bleeding into your mic channel.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -122,6 +518,19 @@ private struct GeneralSettings: View {
                 languageName($0.identifier(.bcp47)) < languageName($1.identifier(.bcp47))
             }
         }
+    }
+
+    private var computerAudioHelp: String {
+        if !liveMeetingASR {
+            return "Computer-audio engine applies only while live transcription is on. After Stop, both channels transcribe on this Mac."
+        }
+        return meetingSystemEngine == "muse"
+            ? "Only the other participants' audio is sent to Meta. Your microphone stays on this Mac. Needs a Muse API key in Settings → Dictation."
+            : "Both channels transcribe on this Mac."
+    }
+
+    private func syncLiveCaptionsOverlay() {
+        CaptionsOverlayController.shared.setVisible(app.recorder.isRecording)
     }
 
     // One entry per language; regional variants are an implementation detail.
@@ -180,6 +589,159 @@ private struct GeneralSettings: View {
     }
 }
 
+private struct DictationSettings: View {
+    @Environment(AppState.self) private var app
+    @AppStorage("dictationEngine") private var engine = "local"
+    @AppStorage("dictationAutoPaste") private var autoPaste = true
+    @AppStorage("dictationKeywords") private var keywords = ""
+    @AppStorage("dictationShortcut") private var shortcut = "rightOption"
+    @AppStorage("dictationLocale") private var dictationLocale = "auto"
+    @AppStorage("probeLocales") private var probeLocalesRaw = "en-US,es-ES"
+    @AppStorage("dictationRewrite") private var rewrite = "off"
+    @AppStorage("rewriteCustomURL") private var rewriteURL = "http://127.0.0.1:11434/v1"
+    @AppStorage("rewriteCustomModel") private var rewriteModel = "llama3.2"
+    @Binding var drafts: DictationKeyDrafts
+
+    private var probeIDs: [String] {
+        LanguageDetection.parseProbeLocales(probeLocalesRaw)
+    }
+
+    var body: some View {
+        ScrollView {
+        Form {
+            Section("Shortcut") {
+                Picker("Hold to dictate", selection: $shortcut) {
+                    Text("Right Option (⌥)").tag("rightOption")
+                    Text("Right Command (⌘)").tag("rightCommand")
+                    Text("Option + Space").tag("optionSpace")
+                }
+                .onChange(of: shortcut) { applyShortcut(); app.registerDictationHotkey() }
+                Text("Hold to talk, release to paste. A quick tap toggles; press again to stop. Esc cancels only while you hold, not in toggle. Right Option and Right Command need Accessibility (same grant as auto-paste) so they work in other apps. Option+Space uses a Carbon hotkey and does not.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("Every dictation is saved locally. Open history from the sidebar, the menu bar, or the shortcut in Settings → Shortcuts — stats (WPM, words, apps, time saved) live at the top.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("Language") {
+                Picker("Dictation language", selection: $dictationLocale) {
+                    Text("Auto (last meeting / this Mac)").tag("auto")
+                    ForEach(probeIDs, id: \.self) { id in
+                        Text(id).tag(id)
+                    }
+                }
+                Text("Meetings still probe languages. Dictation uses one model so it stays fast.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("Engine") {
+                Picker("Transcription engine", selection: $engine) {
+                    Text("On-device (Apple)").tag("local")
+                    Text("Muse Voice Transcribe").tag("muse")
+                }
+                Text(
+                    engine == "local"
+                        ? "Your voice stays on this Mac. This is the default for dictation."
+                        : "Sends YOUR microphone to Meta. For meetings, prefer Settings → General → Them (computer audio only)."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            if engine == "muse" {
+                Section("Muse") {
+                    SecureField("Meta API key", text: $drafts.museKey)
+                    Button("Save key") {
+                        drafts.keySaved = KeychainStore.set(
+                            drafts.museKey, account: KeychainStore.museAPIKeyAccount)
+                    }
+                    if drafts.keySaved == false {
+                        Text("Could not save the key in Keychain.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    } else if drafts.keySaved == true {
+                        Text("Saved in Keychain.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("Audio is sent with zero-data-retention requested. $0.18/hour.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("Vocabulary hints (comma-separated)", text: $keywords)
+                    Text("Names, products, jargon Muse should prefer.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Toggle("Paste into the front app", isOn: $autoPaste)
+                .onChange(of: autoPaste) {
+                    if autoPaste, !PasteService.isTrusted {
+                        PasteService.requestTrust()
+                    }
+                }
+            Text("Needs Accessibility permission. If it's off, dictation still copies the text.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Section("Instant rewrite") {
+                Picker("After dictation", selection: $rewrite) {
+                    Text("Off — paste what I said").tag("off")
+                    Text("SpaceXAI (Grok)").tag("spacexai")
+                    Text("Custom (Mac Mini / VPS)").tag("custom")
+                }
+                Text("Cleans punctuation and obvious ASR mistakes, then pastes. Your mic audio never goes to the rewrite API — only the text.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if rewrite == "spacexai" {
+                    SecureField("SpaceXAI API key", text: $drafts.spaceXAIKey)
+                    Button("Save SpaceXAI key") {
+                        drafts.spaceXAIKeySaved = KeychainStore.set(
+                            drafts.spaceXAIKey, account: KeychainStore.spaceXAIKeyAccount)
+                    }
+                    if drafts.spaceXAIKeySaved == false {
+                        Text("Could not save the key in Keychain.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                    Text("Uses grok-4.6 at api.x.ai. Get a key at console.x.ai.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if rewrite == "custom" {
+                    TextField("Base URL", text: $rewriteURL)
+                    TextField("Model", text: $rewriteModel)
+                    SecureField("API key (optional)", text: $drafts.customKey)
+                    Button("Save endpoint key") {
+                        drafts.customKeySaved = KeychainStore.set(
+                            drafts.customKey, account: KeychainStore.rewriteCustomKeyAccount)
+                    }
+                    Text("OpenAI-compatible /v1/chat/completions. Example: Ollama or llama.cpp on your Mac Mini (http://192.168.x.x:11434/v1), or a VPS.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        }
+        .onAppear {
+            drafts.loadOnce { KeychainStore.get(account: $0) }
+            applyShortcut()
+        }
+    }
+
+    private func applyShortcut() {
+        switch shortcut {
+        case "rightCommand":
+            UserDefaults.standard.set(Int(kVK_RightCommand), forKey: "dictationKeyCode")
+            UserDefaults.standard.set(0, forKey: "dictationModifiers")
+        case "optionSpace":
+            UserDefaults.standard.set(Int(kVK_Space), forKey: "dictationKeyCode")
+            UserDefaults.standard.set(Int(optionKey), forKey: "dictationModifiers")
+        default:
+            UserDefaults.standard.set(Int(kVK_RightOption), forKey: "dictationKeyCode")
+            UserDefaults.standard.set(0, forKey: "dictationModifiers")
+        }
+    }
+}
+
 private struct AISettings: View {
     @AppStorage("llmProvider") private var llmProvider = "claude"
     @AppStorage("diarizationEnabled") private var diarizationEnabled = true
@@ -198,7 +760,7 @@ private struct AISettings: View {
 
             Section("Speakers") {
                 Toggle("Identify individual speakers", isOn: $diarizationEnabled)
-                Text("Splits remote participants into Speaker 1, 2, 3… after the meeting (local CoreML model, ~130 MB downloaded on first use).")
+                Text("Splits remote participants into Speaker 1, 2, 3… after the meeting (local CoreML model, ~20 MB downloaded on first use).")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Toggle("Infer speaker names with AI", isOn: $inferSpeakerNames)
@@ -209,7 +771,7 @@ private struct AISettings: View {
                 ForEach(LLMProviders.all) { spec in
                     ProviderRow(spec: spec)
                 }
-                Text("Sign-in happens in each provider's own CLI (one-time browser login). Grañipa never sees your credentials — it only runs the CLI you already authenticated.")
+                Text("Sign-in happens in each provider's CLI (one-time browser login). Grañipa never sees your credentials.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -227,11 +789,8 @@ private struct ProviderRow: View {
         case failed(String)
     }
 
-    private var installedPath: String? {
-        LLMProviders.resolveExecutable(named: spec.executableName)?.path
-    }
-
     var body: some View {
+        let installedPath = LLMProviders.resolveExecutable(named: spec.executableName)?.path
         VStack(alignment: .leading, spacing: 5) {
             HStack {
                 Image(systemName: installedPath != nil ? "checkmark.circle.fill" : "circle")
@@ -324,17 +883,17 @@ private struct ProductivitySettings: View {
         Form {
             Section("Clipboard history") {
                 Toggle("Capture clipboard history", isOn: $clipboardEnabled)
-                LabeledContent("Open panel", value: "⌥⇧V")
+                .onChange(of: clipboardEnabled) { app.setClipboardCaptureEnabled(clipboardEnabled) }
                 Toggle("Paste automatically after selecting", isOn: $autoPaste)
                     .onChange(of: autoPaste) {
                         if autoPaste, !PasteService.isTrusted {
                             PasteService.requestTrust()
                         }
                     }
-                Text("Auto-paste sends ⌘V to the active app and needs Accessibility permission (System Settings → Privacy & Security → Accessibility).")
+                Text("Sends ⌘V to the active app. Needs Accessibility permission.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text("Keeps the last 500 items locally. Entries marked confidential by password managers are never captured.")
+                Text("Keeps the last 500 items locally. Password-manager entries are never captured.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button("Clear history", role: .destructive) {
@@ -347,13 +906,183 @@ private struct ProductivitySettings: View {
                 }
             }
             Section("Text capture (OCR)") {
-                LabeledContent("Capture screen text", value: "⌥⇧T")
-                Text("Select a screen region; recognized text (Spanish/English) is copied to the clipboard. Needs Screen Recording permission on first use.")
+                Text("Recognized text lands in your clipboard. Needs Screen Recording on first use.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Section("Emoji & Symbols") {
+                Text("Sends ⌃⌘Space to the front app (the system emoji picker). Needs Accessibility, same as auto-paste.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Text("Keyboard shortcuts for these live in Settings → Shortcuts, including the global macro key.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
+    }
+}
+
+private enum ShortcutRecordTarget: Equatable {
+    case extra(ExtraShortcut)
+    case window(WindowAction)
+}
+
+private struct ShortcutsSettings: View {
+    @State private var hyperRaw = WindowHyperKey.current.rawValue
+    @AppStorage("windowSnappingEnabled") private var snapping = true
+    @State private var recording: ShortcutRecordTarget?
+    @State private var captureMonitor: Any?
+    @State private var stamp = 0
+
+    private var hyper: WindowHyperKey {
+        WindowHyperKey(rawValue: hyperRaw) ?? .off
+    }
+
+    var body: some View {
+        Form {
+            Section("Macro key") {
+                Picker("Macro key", selection: $hyperRaw) {
+                    ForEach(WindowHyperKey.allCases) { key in
+                        Text(key.title).tag(key.rawValue)
+                    }
+                }
+                .onChange(of: hyperRaw) {
+                    WindowHyperKey.setCurrent(hyper)
+                    ShortcutHub.shared.rebind()
+                }
+                Text(hyperHelp)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("Click a shortcut, then press the full chord (⌘→, ⌃⌥←, ⌥⇧V…). Esc cancels.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("Hold to dictate stays on the Dictation tab — that key is independent so you can talk without arming the macro.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("Productivity") {
+                extraRow(.clipboard)
+                extraRow(.ocr)
+                extraRow(.emoji)
+                extraRow(.history)
+            }
+            if snapping {
+                Section("Windows") {
+                    ForEach(
+                        [
+                            WindowAction.leftHalf, .rightHalf, .topHalf, .bottomHalf,
+                            .maximize, .center, .restore,
+                        ], id: \.self
+                    ) { windowRow($0) }
+                }
+                Section("Quarters") {
+                    ForEach(
+                        [WindowAction.topLeft, .topRight, .bottomLeft, .bottomRight],
+                        id: \.self
+                    ) { windowRow($0) }
+                }
+                Section("Thirds") {
+                    ForEach(
+                        [WindowAction.firstThird, .centerThird, .lastThird],
+                        id: \.self
+                    ) { windowRow($0) }
+                }
+            }
+            Button("Reset shortcuts") {
+                WindowShortcuts.reset()
+                hyperRaw = WindowHyperKey.off.rawValue
+                stamp += 1
+                ShortcutHub.shared.rebind()
+            }
+        }
+        .formStyle(.grouped)
+        .onDisappear { stopCapture() }
+    }
+
+    private var hyperHelp: String {
+        switch hyper {
+        case .off:
+            "Each shortcut keeps its built-in modifiers (⌥⇧ for clipboard, ⌃⌥ for windows)."
+        case .capsLock:
+            "Press Caps Lock to arm, then any shortcut (⇪V clipboard, ⇪← left half). Press Caps Lock again to exit. Needs Accessibility."
+        case .rightShift, .rightCommand, .rightOption:
+            "Hold the macro key, then any shortcut. Other apps never see that chord. Needs Accessibility."
+        }
+    }
+
+    private func extraRow(_ item: ExtraShortcut) -> some View {
+        recorderRow(
+            title: item.title,
+            label: WindowShortcuts.chordLabel(for: item, hyper: hyper),
+            target: .extra(item))
+    }
+
+    private func windowRow(_ action: WindowAction) -> some View {
+        recorderRow(
+            title: action.title,
+            label: WindowShortcuts.chordLabel(for: action, hyper: hyper),
+            target: .window(action))
+    }
+
+    private func recorderRow(title: String, label: String, target: ShortcutRecordTarget)
+        -> some View
+    {
+        HStack {
+            Text(title)
+            Spacer()
+            Button(recording == target ? "Press a key…" : label) {
+                beginCapture(target)
+            }
+            .font(.system(.body, design: .monospaced))
+        }
+        .id("\(title)-\(stamp)-\(hyperRaw)")
+    }
+
+    private func beginCapture(_ target: ShortcutRecordTarget) {
+        stopCapture()
+        recording = target
+        captureMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let code = UInt32(event.keyCode)
+            if Int(event.keyCode) == kVK_Escape {
+                stopCapture()
+                return nil
+            }
+            if let hyperCode = hyper.keyCode, code == hyperCode {
+                return nil
+            }
+            if HotkeyBinding.modifierFlag(forKeyCode: code) != nil {
+                return nil
+            }
+            let mods = HotkeyBinding.carbonModifiers(from: event.modifierFlags)
+            if hyper == .off, mods == 0 {
+                return nil
+            }
+            switch target {
+            case .extra(let item):
+                ExtraShortcut.setChord(
+                    keyCode: code,
+                    modifiers: hyper == .off ? mods : item.fallbackModifiers,
+                    for: item)
+            case .window(let action):
+                WindowShortcuts.setChord(
+                    keyCode: code,
+                    modifiers: hyper == .off ? mods : WindowShortcuts.defaultModifiers(for: action),
+                    for: action)
+            }
+            stamp += 1
+            ShortcutHub.shared.rebind()
+            stopCapture()
+            return nil
+        }
+    }
+
+    private func stopCapture() {
+        if let captureMonitor {
+            NSEvent.removeMonitor(captureMonitor)
+        }
+        captureMonitor = nil
+        recording = nil
     }
 }
 
@@ -364,29 +1093,19 @@ private struct WindowSettings: View {
     var body: some View {
         Form {
             Toggle("Window snapping shortcuts", isOn: $snapping)
-            Text("Uses the same Accessibility permission as auto-paste. All shortcuts are Control + Option.")
+                .onChange(of: snapping) { WindowManager.shared.setEnabled(snapping) }
+            Text("If a window is already parked on the left (or right), snapping another window that way fills the remaining space instead of covering it.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            if let conflictingApp {
+            Text("Keys and the global macro live in Settings → Shortcuts.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if WindowHyperKey.current == .off, let conflictingApp {
                 Label(
-                    "\(conflictingApp) is running and owns these same shortcuts. Quit it (and remove it from Login Items), then relaunch Grañipa.",
+                    "\(conflictingApp) is running and owns ⌃⌥. Set a macro key in Shortcuts, or quit that app.",
                     systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
                     .foregroundStyle(.orange)
-            }
-            Section("Halves & maximize") {
-                LabeledContent("Left / Right half", value: "⌃⌥←  ⌃⌥→")
-                LabeledContent("Top / Bottom half", value: "⌃⌥↑  ⌃⌥↓")
-                LabeledContent("Maximize", value: "⌃⌥⏎")
-                LabeledContent("Center", value: "⌃⌥C")
-                LabeledContent("Restore previous size", value: "⌃⌥⌫")
-            }
-            Section("Quarters") {
-                LabeledContent("Top left / Top right", value: "⌃⌥U  ⌃⌥I")
-                LabeledContent("Bottom left / Bottom right", value: "⌃⌥J  ⌃⌥K")
-            }
-            Section("Thirds") {
-                LabeledContent("First / Center / Last third", value: "⌃⌥D  ⌃⌥F  ⌃⌥G")
             }
         }
         .formStyle(.grouped)
@@ -403,9 +1122,144 @@ private struct WindowSettings: View {
     }
 }
 
+private struct BatterySettings: View {
+    var body: some View {
+        @Bindable var battery = BatteryService.shared
+        Form {
+            if !battery.snapshot.isPresent {
+                Text("No internal battery — charge limiting is for MacBooks.")
+                    .foregroundStyle(.secondary)
+            } else {
+                LabeledContent("Current charge", value: "\(battery.snapshot.percent)%")
+                if let temp = battery.temperatureC {
+                    LabeledContent("Battery temperature", value: String(format: "%.1f°C", temp))
+                }
+                Toggle("Limit charging", isOn: $battery.limiterEnabled)
+                    .disabled(battery.isCalibrating)
+                if battery.limiterEnabled {
+                    Slider(
+                        value: Binding(
+                            get: { Double(battery.limit) },
+                            set: { battery.limit = Int($0) }),
+                        in: Double(ChargePolicy.minLimit)...Double(ChargePolicy.maxLimit),
+                        step: 5,
+                        onEditingChanged: { editing in
+                            if !editing { battery.tick() }
+                        })
+                    Text("Stop charging at \(battery.limit)%. Discharge while plugged in to come down from a higher level. Top Up charges to 100% once, then the limit returns.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if battery.canControl {
+                    Section("Battery helper") {
+                        LabeledContent(
+                            "Status",
+                            value: battery.helperEnabled ? "Registered" : "Not registered")
+                        Text(
+                            "Registration reflects macOS Login Items state; it does not confirm the helper is running."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        if let message = battery.helperSetupMessage ?? battery.controlMessage {
+                            Text(message)
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
+                        if battery.helperSetupMessage != nil {
+                            Button("Open Login Items…") {
+                                battery.openHelperApproval()
+                            }
+                        }
+                        Button(
+                            battery.helperEnabled
+                                ? "Repair battery helper…" : "Install battery helper…"
+                        ) {
+                            Task { await battery.repairHelper() }
+                        }
+                        .disabled(battery.helperBusy)
+                        Text(
+                            "Charge-limit writes need a root helper. After installing, approve Grañipa in System Settings → General → Login Items."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Heat Protection") {
+                    Toggle("Heat Protection", isOn: $battery.heatProtection)
+                        .disabled(battery.isCalibrating)
+                    if battery.heatProtection {
+                        Stepper(
+                            "Halt charging at \(battery.heatThresholdC)°C",
+                            value: $battery.heatThresholdC, in: 30...45)
+                        Text("Recommended 35°C. Disabled automatically during calibration.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Calibration Mode") {
+                    Text("Charge to 100% → discharge to 10% → charge to 100% → hold 1h → discharge to 75%. Recalibrates the battery gauge. Leave the Mac plugged in.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        ForEach(CalibrationStep.allCases) { step in
+                            Text(step.title)
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(
+                                    battery.calibrationStep == step
+                                        ? Theme.accent : Theme.textTertiary)
+                                .multilineTextAlignment(.center)
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    if battery.isCalibrating {
+                        Button("Stop Calibration", role: .destructive) {
+                            battery.stopCalibration()
+                        }
+                    } else {
+                        Button("Start Calibration") {
+                            battery.startCalibration()
+                        }
+                        .disabled(!battery.canControl)
+                    }
+                    LabeledContent("Last calibration") {
+                        if let date = battery.lastCalibrationAt {
+                            Text(date, format: .dateTime.month().day().hour().minute())
+                        } else {
+                            Text("—")
+                        }
+                    }
+                }
+
+                if battery.hasMagSafeLED {
+                    Section("MagSafe LED") {
+                        Picker("LED setting", selection: $battery.magSafeLED) {
+                            ForEach(MagSafeLEDMode.allCases) { mode in
+                                Text(mode.title).tag(mode)
+                            }
+                        }
+                    }
+                }
+
+                if !battery.canControl, let message = battery.controlMessage {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+                Text("On quit, Grañipa re-enables charging and returns the MagSafe LED to System. macOS 26 also has a system charge limit in System Settings → Battery; the lower of the two wins.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
 private struct APISettings: View {
     @Environment(AppState.self) private var app
-    @AppStorage("apiEnabled") private var apiEnabled = true
+    @AppStorage("apiEnabled") private var apiEnabled = false
     @AppStorage("apiPort") private var apiPort = 7799
     @State private var token = AppState.apiToken()
 
@@ -451,6 +1305,7 @@ private struct APISettings: View {
 
 private struct WebhookSettings: View {
     @Environment(AppState.self) private var app
+    @Binding var drafts: EditorDrafts<Webhook>
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -465,7 +1320,7 @@ private struct WebhookSettings: View {
                 ScrollView {
                     VStack(spacing: 8) {
                         ForEach(app.webhooks) { webhook in
-                            WebhookEditor(webhook: webhook)
+                            WebhookEditor(webhook: draftBinding(webhook))
                         }
                     }
                     .padding(8)
@@ -484,11 +1339,17 @@ private struct WebhookSettings: View {
             .padding(12)
         }
     }
+
+    private func draftBinding(_ webhook: Webhook) -> Binding<Webhook> {
+        Binding(
+            get: { drafts[webhook] },
+            set: { drafts[webhook] = $0 })
+    }
 }
 
 private struct WebhookEditor: View {
     @Environment(AppState.self) private var app
-    @State var webhook: Webhook
+    @Binding var webhook: Webhook
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -532,6 +1393,7 @@ private struct WebhookEditor: View {
 
 private struct TemplateSettings: View {
     @Environment(AppState.self) private var app
+    @Binding var drafts: EditorDrafts<MeetingTemplate>
     @State private var editing: MeetingTemplate?
 
     var body: some View {
@@ -555,7 +1417,7 @@ private struct TemplateSettings: View {
             .frame(height: 120)
             Divider()
             if let template = editing {
-                TemplateEditor(template: template) { updated in
+                TemplateEditor(template: draftBinding(template)) { updated in
                     app.saveTemplate(updated)
                     editing = updated
                 } onDelete: {
@@ -584,10 +1446,16 @@ private struct TemplateSettings: View {
             .padding(8)
         }
     }
+
+    private func draftBinding(_ template: MeetingTemplate) -> Binding<MeetingTemplate> {
+        Binding(
+            get: { drafts[template] },
+            set: { drafts[template] = $0 })
+    }
 }
 
 private struct TemplateEditor: View {
-    @State var template: MeetingTemplate
+    @Binding var template: MeetingTemplate
     let onSave: (MeetingTemplate) -> Void
     let onDelete: () -> Void
 

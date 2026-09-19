@@ -41,4 +41,19 @@ import Testing
     @Test func yearIsNotANumberedItem() {
         #expect(MarkdownParser.parse("2026. A great year") == [.paragraph("2026. A great year")])
     }
+
+    @Test func prefixParseMatchesFullParseAndStopsEarly() {
+        let markdown = "## Decisions\n- Launch moved to July\n- ignored filler\nplain closer\n"
+        let full = MarkdownParser.parse(markdown)
+        let prefix = MarkdownParser.parse(markdown, maxBlocks: 2)
+        #expect(prefix.blocks == Array(full.prefix(2)))
+        #expect(prefix.linesVisited == 2)
+        #expect(full.count == 4)
+
+        let leading = MarkdownParser.parse("\n\nHello\nWorld\n", maxBlocks: 2)
+        #expect(leading.blocks == [.paragraph("Hello"), .paragraph("World")])
+        #expect(leading.linesVisited == 4)
+        #expect(MarkdownParser.parse("", maxBlocks: 2).blocks.isEmpty)
+        #expect(MarkdownParser.parse("Hello", maxBlocks: 0).blocks.isEmpty)
+    }
 }

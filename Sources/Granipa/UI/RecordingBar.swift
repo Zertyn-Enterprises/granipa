@@ -13,14 +13,11 @@ struct RecordingBar: View {
             HStack(spacing: 12) {
                 if isRecordingThisMeeting {
                     Image(systemName: "record.circle.fill")
-                        .foregroundStyle(.red)
-                        .symbolEffect(.pulse)
+                        .foregroundStyle(Theme.statusListening)
                     if let started = app.recorder.startedAt {
-                        TimelineView(.periodic(from: started, by: 1)) { context in
-                            Text(elapsed(from: started, to: context.date))
-                                .monospacedDigit()
-                                .font(.callout)
-                        }
+                        RecordingTimer(startedAt: started)
+                            .font(.system(size: 13, weight: .medium).monospacedDigit())
+                            .foregroundStyle(Theme.textPrimary)
                     }
                     LevelMeter(label: "Mic", level: app.recorder.micLevel)
                     LevelMeter(label: "System", level: app.recorder.systemLevel)
@@ -28,7 +25,10 @@ struct RecordingBar: View {
                     Button("Stop", systemImage: "stop.fill") {
                         Task { await app.stopRecording() }
                     }
-                    .tint(.red)
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.statusListening)
+                    .controlSize(.small)
+                    .accessibilityLabel("Stop recording")
                 } else {
                     Button {
                         app.startRecording(meetingID: meeting.id)
@@ -36,21 +36,16 @@ struct RecordingBar: View {
                         Label("Record", systemImage: "record.circle")
                             .font(.system(size: 13, weight: .semibold))
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Theme.accent)
-                    .disabled(app.recorder.isRecording)
+                    .granipaPrimaryControl()
+                    .disabled(app.recorder.isBusy)
                     Spacer()
                 }
             }
             if isRecordingThisMeeting, let warning = app.recorder.systemAudioWarning {
-                Label(warning, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+                AudioWarningLabel(text: warning)
             }
             if isRecordingThisMeeting, let warning = app.recorder.micWarning {
-                Label(warning, systemImage: "mic.slash")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+                AudioWarningLabel(text: warning, icon: "mic.slash")
             }
             if isRecordingThisMeeting, let transcription = app.transcription {
                 switch transcription.phase {
@@ -59,19 +54,14 @@ struct RecordingBar: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 case .failed(let message):
-                    Label("Transcription failed: \(message)", systemImage: "xmark.circle")
-                        .font(.caption)
-                        .foregroundStyle(.red)
+                    TranscriptionFailedLabel(message: message) {
+                        app.transcription?.retryIfFailed()
+                    }
                 default:
                     EmptyView()
                 }
             }
         }
-    }
-
-    private func elapsed(from start: Date, to now: Date) -> String {
-        let seconds = max(0, Int(now.timeIntervalSince(start)))
-        return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 }
 
@@ -85,13 +75,12 @@ struct LevelMeter: View {
                 .font(.caption2)
                 .foregroundStyle(Theme.textTertiary)
             ZStack(alignment: .leading) {
-                Capsule().fill(Color.white.opacity(0.1))
+                Capsule().fill(Theme.fillSubtle)
                 Capsule()
-                    .fill(.green)
+                    .fill(Theme.statusDone)
                     .frame(width: CGFloat(min(level * 300, 60)))
             }
             .frame(width: 60, height: 6)
-            .animation(.linear(duration: 0.1), value: level)
         }
     }
 }

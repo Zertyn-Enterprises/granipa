@@ -3,7 +3,7 @@ import SwiftUI
 
 struct ClipboardHistoryView: View {
     @Environment(AppState.self) private var app
-    let onClose: () -> Void
+    let onClose: (@escaping @MainActor @Sendable () -> Void) -> Void
 
     @State private var items: [ClipboardItem] = []
     @State private var groups: [(day: Date, items: [ClipboardItem])] = []
@@ -33,9 +33,11 @@ struct ClipboardHistoryView: View {
             footer
         }
         .frame(width: 800, height: 460)
-        .background(Theme.bgSidebar)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.border, lineWidth: 1))
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.radiusOverlay, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.radiusOverlay, style: .continuous)
+                .stroke(Theme.strokeStrong, lineWidth: 1))
         .preferredColorScheme(.dark)
         .onAppear {
             reload()
@@ -47,7 +49,7 @@ struct ClipboardHistoryView: View {
                 frontmost?.bundleIdentifier == Bundle.main.bundleIdentifier
                 ? nil : frontmost?.localizedName
         }
-        .onExitCommand { onClose() }
+        .onExitCommand { onClose({}) }
     }
 
     private var header: some View {
@@ -57,7 +59,7 @@ struct ClipboardHistoryView: View {
                 .foregroundStyle(Theme.textTertiary)
             TextField("Type to filter entries…", text: $search)
                 .textFieldStyle(.plain)
-                .font(.system(size: 15))
+                .font(.system(size: 17))
                 .foregroundStyle(Theme.textPrimary)
                 .focused($searchFocused)
                 .onChange(of: search) {
@@ -91,8 +93,8 @@ struct ClipboardHistoryView: View {
             .frame(width: 110)
             .onChange(of: filter) { reloadKeepingSelection() }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
+        .padding(.horizontal, Theme.spaceL)
+        .padding(.vertical, 14)
     }
 
     private var list: some View {
@@ -154,7 +156,7 @@ struct ClipboardHistoryView: View {
                     } else {
                         ScrollView {
                             Text(item.textContent ?? "")
-                                .font(.system(size: 13))
+                                .font(.system(size: 15))
                                 .foregroundStyle(Theme.textPrimary)
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -192,7 +194,7 @@ struct ClipboardHistoryView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.03))
+        .background(Theme.fillHover)
         .overlay(alignment: .top) {
             Rectangle().fill(Theme.border).frame(height: 1)
         }
@@ -228,7 +230,7 @@ struct ClipboardHistoryView: View {
                 .foregroundStyle(Theme.textSecondary)
                 .padding(.horizontal, 5)
                 .padding(.vertical, 2)
-                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
+                .background(Theme.fillSubtle, in: RoundedRectangle(cornerRadius: 4))
             Menu("Actions") {
                 Button("Delete selected", role: .destructive) {
                     if let selected { delete(selected) }
@@ -290,21 +292,20 @@ struct ClipboardHistoryView: View {
         case .text, .link:
             pasteboard.setString(item.textContent ?? "", forType: .string)
         }
-        onClose()
-
         if autoPasteEnabled {
             let appName = targetApp
-            Task { @MainActor in
-                // Give the panel a beat to order out so key events land in the target app.
-                try? await Task.sleep(for: .milliseconds(140))
+            onClose {
                 if PasteService.pasteToFrontmostApp() {
                     ToastController.shared.show(appName.map { "Pasted to \($0)" } ?? "Pasted")
                 } else {
-                    ToastController.shared.show("Copied — grant Accessibility to auto-paste")
+                    ToastController.shared.show(
+                        "Copied — grant Accessibility to auto-paste", style: .warning)
                 }
             }
         } else {
-            ToastController.shared.show("Copied to clipboard")
+            onClose {
+                ToastController.shared.show("Copied to clipboard")
+            }
         }
     }
 
@@ -375,16 +376,16 @@ private struct ClipboardRow: View {
                     .frame(width: 22)
             }
             Text(title)
-                .font(.system(size: 13))
+                .font(.system(size: 15))
                 .foregroundStyle(Theme.textPrimary)
                 .lineLimit(1)
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 6)
-        .padding(.horizontal, 8)
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
         .background(
-            isSelected ? Color.white.opacity(0.09) : .clear,
-            in: RoundedRectangle(cornerRadius: 7))
+            isSelected ? Theme.accent.opacity(0.18) : .clear,
+            in: RoundedRectangle(cornerRadius: Theme.radiusS))
         .contentShape(Rectangle())
     }
 }

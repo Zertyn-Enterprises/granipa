@@ -1,8 +1,55 @@
 import SwiftUI
 
+/// One meeting's enhanced-notes markdown as renderable blocks: a bounded
+/// prefix parses synchronously so tab entry paints immediately, the full
+/// document parses off the main actor, and the result is cached for the
+/// source it came from (a re-enhance invalidates it).
+@MainActor
+@Observable
+final class EnhancedNotesDocument {
+    static let previewBlockLimit = 30
+
+    private(set) var blocks: [MarkdownBlock] = []
+    private(set) var isComplete = false
+    /// The source `blocks` currently render. Until `.task` runs `update`,
+    /// this differs from the meeting's notes and the view shows preparation
+    /// instead of flashing the previous source's blocks.
+    private(set) var source = ""
+    private var inFlight = false
+    private var generation = 0
+
+    func update(source newSource: String) {
+        if newSource == source, isComplete || inFlight { return }
+        generation += 1
+        let current = generation
+        source = newSource
+        isComplete = false
+        let prefix = MarkdownParser.parse(newSource, maxBlocks: Self.previewBlockLimit).blocks
+        blocks = prefix
+        // Fewer blocks than the limit means the prefix reached the end of
+        // the document; there is nothing left to parse in the background.
+        guard prefix.count >= Self.previewBlockLimit else {
+            isComplete = true
+            inFlight = false
+            return
+        }
+        inFlight = true
+        Task {
+            let full = await Task.detached(priority: .userInitiated) {
+                MarkdownParser.parse(newSource)
+            }.value
+            guard current == generation else { return }
+            blocks = full
+            isComplete = true
+            inFlight = false
+        }
+    }
+}
+
 struct EnhancedNotesView: View {
     @Environment(AppState.self) private var app
     let meetingID: String
+    let document: EnhancedNotesDocument
 
     @State private var emailExpanded = false
 
@@ -27,8 +74,8 @@ struct EnhancedNotesView: View {
                         .foregroundStyle(Theme.textTertiary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let meeting, meeting.enhancedNotesMarkdown != nil {
-                content(for: meeting)
+            } else if let meeting, let notes = meeting.enhancedNotesMarkdown {
+                content(for: meeting, notes: notes)
             } else {
                 VStack(spacing: 10) {
                     Image(systemName: "wand.and.stars")
@@ -50,23 +97,36 @@ struct EnhancedNotesView: View {
 
     // MARK: - Document
 
-    private func content(for meeting: Meeting) -> some View {
+    private func content(for meeting: Meeting, notes: String) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 22) {
                 if let summary = meeting.summary, !summary.isEmpty {
-                    VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label("Summary", systemImage: "sparkles")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Theme.textPrimary)
                         MarkdownText(markdown: summary)
                             .font(.system(size: 14))
-                            .lineSpacing(5)
+                            .lineSpacing(6)
                             .foregroundStyle(Theme.textSecondary)
-                        Rectangle()
-                            .fill(Theme.border)
-                            .frame(height: 1)
                     }
+                    .padding(20)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .card(cornerRadius: Theme.radiusL)
                 }
 
-                if let notes = meeting.enhancedNotesMarkdown {
-                    MarkdownBlocksView(markdown: notes)
+                if document.source == notes {
+                    MarkdownBlocksView(blocks: document.blocks)
+                } else if !notes.isEmpty {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Formatting notes…")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Theme.textTertiary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 8)
                 }
 
                 let items = ActionItem.decodeList(from: meeting.actionItemsJSON)
@@ -115,15 +175,16 @@ struct EnhancedNotesView: View {
                 }
                 .padding(.top, 10)
             }
-            .frame(maxWidth: 720, alignment: .leading)
-            .padding(.horizontal, 32)
-            .padding(.vertical, 26)
+            .padding(.horizontal, 28)
+            .padding(.vertical, 22)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .task(id: notes) { document.update(source: notes) }
     }
 
     private func sectionHeader(_ title: String) -> some View {
         Text(title)
-            .font(.system(size: 17, weight: .semibold, design: .serif))
+            .font(Theme.sectionFont)
             .foregroundStyle(Theme.textPrimary)
             .padding(.top, 6)
     }
@@ -146,7 +207,7 @@ struct EnhancedNotesView: View {
     }
 }
 
-private struct ActionItemRow: View {
+struct ActionItemRow: View {
     let item: ActionItem
     let toggle: () -> Void
 
@@ -158,16 +219,24 @@ private struct ActionItemRow: View {
                 Image(systemName: isDone ? "checkmark.square.fill" : "square")
                     .font(.system(size: 14))
                     .foregroundStyle(isDone ? Theme.accent : Theme.textTertiary)
-                Text(item.text + (item.owner.map { " — \($0)" } ?? ""))
+                Text(item.text)
                     .font(.system(size: 14))
                     .strikethrough(isDone)
                     .foregroundStyle(isDone ? Theme.textTertiary : Theme.textPrimary)
                     .multilineTextAlignment(.leading)
-                Spacer(minLength: 0)
+                Spacer(minLength: 8)
+                if let owner = item.owner, !owner.isEmpty {
+                    Text(owner)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.textTertiary)
+                        .lineLimit(1)
+                }
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(
+            item.text + (item.owner.map { ", \($0)" } ?? "") + (isDone ? ", done" : ""))
     }
 }
 

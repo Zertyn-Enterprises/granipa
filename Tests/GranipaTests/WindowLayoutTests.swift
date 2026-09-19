@@ -57,4 +57,41 @@ import Testing
     @Test func restoreHasNoComputedFrame() {
         #expect(WindowLayout.frame(for: .restore, screen: screen, current: .zero) == nil)
     }
+
+    @Test func leftSnapFillsRemainderWhenLeftIsOccupied() {
+        let parked = CGRect(x: 0, y: 25, width: 400, height: 975)
+        let moving = CGRect(x: 800, y: 25, width: 800, height: 975)
+        let frame = WindowLayout.frame(
+            for: .leftHalf, screen: screen, current: moving, occupied: [parked])!
+        #expect(frame.minX == 400)
+        #expect(frame.maxX == screen.maxX)
+        #expect(frame.height == screen.height)
+    }
+
+    @Test func leftSnapIgnoresTheMovingWindowItself() {
+        let current = CGRect(x: 0, y: 25, width: 400, height: 975)
+        let frame = WindowLayout.frame(
+            for: .leftHalf, screen: screen, current: current, occupied: [current])!
+        #expect(frame.minX == screen.minX)
+        #expect(frame.width == (screen.width / 2).rounded())
+    }
+
+    @Test func leftSnapIgnoresAlmostMaximizedWindows() {
+        let huge = CGRect(x: 0, y: 25, width: 1500, height: 975)
+        let moving = CGRect(x: 200, y: 100, width: 300, height: 300)
+        let frame = WindowLayout.frame(
+            for: .leftHalf, screen: screen, current: moving, occupied: [huge])!
+        #expect(frame.minX == screen.minX)
+        #expect(frame.width == (screen.width / 2).rounded())
+    }
+
+    @Test func rightSnapFillsRemainderWhenRightIsOccupied() {
+        let parked = CGRect(x: 1000, y: 25, width: 600, height: 975)
+        let moving = CGRect(x: 0, y: 25, width: 800, height: 975)
+        let frame = WindowLayout.frame(
+            for: .rightHalf, screen: screen, current: moving, occupied: [parked])!
+        #expect(frame.minX == screen.minX)
+        #expect(frame.maxX == 1000)
+        #expect(frame.height == screen.height)
+    }
 }

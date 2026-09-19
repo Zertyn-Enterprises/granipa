@@ -1,29 +1,219 @@
+import AppKit
 import Carbon.HIToolbox
 import Foundation
+import os
 
-// Carbon hotkeys need no Accessibility permission, unlike NSEvent global monitors.
-// All access happens on the main thread (Carbon dispatches on the main run loop).
+enum HotkeyBinding {
+    /// Carbon `RegisterEventHotKey` never delivers modifier-only keys (Right Option,
+    /// Right Command, …). Those need `flagsChanged`. Combos still use Carbon.
+    static func modifierFlag(forKeyCode keyCode: UInt32) -> NSEvent.ModifierFlags? {
+        switch Int(keyCode) {
+        case Int(kVK_RightOption), Int(kVK_Option): .option
+        case Int(kVK_RightCommand), Int(kVK_Command): .command
+        case Int(kVK_RightControl), Int(kVK_Control): .control
+        case Int(kVK_RightShift), Int(kVK_Shift): .shift
+        default: nil
+        }
+    }
+
+    static func isModifierOnly(keyCode: UInt32, modifiers: UInt32) -> Bool {
+        modifiers == 0 && modifierFlag(forKeyCode: keyCode) != nil
+    }
+
+    static func eventReportsModifierDown(
+        keyCode: UInt32, flags: NSEvent.ModifierFlags
+    ) -> Bool {
+        let mask: UInt
+        switch Int(keyCode) {
+        case Int(kVK_RightOption): mask = UInt(NX_DEVICERALTKEYMASK)
+        case Int(kVK_Option): mask = UInt(NX_DEVICELALTKEYMASK)
+        case Int(kVK_RightCommand): mask = UInt(NX_DEVICERCMDKEYMASK)
+        case Int(kVK_Command): mask = UInt(NX_DEVICELCMDKEYMASK)
+        case Int(kVK_RightControl): mask = UInt(NX_DEVICERCTLKEYMASK)
+        case Int(kVK_Control): mask = UInt(NX_DEVICELCTLKEYMASK)
+        case Int(kVK_RightShift): mask = UInt(NX_DEVICERSHIFTKEYMASK)
+        case Int(kVK_Shift): mask = UInt(NX_DEVICELSHIFTKEYMASK)
+        default: return false
+        }
+        return flags.rawValue & mask != 0
+    }
+
+    static func carbonModifiers(from flags: NSEvent.ModifierFlags) -> UInt32 {
+        let f = flags.intersection(.deviceIndependentFlagsMask)
+        var carbon: UInt32 = 0
+        if f.contains(.control) { carbon |= UInt32(controlKey) }
+        if f.contains(.option) { carbon |= UInt32(optionKey) }
+        if f.contains(.shift) { carbon |= UInt32(shiftKey) }
+        if f.contains(.command) { carbon |= UInt32(cmdKey) }
+        return carbon
+    }
+
+    static func modifierGlyph(_ carbon: UInt32) -> String {
+        var glyph = ""
+        if carbon & UInt32(controlKey) != 0 { glyph += "⌃" }
+        if carbon & UInt32(optionKey) != 0 { glyph += "⌥" }
+        if carbon & UInt32(shiftKey) != 0 { glyph += "⇧" }
+        if carbon & UInt32(cmdKey) != 0 { glyph += "⌘" }
+        return glyph
+    }
+}
+
+// Carbon hotkeys need no Accessibility permission. Modifier-only holds (the
+// default Right Option dictation key) cannot use Carbon; they use NSEvent
+// flagsChanged, which needs Accessibility to see keys in other apps.
 final class HotkeyManager: @unchecked Sendable {
     static let shared = HotkeyManager()
+    private static let log = Logger(subsystem: "com.zertyn.granipa", category: "hotkey")
 
-    private var handlers: [UInt32: @MainActor () -> Void] = [:]
-    private var hotkeyRefs: [EventHotKeyRef?] = []
+    private struct Handler {
+        var onPress: @MainActor (TimeInterval) -> Void
+        var onRelease: (@MainActor (TimeInterval) -> Void)?
+    }
+
+    private struct ModifierSpec {
+        var keyCode: UInt32
+    }
+
+    private var handlers: [UInt32: Handler] = [:]
+    private var hotkeyRefs: [UInt32: EventHotKeyRef] = [:]
+    private var modifierSpecs: [UInt32: ModifierSpec] = [:]
+    private var modifierDown: [UInt32: Bool] = [:]
+    private var keyDown: [UInt32: Bool] = [:]
     private var eventHandler: EventHandlerRef?
+    private var localMonitor: Any?
+    private var globalMonitor: Any?
+    #if DEBUG
+        private var testBoundIDs: Set<UInt32> = []
+    #endif
 
-    func register(id: UInt32, keyCode: UInt32, modifiers: UInt32, handler: @escaping @MainActor () -> Void) {
+    func register(
+        id: UInt32, keyCode: UInt32, modifiers: UInt32, handler: @escaping @MainActor () -> Void
+    ) {
+        register(
+            id: id, keyCode: keyCode, modifiers: modifiers,
+            onPress: { _ in handler() }, onRelease: nil)
+    }
+
+    func register(
+        id: UInt32,
+        keyCode: UInt32,
+        modifiers: UInt32,
+        onPress: @escaping @MainActor (TimeInterval) -> Void,
+        onRelease: (@MainActor (TimeInterval) -> Void)?
+    ) {
+        unregister(id: id)
+        handlers[id] = Handler(onPress: onPress, onRelease: onRelease)
+        if HotkeyBinding.isModifierOnly(keyCode: keyCode, modifiers: modifiers) {
+            modifierSpecs[id] = ModifierSpec(keyCode: keyCode)
+            modifierDown[id] = false
+            refreshModifierMonitors()
+            return
+        }
+        keyDown[id] = false
         installIfNeeded()
-        handlers[id] = handler
         var ref: EventHotKeyRef?
         let hotKeyID = EventHotKeyID(signature: OSType(0x47524E50), id: id)
-        RegisterEventHotKey(keyCode, modifiers, hotKeyID, GetApplicationEventTarget(), 0, &ref)
-        hotkeyRefs.append(ref)
+        let status = RegisterEventHotKey(
+            keyCode, modifiers, hotKeyID, GetApplicationEventTarget(), 0, &ref)
+        if status != noErr {
+            Self.log.error("RegisterEventHotKey id=\(id) status=\(status)")
+        }
+        if let ref {
+            hotkeyRefs[id] = ref
+        }
+    }
+
+    func unregister(id: UInt32) {
+        #if DEBUG
+            let testBound = testBoundIDs.remove(id) != nil
+        #else
+            let testBound = false
+        #endif
+        if let ref = hotkeyRefs.removeValue(forKey: id) {
+            UnregisterEventHotKey(ref)
+        }
+        let hadModifier = modifierSpecs.removeValue(forKey: id) != nil
+        modifierDown.removeValue(forKey: id)
+        keyDown.removeValue(forKey: id)
+        handlers.removeValue(forKey: id)
+        if hadModifier && !testBound {
+            refreshModifierMonitors()
+        }
+    }
+
+    private func refreshModifierMonitors() {
+        if let localMonitor {
+            NSEvent.removeMonitor(localMonitor)
+            self.localMonitor = nil
+        }
+        if let globalMonitor {
+            NSEvent.removeMonitor(globalMonitor)
+            self.globalMonitor = nil
+        }
+        guard !modifierSpecs.isEmpty else { return }
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            self?.handleModifierEvent(event)
+            return event
+        }
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            self?.handleModifierEvent(event)
+        }
+        if globalMonitor == nil {
+            Self.log.error("flagsChanged global monitor nil — grant Accessibility for Right Option dictation")
+        }
+    }
+
+    private func handleModifierEvent(_ event: NSEvent) {
+        let code = UInt32(event.keyCode)
+        let down = HotkeyBinding.eventReportsModifierDown(
+            keyCode: code, flags: event.modifierFlags)
+        // Hardware time, captured before the MainActor hop so overlay/UI
+        // stalls cannot turn a tap into a hold.
+        let timestamp = event.timestamp
+        Task { @MainActor in
+            self.dispatchModifier(code: code, down: down, timestamp: timestamp)
+        }
+    }
+
+    @MainActor
+    private func dispatchModifier(code: UInt32, down: Bool, timestamp: TimeInterval) {
+        for (id, spec) in modifierSpecs where spec.keyCode == code {
+            let was = modifierDown[id] ?? false
+            guard down != was else { continue }
+            modifierDown[id] = down
+            guard let handler = handlers[id] else { continue }
+            if down {
+                handler.onPress(timestamp)
+            } else {
+                handler.onRelease?(timestamp)
+            }
+        }
+    }
+
+    @MainActor
+    private func dispatchHotKey(id: UInt32, released: Bool, timestamp: TimeInterval) {
+        let was = keyDown[id] ?? false
+        if released {
+            guard was else { return }
+            keyDown[id] = false
+            handlers[id]?.onRelease?(timestamp)
+        } else {
+            guard !was else { return }
+            keyDown[id] = true
+            handlers[id]?.onPress(timestamp)
+        }
     }
 
     private func installIfNeeded() {
         guard eventHandler == nil else { return }
-        var eventType = EventTypeSpec(
-            eventClass: OSType(kEventClassKeyboard),
-            eventKind: UInt32(kEventHotKeyPressed))
+        var eventTypes = [
+            EventTypeSpec(
+                eventClass: OSType(kEventClassKeyboard),
+                eventKind: UInt32(kEventHotKeyPressed)),
+            EventTypeSpec(
+                eventClass: OSType(kEventClassKeyboard),
+                eventKind: UInt32(kEventHotKeyReleased)),
+        ]
         InstallEventHandler(
             GetApplicationEventTarget(),
             { _, event, userData in
@@ -39,14 +229,51 @@ final class HotkeyManager: @unchecked Sendable {
                     &hotKeyID)
                 let manager = Unmanaged<HotkeyManager>.fromOpaque(userData).takeUnretainedValue()
                 let id = hotKeyID.id
+                let kind = GetEventKind(event)
+                let timestamp = TimeInterval(GetEventTime(event))
                 Task { @MainActor in
-                    manager.handlers[id]?()
+                    manager.dispatchHotKey(
+                        id: id,
+                        released: kind == UInt32(kEventHotKeyReleased),
+                        timestamp: timestamp)
                 }
                 return noErr
             },
-            1,
-            &eventType,
+            2,
+            &eventTypes,
             Unmanaged.passUnretained(self).toOpaque(),
             &eventHandler)
     }
+
+    #if DEBUG
+        /// Binds press/release handlers without Carbon or flagsChanged monitors.
+        func bindForTesting(
+            id: UInt32,
+            keyCode: UInt32,
+            modifiers: UInt32,
+            onPress: @escaping @MainActor (TimeInterval) -> Void,
+            onRelease: (@MainActor (TimeInterval) -> Void)?
+        ) {
+            unregister(id: id)
+            handlers[id] = Handler(onPress: onPress, onRelease: onRelease)
+            testBoundIDs.insert(id)
+            if HotkeyBinding.isModifierOnly(keyCode: keyCode, modifiers: modifiers) {
+                modifierSpecs[id] = ModifierSpec(keyCode: keyCode)
+                modifierDown[id] = false
+                return
+            }
+            keyDown[id] = false
+        }
+
+        func handleModifierEventForTesting(_ event: NSEvent) {
+            handleModifierEvent(event)
+        }
+
+        @MainActor
+        func dispatchHotKeyForTesting(
+            id: UInt32, released: Bool, timestamp: TimeInterval
+        ) {
+            dispatchHotKey(id: id, released: released, timestamp: timestamp)
+        }
+    #endif
 }

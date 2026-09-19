@@ -15,6 +15,12 @@ struct RecordingHUD: View {
         return false
     }
 
+    private var processingMeetingTitle: String? {
+        app.processingMeetingID.flatMap { id in
+            app.meetings.first { $0.id == id }?.title
+        }
+    }
+
     var body: some View {
         Group {
             if app.recorder.isRecording {
@@ -23,14 +29,34 @@ struct RecordingHUD: View {
                 } else {
                     expandedCard
                 }
+            } else if let title = processingMeetingTitle {
+                HStack(spacing: 10) {
+                    Image(systemName: "gearshape.2")
+                        .foregroundStyle(Theme.statusProcessing)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Processing notes…")
+                            .font(Theme.fontBody.weight(.semibold))
+                            .foregroundStyle(Theme.textPrimary)
+                        Text(title)
+                            .font(Theme.fontCaption)
+                            .foregroundStyle(Theme.textSecondary)
+                            .lineLimit(1)
+                    }
+                }
+                .padding(Theme.spaceL)
+                .background(
+                    Theme.card,
+                    in: RoundedRectangle(cornerRadius: Theme.radiusOverlay, style: .continuous))
             } else {
                 VStack(spacing: 8) {
                     Text("Not recording")
                         .foregroundStyle(.secondary)
                     Button("Close") { dismiss() }
                 }
-                .padding(16)
-                .background(Theme.card, in: RoundedRectangle(cornerRadius: 16))
+                .padding(Theme.spaceL)
+                .background(
+                    Theme.card,
+                    in: RoundedRectangle(cornerRadius: Theme.radiusOverlay, style: .continuous))
             }
         }
         .preferredColorScheme(.dark)
@@ -40,12 +66,9 @@ struct RecordingHUD: View {
     private var compactPill: some View {
         VStack(spacing: 12) {
             if let started = app.recorder.startedAt {
-                TimelineView(.periodic(from: started, by: 1)) { context in
-                    Text(elapsed(from: started, to: context.date))
-                        .monospacedDigit()
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(transcriptionFailed ? .orange : Theme.textPrimary)
-                }
+                RecordingTimer(startedAt: started)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(transcriptionFailed ? .orange : Theme.textPrimary)
             }
             HStack(spacing: 6) {
                 ActivityDot(level: app.recorder.micLevel)
@@ -53,7 +76,6 @@ struct RecordingHUD: View {
             }
             Button {
                 Task { await app.stopRecording() }
-                dismiss()
             } label: {
                 Image(systemName: "stop.fill")
                     .font(.system(size: 10, weight: .bold))
@@ -73,36 +95,35 @@ struct RecordingHUD: View {
             .buttonStyle(.plain)
             .help("Expand")
         }
-        .padding(.vertical, 13)
-        .padding(.horizontal, 13)
+        .padding(.vertical, Theme.spaceL)
+        .padding(.horizontal, Theme.spaceL)
         .background(Theme.card, in: Capsule())
-        .overlay(Capsule().stroke(.white.opacity(0.08), lineWidth: 1))
+        .overlay(Capsule().stroke(Theme.strokeStrong, lineWidth: 1))
         .contentShape(Capsule())
         .gesture(WindowDragGesture())
     }
 
     private var expandedCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
                 Image(systemName: "record.circle.fill")
-                    .foregroundStyle(.red)
-                    .symbolEffect(.pulse)
+                    .font(.system(size: 17))
+                    .foregroundStyle(Theme.statusListening)
                 Text(meetingTitle)
-                    .font(.headline)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                 Spacer()
                 if let started = app.recorder.startedAt {
-                    TimelineView(.periodic(from: started, by: 1)) { context in
-                        Text(elapsed(from: started, to: context.date))
-                            .monospacedDigit()
-                            .font(.callout)
-                    }
+                    RecordingTimer(startedAt: started)
+                        .font(.system(size: 15, weight: .medium).monospacedDigit())
+                        .foregroundStyle(Theme.textSecondary)
                 }
                 Button {
                     compact = true
                 } label: {
                     Image(systemName: "arrow.down.right.and.arrow.up.left")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(Theme.fontCaption.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
@@ -114,14 +135,15 @@ struct RecordingHUD: View {
                 Spacer()
                 Button("Stop", systemImage: "stop.fill") {
                     Task { await app.stopRecording() }
-                    dismiss()
                 }
+                .controlSize(.large)
                 .tint(.red)
             }
             if let warning = app.recorder.micWarning ?? app.recorder.systemAudioWarning {
-                Label(warning, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
+                AudioWarningLabel(text: warning)
+            }
+            if let warning = app.transcription?.systemWarning {
+                AudioWarningLabel(text: warning)
             }
             if let live = app.transcription {
                 switch live.phase {
@@ -129,51 +151,35 @@ struct RecordingHUD: View {
                     Label(
                         "Preparing the speech model — the first recording on this Mac downloads it, which can take a few minutes.",
                         systemImage: "arrow.down.circle")
-                        .font(.caption)
+                        .font(Theme.fontCaption)
                         .foregroundStyle(.secondary)
                 case .failed(let message):
-                    Label("Transcription failed: \(message)", systemImage: "xmark.circle")
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                default:
-                    VStack(alignment: .leading, spacing: 2) {
-                        if let last = live.liveSegments.last {
-                            Text("\(last.speaker): \(last.text)")
-                                .font(.caption)
-                                .lineLimit(2)
-                                .truncationMode(.head)
-                                .foregroundStyle(.secondary)
-                        }
-                        if !live.volatileSystem.isEmpty {
-                            Text("Them: \(live.volatileSystem)")
-                                .font(.caption)
-                                .lineLimit(2)
-                                .truncationMode(.head)
-                                .italic()
-                                .foregroundStyle(.tertiary)
-                        } else if !live.volatileMic.isEmpty {
-                            Text("Me: \(live.volatileMic)")
-                                .font(.caption)
-                                .lineLimit(2)
-                                .truncationMode(.head)
-                                .italic()
-                                .foregroundStyle(.tertiary)
-                        }
+                    TranscriptionFailedLabel(message: message) {
+                        app.transcription?.retryIfFailed()
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                default:
+                    LiveTranscriptSnippet(
+                        lastSegment: live.liveSegments.last,
+                        volatileSystem: live.volatileSystem,
+                        volatileMic: live.volatileMic,
+                        style: .hud)
                 }
+            } else if app.recorder.isRecording {
+                Text("Transcript after you stop")
+                    .font(Theme.fontCaption)
+                    .foregroundStyle(Theme.textTertiary)
             }
         }
-        .padding(16)
-        .frame(width: 400)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.12), lineWidth: 1))
+        .padding(.horizontal, 22)
+        .padding(.vertical, 18)
+        .frame(width: 520)
+        .background(
+            Theme.card,
+            in: RoundedRectangle(cornerRadius: Theme.radiusOverlay, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.radiusOverlay, style: .continuous)
+                .stroke(Theme.strokeStrong, lineWidth: 1))
         .gesture(WindowDragGesture())
-    }
-
-    private func elapsed(from start: Date, to now: Date) -> String {
-        let seconds = max(0, Int(now.timeIntervalSince(start)))
-        return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 }
 
@@ -182,9 +188,8 @@ private struct ActivityDot: View {
 
     var body: some View {
         Circle()
-            .fill(.green)
+            .fill(Theme.statusDone)
             .frame(width: 5, height: 5)
             .opacity(0.25 + Double(min(level * 6, 0.75)))
-            .animation(.linear(duration: 0.1), value: level)
     }
 }

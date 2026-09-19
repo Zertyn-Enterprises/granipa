@@ -21,7 +21,7 @@ final class PermissionCenter {
     private(set) var screenRecording: PermissionState = .unchecked
     private(set) var probingSystemAudio = false
 
-    static let securityPane = "x-apple.systempreferences:com.apple.preference.security"
+    nonisolated static let securityPane = "x-apple.systempreferences:com.apple.preference.security"
 
     func refresh() async {
         microphone =
@@ -67,5 +67,22 @@ final class PermissionCenter {
             }
         }.value
         systemAudio = result
+    }
+
+    func requestMicrophone() async {
+        _ = await AVCaptureDevice.requestAccess(for: .audio)
+        await refresh()
+    }
+
+    func requestCalendar() async {
+        _ = try? await EKEventStore().requestFullAccessToEvents()
+        await refresh()
+    }
+
+    func requestNotifications() async {
+        guard NotificationManager.isAvailable else { return }
+        _ = try? await UNUserNotificationCenter.current().requestAuthorization(
+            options: [.alert, .sound, .badge])
+        await refresh()
     }
 }

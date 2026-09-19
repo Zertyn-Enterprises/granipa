@@ -46,6 +46,17 @@ final class CalendarService {
         refreshTask = Task {
             await requestAccess()
             while !Task.isCancelled {
+                if access != .granted {
+                    // Access can be granted in System Settings later; the
+                    // static status check is free, so wait cheaply instead of
+                    // running event fetches that would all no-op.
+                    if EKEventStore.authorizationStatus(for: .event) == .fullAccess {
+                        access = .granted
+                    } else {
+                        try? await Task.sleep(for: .seconds(900))
+                        continue
+                    }
+                }
                 refresh()
                 try? await Task.sleep(for: .seconds(300))
             }

@@ -121,6 +121,16 @@ struct AppDatabase: Sendable {
                 try template.save(db)
             }
         }
+        migrator.registerMigration("v8-dictation-history") { db in
+            try db.create(table: "dictationEntry") { t in
+                t.primaryKey("id", .text)
+                t.column("text", .text).notNull()
+                t.column("createdAt", .datetime).notNull().indexed()
+                t.column("durationSeconds", .double).notNull()
+                t.column("wordCount", .integer).notNull()
+                t.column("sourceApp", .text)
+            }
+        }
         return migrator
     }
 }
@@ -187,6 +197,153 @@ extension AppDatabase {
                 try victim.delete(db)
             }
             return victims.compactMap(\.imagePath)
+        }
+    }
+}
+
+extension AppDatabase {
+    func insertDictationEntry(_ entry: DictationEntry) throws {
+        try writer.write { db in try entry.insert(db) }
+    }
+
+    private func filteredDictationRequest(
+        since: Date?,
+        sourceApp: String?,
+        search: String?
+    ) -> QueryInterfaceRequest<DictationEntry> {
+        var request = DictationEntry.all()
+        if let since {
+            request = request.filter(Column("createdAt") >= since)
+        }
+        if let sourceApp, !sourceApp.isEmpty {
+            request = request.filter(Column("sourceApp") == sourceApp)
+        }
+        if let search, !search.isEmpty {
+            let escaped = search
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "%", with: "\\%")
+                .replacingOccurrences(of: "_", with: "\\_")
+            request = request.filter(
+                sql: "text LIKE ? ESCAPE '\\' COLLATE NOCASE",
+                arguments: ["%\(escaped)%"])
+        }
+        return request
+    }
+
+    func fetchDictationEntries(
+        search: String? = nil,
+        since: Date? = nil,
+        sourceApp: String? = nil,
+        limit: Int = 500,
+        offset: Int = 0
+    ) throws -> [DictationEntry] {
+        try writer.read { db in
+            try filteredDictationRequest(since: since, sourceApp: sourceApp, search: search)
+                .order(Column("createdAt").desc)
+                .limit(limit, offset: offset)
+                .fetchAll(db)
+        }
+    }
+
+    /// Page + total + stats + app list in ONE read transaction, so a save that
+    /// lands mid-fetch cannot split the page from its count. Paging past the
+    /// first page is keyset (`createdAt`, `id`): rows inserted or deleted
+    /// between pages can neither duplicate nor skip.
+    func fetchDictationLibrarySnapshot(
+        search: String? = nil,
+        since: Date? = nil,
+        sourceApp: String? = nil,
+        limit: Int,
+        before: (createdAt: Date, id: String)? = nil
+    ) throws -> DictationLibrarySnapshot {
+        try writer.read { db in
+            var pageRequest = filteredDictationRequest(
+                since: since, sourceApp: sourceApp, search: search
+            ).order(Column("createdAt").desc, Column("id").desc)
+            if let before {
+                pageRequest = pageRequest.filter(
+                    sql: "(createdAt, id) < (?, ?)",
+                    arguments: [before.createdAt, before.id])
+            }
+            return DictationLibrarySnapshot(
+                entries: try pageRequest.limit(limit).fetchAll(db),
+                total: try filteredDictationRequest(
+                    since: since, sourceApp: sourceApp, search: search
+                ).fetchCount(db),
+                stats: try Self.dictationStats(db, since: since),
+                sourceApps: try Self.dictationSourceApps(db, since: since))
+        }
+    }
+
+    func dictationEntryCount(
+        search: String? = nil,
+        since: Date? = nil,
+        sourceApp: String? = nil
+    ) throws -> Int {
+        try writer.read { db in
+            try filteredDictationRequest(since: since, sourceApp: sourceApp, search: search)
+                .fetchCount(db)
+        }
+    }
+
+    /// Distinct non-nil source apps captured in the window, alphabetical.
+    func dictationSourceApps(since: Date? = nil) throws -> [String] {
+        try writer.read { db in try Self.dictationSourceApps(db, since: since) }
+    }
+
+    private static func dictationSourceApps(
+        _ db: Database, since: Date?
+    ) throws -> [String] {
+        var request = DictationEntry
+            .select(Column("sourceApp"))
+            .filter(Column("sourceApp") != nil)
+            .distinct()
+            .order(Column("sourceApp"))
+        if let since {
+            request = request.filter(Column("createdAt") >= since)
+        }
+        return try String.fetchAll(db, request)
+    }
+
+    func dictationStats(since: Date? = nil) throws -> DictationStats {
+        try writer.read { db in try Self.dictationStats(db, since: since) }
+    }
+
+    private static func dictationStats(
+        _ db: Database, since: Date?
+    ) throws -> DictationStats {
+        var sql = """
+            SELECT COALESCE(SUM(wordCount), 0) AS words,
+                   COALESCE(SUM(durationSeconds), 0) AS duration,
+                   COUNT(DISTINCT sourceApp) AS apps
+            FROM dictationEntry
+            """
+        if since != nil {
+            sql += " WHERE createdAt >= ?"
+        }
+        let row: Row?
+        if let since {
+            row = try Row.fetchOne(db, sql: sql, arguments: [since])
+        } else {
+            row = try Row.fetchOne(db, sql: sql)
+        }
+        return DictationStats(
+            words: Int(row?["words"] as Int64? ?? 0),
+            durationSeconds: row?["duration"] ?? 0,
+            apps: Int(row?["apps"] as Int64? ?? 0))
+    }
+
+    func deleteDictationEntry(id: String) throws {
+        _ = try writer.write { db in try DictationEntry.deleteOne(db, key: id) }
+    }
+
+    func pruneDictationEntries(keep: Int = 2000) throws {
+        try writer.write { db in
+            let victims = try DictationEntry
+                .order(Column("createdAt").desc)
+                .limit(10_000, offset: keep)
+                .fetchAll(db)
+            for victim in victims { try victim.delete(db) }
         }
     }
 }
