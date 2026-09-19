@@ -38,7 +38,7 @@ Verified this session against git, GitHub, `Info.plist`, and source.
 | `main` / `origin/main` | `bd05f9d` — v1.0.4 (2026-06-19). This is what `git clone` and the GitHub homepage show. |
 | `feat/granipa-v2` | `5505ee3`, **already pushed**. 145 commits ahead of `main`. Source version **2.0.1**, Sparkle build **8**. |
 | GitHub Release Latest | **v2.0.0** (build 6), published 2026-09-06. Zip + `appcast.xml`. Tag `v2.0.0` = `337d0f4`, not the branch tip. |
-| PR V2 → `main` | None at the start of this session. Agents open one hold-PR and do not merge it. |
+| PR V2 → `main` | [#27](https://github.com/Zertyn-Enterprises/granipa/pull/27) open (hold). Do not merge from an agent. |
 | PR #25 | `chore/optimize-2026-09-04` → `main`. Open. That commit **is** an ancestor of `feat/granipa-v2`. |
 | PR #26 | `perf/post-recording-cpu` → `feat/granipa-v2`. Open, **not** in the V2 tip. |
 
@@ -88,7 +88,8 @@ Still human one-way doors (plan + T0 contract). Not implemented as if decided:
 
 ## Next
 
-1. Human merges the V2 → `main` PR (or sets the default branch). Until then clones stay on 1.0.4.
+1. Human merges [#27](https://github.com/Zertyn-Enterprises/granipa/pull/27) (or sets the default branch). Until then clones stay on 1.0.4.
 2. Decide PR #26 (post-recording CPU) into `feat/granipa-v2` before or after that merge.
 3. Helper LWCR / build-8 install remains a machine-local gate, not a docs gate.
 4. Replace `docs/home.png` with a V2 shot when one exists.
+5. Panel xreview 2026-09-19 vs `main`: Claude ISSUES + GLM ISSUES (listed on #27). Codex/Kimi did not run. Not fixed in the docs commit.
