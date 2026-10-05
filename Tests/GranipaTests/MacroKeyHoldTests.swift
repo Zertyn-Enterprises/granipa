@@ -1,5 +1,6 @@
 import Carbon.HIToolbox
 import CoreGraphics
+import Foundation
 import Testing
 
 @testable import Granipa
@@ -50,4 +51,30 @@ import Testing
         #expect(CapsLockRemap.merged(enabled, enabled: false) == [other])
         #expect(CapsLockRemap.merged([], enabled: false).isEmpty)
     }
+
+    @Test func remapIsOnlyRemovedWhenGranipaInstalledIt() {
+        #expect(CapsLockRemap.change(present: false, owned: false, enabled: true) == .install)
+        #expect(CapsLockRemap.change(present: true, owned: false, enabled: true) == .none)
+        #expect(CapsLockRemap.change(present: true, owned: true, enabled: true) == .none)
+        #expect(CapsLockRemap.change(present: true, owned: true, enabled: false) == .remove)
+        // Another tool's identical mapping survives Grañipa's cleanup.
+        #expect(CapsLockRemap.change(present: true, owned: false, enabled: false) == .none)
+        #expect(CapsLockRemap.change(present: false, owned: true, enabled: false) == .none)
+    }
+
+    @Test func remapFollowsTheEventTapNotTheSetting() throws {
+        let hub = try granipaSource("Sources/Granipa/System/ShortcutHub.swift")
+        let start = try #require(hub.range(of: "HyperKeyMonitor.shared.start("))
+        let remap = try #require(
+            hub.range(of: "CapsLockRemap.apply(enabled: hyper == .capsLock && started)"))
+        #expect(start.lowerBound < remap.lowerBound)
+    }
+}
+
+private func granipaSource(_ relativePath: String) throws -> String {
+    let testsFile = URL(fileURLWithPath: #filePath)
+    let repo = testsFile.deletingLastPathComponent().deletingLastPathComponent()
+        .deletingLastPathComponent()
+    return try String(
+        contentsOf: repo.appendingPathComponent(relativePath), encoding: .utf8)
 }

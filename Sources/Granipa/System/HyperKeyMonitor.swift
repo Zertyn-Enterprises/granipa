@@ -16,11 +16,12 @@ final class HyperKeyMonitor: @unchecked Sendable {
     private var layer = HyperLayer(hyperKeyCode: 0, bindings: [:])
     private var onAction: (@MainActor (UInt32) -> Void)?
 
+    @discardableResult
     func start(
         hyperKeyCode: UInt32,
         bindings: [UInt32: UInt32],
         onAction: @escaping @MainActor (UInt32) -> Void
-    ) {
+    ) -> Bool {
         stop()
         lock.lock()
         self.layer = HyperLayer(hyperKeyCode: hyperKeyCode, bindings: bindings)
@@ -46,7 +47,7 @@ final class HyperKeyMonitor: @unchecked Sendable {
                 userInfo: Unmanaged.passUnretained(self).toOpaque())
         else {
             Self.log.error("CGEvent tap failed — grant Accessibility for the macro key")
-            return
+            return false
         }
         let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
@@ -56,6 +57,7 @@ final class HyperKeyMonitor: @unchecked Sendable {
         self.source = source
         lock.unlock()
         Self.log.info("hyper key monitor on code=\(hyperKeyCode)")
+        return true
     }
 
     func stop() {
