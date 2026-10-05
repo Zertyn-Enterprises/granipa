@@ -75,26 +75,32 @@ struct DictationOverlayView: View {
 
     @ViewBuilder
     private var trailingAction: some View {
-        if isLive {
-            Button {
-                dictation.cancel()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Theme.textSecondary)
-                    .frame(width: 22, height: 22)
-                    .background(Theme.fillSubtle, in: Circle())
+        let actions = DictationOverlayAction.available(
+            for: dictation.phase, retryable: dictation.lastFailureRetryable)
+        HStack(spacing: 8) {
+            if actions.contains(.retry) {
+                Button("Retry") {
+                    dictation.retry()
+                }
+                .font(.system(size: 13, weight: .semibold))
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.accent)
+                .controlSize(.regular)
             }
-            .buttonStyle(.plain)
-            .help("Cancel (Esc)")
-        } else if case .failed = dictation.phase, dictation.lastFailureRetryable {
-            Button("Retry") {
-                dictation.retry()
+            if actions.contains(.cancel) || actions.contains(.dismiss) {
+                Button {
+                    dictation.cancel()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Theme.textSecondary)
+                        .frame(width: 22, height: 22)
+                        .background(Theme.fillSubtle, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .help(actions.contains(.cancel) ? "Cancel (Esc)" : "Dismiss")
+                .accessibilityLabel(actions.contains(.cancel) ? "Cancel" : "Dismiss")
             }
-            .font(.system(size: 13, weight: .semibold))
-            .buttonStyle(.borderedProminent)
-            .tint(Theme.accent)
-            .controlSize(.regular)
         }
     }
 
@@ -217,5 +223,19 @@ private struct VoiceWaveform: View {
             path.closeSubpath()
         }
         return path
+    }
+}
+
+enum DictationOverlayAction: Equatable {
+    case cancel, retry, dismiss
+
+    /// A retryable failure stays on screen until acted on, so it must be
+    /// closable too — an accidental press otherwise leaves only Retry.
+    static func available(for phase: DictationPhase, retryable: Bool) -> [Self] {
+        switch phase {
+        case .preparing, .listening: [.cancel]
+        case .failed where retryable: [.retry, .dismiss]
+        default: []
+        }
     }
 }
