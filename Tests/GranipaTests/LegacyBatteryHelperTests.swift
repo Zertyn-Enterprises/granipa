@@ -21,5 +21,9 @@ import Testing
             try PropertyListSerialization.propertyList(from: data, format: nil)
                 as? [String: Any])
         #expect(dict["Label"] as? String == "com.zertyn.granipa.batteryhelper")
+        // The root daemon must stay on-demand only: it ships for unregistering.
+        #expect(dict["RunAtLoad"] == nil)
+        #expect(dict["KeepAlive"] == nil)
+        #expect(dict["MachServices"] != nil)
     }
 }
