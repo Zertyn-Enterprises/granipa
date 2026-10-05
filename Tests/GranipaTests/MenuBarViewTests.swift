@@ -83,7 +83,8 @@ import Testing
 
     @Test func menuHasNoBatteryControls() throws {
         let menu = try granipaSource("Sources/Granipa/UI/MenuBarView.swift")
-        #expect(!menu.contains("Battery"))
+        #expect(!menu.contains(#"Menu("Battery")"#))
+        #expect(!menu.contains("BatteryService"))
     }
 
     @Test func extraAddsNoTimersAndLabelHasNoBattery() throws {

@@ -42,15 +42,17 @@ echo "Signing with: $SIGN_ID"
 swift build -c "$CONFIG"
 BIN_DIR="$(swift build -c "$CONFIG" --show-bin-path)"
 BIN="$BIN_DIR/Granipa"
+HELPER="$BIN_DIR/GranipaBatteryHelper"
 
 APP="build/Grañipa.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Library/LaunchDaemons"
 cp "$BIN" "$APP/Contents/MacOS/Granipa"
+cp "$HELPER" "$APP/Contents/MacOS/GranipaBatteryHelper"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
-# Removed battery helper: the plist ships only so LegacyBatteryHelper can
-# unregister daemons registered by earlier builds.
+# Battery control was removed. The plist and a no-op stub helper still ship so
+# LegacyBatteryHelper can unregister daemons registered by earlier builds.
 cp Resources/com.zertyn.granipa.batteryhelper.plist \
   "$APP/Contents/Library/LaunchDaemons/com.zertyn.granipa.batteryhelper.plist"
 
@@ -77,6 +79,9 @@ sign_bundle() {
       done
     codesign "${options[@]}" "$@" --sign "$id" "$fw"
   fi
+  codesign "${options[@]}" --identifier com.zertyn.granipa.batteryhelper \
+    "$@" --sign "$id" \
+    "$APP/Contents/MacOS/GranipaBatteryHelper"
   codesign "${options[@]}" --entitlements Resources/Granipa.entitlements \
     "$@" --sign "$id" "$APP"
 }

@@ -19,7 +19,7 @@ Bundle id `com.zertyn.granipa`. Data:
 ## Stack
 
 Swift 6 · SwiftUI · SwiftPM (no Xcode project) · GRDB · FluidAudio 0.15.2 ·
-Sparkle 2.7+ · one executable: `Granipa`.
+Sparkle 2.7+ · executable `Granipa` plus the no-op stub `GranipaBatteryHelper`.
 Bundled by `Scripts/bundle.sh` into `build/Grañipa.app`.
 
 ## Where it lives
@@ -67,7 +67,7 @@ Mac16,12) while their replacements (`bfD0`/`bfE0`/`bfF0`) return
 `kIOReturnNotPrivileged`. macOS has a native charge limit (80–100%,
 System Settings → Battery). The user chose to drop battery control from
 Grañipa. `LegacyBatteryHelper` unregisters a daemon left by 2.0.0/2.0.1
-builds; the plist must keep shipping until no such installs remain.
+builds; the plist and stub must keep shipping until no such installs remain.
 
 Last recorded suite (2026-09-06, not re-run this session): 465 tests /
 77 suites, `swift test --no-parallel`. 53 test files are in
@@ -92,6 +92,6 @@ Still human one-way doors (plan + T0 contract). Not implemented as if decided:
 
 1. Human merges [#27](https://github.com/Zertyn-Enterprises/granipa/pull/27) (or sets the default branch). Until then clones stay on 1.0.4.
 2. Decide PR #26 (post-recording CPU) into `feat/granipa-v2` before or after that merge.
-3. Remove the legacy helper plist once no 2.0.0/2.0.1 installs can hold a registration.
+3. Remove the legacy helper plist and stub once no 2.0.0/2.0.1 installs can hold a registration.
 4. Replace `docs/home.png` with a V2 shot when one exists.
 5. Panel xreview 2026-09-19 vs `main`: Claude ISSUES + GLM ISSUES (listed on #27). Codex/Kimi did not run. Not fixed in the docs commit.
