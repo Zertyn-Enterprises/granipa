@@ -65,7 +65,6 @@ done
 bin_dir="$STUB_HOME/.build/$3"
 mkdir -p "$bin_dir"
 : > "$bin_dir/Granipa"
-: > "$bin_dir/GranipaBatteryHelper"
 fw="$STUB_HOME/.build/macos/$3/Sparkle.framework"
 mkdir -p "$fw/XPCServices/org.sparkle-project.SparkleUpdater.xpc" \\
   "$fw/Resources" "$fw/Versions/A/Updater.app/Contents/MacOS"
@@ -184,7 +183,6 @@ class BundleSigningTests(unittest.TestCase):
             "autoupdate": fw / "Resources" / "Autoupdate",
             "updater": fw / "Versions" / "A" / "Updater.app",
             "framework": fw,
-            "helper": self.app() / "Contents" / "MacOS" / "GranipaBatteryHelper",
             "app": self.app(),
         }
 
@@ -203,8 +201,8 @@ class BundleSigningTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("Built", proc.stdout)
         signs = self.codesign_signs()
-        # 3 Sparkle nested targets + framework + helper + app
-        self.assertEqual(len(signs), 6)
+        # 3 Sparkle nested targets + framework + app
+        self.assertEqual(len(signs), 5)
         for sign_id, _ in signs:
             self.assertEqual(sign_id, DR_NAME)
 
@@ -283,9 +281,6 @@ class BundleSigningTests(unittest.TestCase):
     def test_framework_sign_failure_aborts(self):
         self.assert_sign_failure_aborts("framework")
 
-    def test_helper_sign_failure_aborts(self):
-        self.assert_sign_failure_aborts("helper")
-
     def test_app_sign_failure_aborts(self):
         self.assert_sign_failure_aborts("app")
 
@@ -310,8 +305,16 @@ class BundleSigningTests(unittest.TestCase):
         ):
             self.assertIn(token, app_calls[0])
         helper_calls = [c for c in calls if c[-1].endswith("GranipaBatteryHelper")]
-        self.assertEqual(len(helper_calls), 1)
-        self.assertIn("--identifier", helper_calls[0])
+        self.assertEqual(helper_calls, [])
+
+    def test_legacy_helper_plist_still_ships_for_unregister(self):
+        proc = self.run_bundle()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        contents = self.app() / "Contents"
+        self.assertTrue(
+            (contents / "Library" / "LaunchDaemons"
+             / "com.zertyn.granipa.batteryhelper.plist").exists())
+        self.assertFalse((contents / "MacOS" / "GranipaBatteryHelper").exists())
 
 
 if __name__ == "__main__":

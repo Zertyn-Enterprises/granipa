@@ -31,34 +31,6 @@ import Testing
         #expect(MenuBarStatus.processing.accessibilityLabel == "Processing notes")
     }
 
-    @Test func batteryHeadlineDoesNotDuplicatePercent() {
-        #expect(
-            BatteryMenuHeadline.text(
-                for: BatterySnapshot(
-                    isPresent: true, percent: 80, isCharging: true, minutesToEmpty: nil))
-                == "80% charging")
-        #expect(
-            BatteryMenuHeadline.text(
-                for: BatterySnapshot(
-                    isPresent: true, percent: 80, isCharging: false, minutesToEmpty: 80))
-                == "80% · 1h 20m")
-        #expect(
-            BatteryMenuHeadline.text(
-                for: BatterySnapshot(
-                    isPresent: true, percent: 80, isCharging: false, minutesToEmpty: 20))
-                == "80% · 20m")
-        #expect(
-            BatteryMenuHeadline.text(
-                for: BatterySnapshot(
-                    isPresent: true, percent: 80, isCharging: false, minutesToEmpty: nil))
-                == "80%")
-        #expect(
-            BatteryMenuHeadline.text(
-                for: BatterySnapshot(
-                    isPresent: true, percent: 80, isCharging: true, minutesToEmpty: 40))
-                == "80% charging")
-    }
-
     @Test func captureToolsAndAppKeepExistingCallers() throws {
         let menu = try granipaSource("Sources/Granipa/UI/MenuBarView.swift")
         let app = try granipaSource("Sources/Granipa/GranipaApp.swift")
@@ -109,29 +81,9 @@ import Testing
         #expect(!menu.contains(#"Button("New Meeting")"#))
     }
 
-    @Test func batteryIsNestedAndPercentLineUsesExistingFields() throws {
+    @Test func menuHasNoBatteryControls() throws {
         let menu = try granipaSource("Sources/Granipa/UI/MenuBarView.swift")
-        #expect(menu.contains("snapshot.isPresent"))
-        #expect(menu.contains("Menu(\"Battery\")") || menu.contains("Menu {"))
-        #expect(menu.contains("BatteryMenuSection"))
-        #expect(menu.contains("limiterEnabled"))
-        #expect(menu.contains("beginDischarge()"))
-        #expect(menu.contains("beginTopUp()"))
-        #expect(menu.contains("heatProtection"))
-        #expect(menu.contains("startCalibration()"))
-        #expect(menu.contains("stopCalibration()"))
-        #expect(menu.contains("magSafeLED"))
-        // UI helper clicks go through repair (unregister+register), not plain
-        // install; the auto-install prompt remains installHelper's only caller.
-        #expect(menu.contains("repairHelper()"))
-        #expect(menu.contains("controlMessage"))
-        #expect(menu.contains("BatteryMenuHeadline.text(for:"))
-        #expect(!menu.contains(#"Text("\(snap.percent)% · \(snap.menuBarText)")"#))
-        if let present = menu.range(of: "snapshot.isPresent"),
-            let nested = menu.range(of: "BatteryMenuSection")
-        {
-            #expect(present.lowerBound < nested.lowerBound)
-        }
+        #expect(!menu.contains("Battery"))
     }
 
     @Test func extraAddsNoTimersAndLabelHasNoBattery() throws {

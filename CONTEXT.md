@@ -8,7 +8,7 @@ Native macOS 26+ (Apple Silicon) meeting recorder and notes app. No bot joins
 the call. Mic + system audio, on-device live transcription, speaker diarization,
 AI-enhanced notes via the user's existing CLI subscriptions (claude / codex /
 gemini / grok — no API keys). Also: hold-to-talk dictation, clipboard history,
-OCR, window snapping, optional battery charge limit.
+OCR, window snapping and app-window grid tiling.
 
 Local by default. Optional cloud: Muse (system-channel ASR only), dictation
 text rewrite (SpaceXAI or a custom OpenAI-compatible URL).
@@ -19,7 +19,7 @@ Bundle id `com.zertyn.granipa`. Data:
 ## Stack
 
 Swift 6 · SwiftUI · SwiftPM (no Xcode project) · GRDB · FluidAudio 0.15.2 ·
-Sparkle 2.7+ · two executables: `Granipa` and `GranipaBatteryHelper`.
+Sparkle 2.7+ · one executable: `Granipa`.
 Bundled by `Scripts/bundle.sh` into `build/Grañipa.app`.
 
 ## Where it lives
@@ -59,13 +59,15 @@ The updates **were pushed**. They were not merged to the default branch.
 
 Do not treat "no commits on `main` since June" as "V2 never left this Mac".
 
-### Helper / battery (not done)
+### Battery control removed (2026-10-05)
 
-Build 8 was notarized after explicit approval (submission
-`89606c75-71ac-4f9a-81bf-85d30b9c31aa`) and was **not** installed over
-build 7. Helper launch on the development Mac was still `EX_CONFIG` (78) /
-`needs LWCR update`. That is an OS launch-constraint failure, not a
-verified app-logic miss. Do not publish 2.0.1 as a helper fix.
+The root helper never launched (`EX_CONFIG` 78 / `needs LWCR update`), and on
+macOS 27 the SMC charge keys are gone (`CHTE`/`CH0B`/`CH0C` not found on a
+Mac16,12) while their replacements (`bfD0`/`bfE0`/`bfF0`) return
+`kIOReturnNotPrivileged`. macOS has a native charge limit (80–100%,
+System Settings → Battery). The user chose to drop battery control from
+Grañipa. `LegacyBatteryHelper` unregisters a daemon left by 2.0.0/2.0.1
+builds; the plist must keep shipping until no such installs remain.
 
 Last recorded suite (2026-09-06, not re-run this session): 465 tests /
 77 suites, `swift test --no-parallel`. 53 test files are in
@@ -84,12 +86,12 @@ Still human one-way doors (plan + T0 contract). Not implemented as if decided:
 - Accuracy substitute (omit vs real metric). Light appearance (app forces dark).
 - Tags, standalone tasks, collections tables (T7 postponed 2026-09-05).
 - Merge `feat/granipa-v2` to `main`.
-- Publish 2.0.1 (blocked on helper + safe install of build 8).
+- Publish 2.0.1 (the helper blocker went away with battery control).
 
 ## Next
 
 1. Human merges [#27](https://github.com/Zertyn-Enterprises/granipa/pull/27) (or sets the default branch). Until then clones stay on 1.0.4.
 2. Decide PR #26 (post-recording CPU) into `feat/granipa-v2` before or after that merge.
-3. Helper LWCR / build-8 install remains a machine-local gate, not a docs gate.
+3. Remove the legacy helper plist once no 2.0.0/2.0.1 installs can hold a registration.
 4. Replace `docs/home.png` with a V2 shot when one exists.
 5. Panel xreview 2026-09-19 vs `main`: Claude ISSUES + GLM ISSUES (listed on #27). Codex/Kimi did not run. Not fixed in the docs commit.

@@ -20,10 +20,6 @@ let package = Package(
             ],
             path: "Sources/Granipa"
         ),
-        .executableTarget(
-            name: "GranipaBatteryHelper",
-            path: "Sources/BatteryHelper"
-        ),
         .testTarget(
             name: "GranipaTests",
             dependencies: ["Granipa"],
