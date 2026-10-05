@@ -34,11 +34,7 @@ final class WindowManager {
 
         guard let screen = visibleFrameAX(forWindowFrame: current) else { return }
         let usable = WindowLayout.usableFrame(
-            screen: screen,
-            stageStrip: WindowInventory.stageStripSide,
-            stripWindows: WindowInventory.onscreenFrames().filter {
-                !WindowLayout.isSame($0, current)
-            })
+            screen: screen, stageStrip: WindowInventory.stageStripSide)
 
         if action == .tileAppWindows {
             tileFrontmostAppWindows(on: screen, into: usable)
@@ -50,9 +46,7 @@ final class WindowManager {
             for: action, screen: usable, current: current, occupied: occupied)
         else { return }
 
-        if lastSnap.count != 1 || !CFEqual(lastSnap[0].window, window) {
-            lastSnap = [(window, current)]
-        }
+        remember([(window, current)])
         setFrame(target, on: window)
     }
 
@@ -82,11 +76,18 @@ final class WindowManager {
             tileable.append((window, frame))
         }
         guard !tileable.isEmpty else { return }
-        lastSnap = tileable
+        remember(tileable)
         let order = WindowLayout.tileOrder(tileable.map(\.frame))
         let targets = WindowLayout.gridFrames(count: tileable.count, screen: usable)
         for (target, index) in zip(targets, order) {
             setFrame(target, on: tileable[index].window)
+        }
+    }
+
+    /// Windows already moved since their last restore keep their original frame.
+    private func remember(_ moved: [(window: AXUIElement, frame: CGRect)]) {
+        lastSnap = moved.map { item in
+            lastSnap.first(where: { CFEqual($0.window, item.window) }) ?? item
         }
     }
 

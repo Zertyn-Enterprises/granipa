@@ -152,18 +152,6 @@ import Testing
         #expect(WindowLayout.usableFrame(screen: screen, stageStrip: nil) == screen)
     }
 
-    @Test func wideStripThumbnailWidensTheReservation() {
-        let thumbnail = CGRect(x: 10, y: 400, width: 170, height: 120)
-        let usable = WindowLayout.usableFrame(
-            screen: screen, stageStrip: .left, stripWindows: [thumbnail])
-        #expect(usable.minX == thumbnail.maxX + WindowLayout.stageStripGap)
-
-        let elsewhere = CGRect(x: 700, y: 400, width: 170, height: 120)
-        let ignored = WindowLayout.usableFrame(
-            screen: screen, stageStrip: .left, stripWindows: [elsewhere])
-        #expect(ignored.minX == screen.minX + WindowLayout.stageStripWidth)
-    }
-
     @Test func tileHasNoSingleWindowFrame() {
         #expect(WindowLayout.frame(for: .tileAppWindows, screen: screen, current: .zero) == nil)
     }

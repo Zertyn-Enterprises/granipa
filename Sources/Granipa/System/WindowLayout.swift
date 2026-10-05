@@ -93,32 +93,20 @@ enum WindowLayout {
     enum StripSide: Sendable { case left, right }
 
     /// Stage Manager keeps its strip of other app groups on one edge; snaps must
-    /// not cover it. Strip windows wider than the default reservation widen it.
+    /// not cover it. Measured strip thumbnails end ~124 pt from the edge.
     static let stageStripWidth: CGFloat = 150
-    static let stageStripGap: CGFloat = 12
 
-    static func usableFrame(
-        screen s: CGRect, stageStrip side: StripSide?, stripWindows: [CGRect] = []
-    ) -> CGRect {
-        guard let side else { return s }
-        let band = max(s.width * 0.15, stageStripWidth)
-        var inset = stageStripWidth
-        for w in stripWindows where w.intersects(s) && w.width < band {
-            switch side {
-            case .left where w.minX < s.minX + band:
-                inset = max(inset, w.maxX - s.minX + stageStripGap)
-            case .right where w.maxX > s.maxX - band:
-                inset = max(inset, s.maxX - w.minX + stageStripGap)
-            default:
-                continue
-            }
-        }
-        inset = min(inset, band)
+    static func usableFrame(screen s: CGRect, stageStrip side: StripSide?) -> CGRect {
         switch side {
+        case nil:
+            return s
         case .left:
-            return CGRect(x: s.minX + inset, y: s.minY, width: s.width - inset, height: s.height)
+            return CGRect(
+                x: s.minX + stageStripWidth, y: s.minY,
+                width: s.width - stageStripWidth, height: s.height)
         case .right:
-            return CGRect(x: s.minX, y: s.minY, width: s.width - inset, height: s.height)
+            return CGRect(
+                x: s.minX, y: s.minY, width: s.width - stageStripWidth, height: s.height)
         }
     }
 
