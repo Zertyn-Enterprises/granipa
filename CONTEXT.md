@@ -70,7 +70,7 @@ Grañipa. `LegacyBatteryHelper` unregisters a daemon left by 2.0.0/2.0.1
 builds; the plist and stub must keep shipping until no such installs remain.
 
 Last recorded suite (2026-09-06, not re-run this session): 465 tests /
-77 suites, `swift test --no-parallel`. 53 test files are in
+77 suites, `swift test --no-parallel`. 49 test files are in
 `Tests/GranipaTests/` on this branch.
 
 ## Open decisions
