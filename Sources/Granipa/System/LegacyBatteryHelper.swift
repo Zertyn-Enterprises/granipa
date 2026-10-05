@@ -13,10 +13,16 @@ enum LegacyBatteryHelper {
         status == .enabled || status == .requiresApproval
     }
 
-    static func unregisterIfRegistered() {
-        let service = SMAppService.daemon(plistName: plistName)
-        guard needsUnregister(service.status) else { return }
-        service.unregister { error in
+    static func unregisterIfRegistered(
+        status: () -> SMAppService.Status = {
+            SMAppService.daemon(plistName: plistName).status
+        },
+        unregister: (@escaping @Sendable (Error?) -> Void) -> Void = {
+            SMAppService.daemon(plistName: plistName).unregister(completionHandler: $0)
+        }
+    ) {
+        guard needsUnregister(status()) else { return }
+        unregister { error in
             if let error {
                 log.error("legacy battery helper unregister failed: \(error.localizedDescription, privacy: .public)")
             } else {

@@ -12,6 +12,22 @@ import Testing
         #expect(!LegacyBatteryHelper.needsUnregister(.notFound))
     }
 
+    @Test func unregisterRunsOnlyForAnExistingRegistration() {
+        for (status, expected) in [
+            (SMAppService.Status.enabled, 1), (.requiresApproval, 1),
+            (.notRegistered, 0), (.notFound, 0),
+        ] {
+            var calls = 0
+            LegacyBatteryHelper.unregisterIfRegistered(
+                status: { status },
+                unregister: { completion in
+                    calls += 1
+                    completion(nil)
+                })
+            #expect(calls == expected)
+        }
+    }
+
     @Test func bundledPlistKeepsTheRegisteredLabel() throws {
         let plist = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
