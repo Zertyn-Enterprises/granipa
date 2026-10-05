@@ -106,7 +106,6 @@ final class AppState {
             self?.recordDictation(text: text, duration: duration, sourceApp: appName)
         }
         registerDictationHotkey()
-        BatteryService.shared.start()
         ShortcutHub.shared.rebind()
     }
 

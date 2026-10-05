@@ -42,7 +42,7 @@ enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
         case .shortcuts: "Hotkeys and window actions"
         case .permissions: "Access and system permissions"
         case .ai: "Providers and note templates"
-        case .extras: "Clipboard, windows and battery"
+        case .extras: "Clipboard and windows"
         case .integrations: "Local API and webhooks"
         }
     }
@@ -50,7 +50,7 @@ enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
     var subPages: [SettingsSubPage] {
         switch self {
         case .ai: [.providers, .templates]
-        case .extras: [.clipboardAndOCR, .windows, .battery]
+        case .extras: [.clipboardAndOCR, .windows]
         case .integrations: [.api, .webhooks]
         case .general, .dictation, .shortcuts, .permissions: []
         }
@@ -59,7 +59,7 @@ enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
 
 enum SettingsSubPage: String, Hashable, Identifiable {
     case providers, templates
-    case clipboardAndOCR, windows, battery
+    case clipboardAndOCR, windows
     case api, webhooks
 
     var id: String { rawValue }
@@ -70,7 +70,6 @@ enum SettingsSubPage: String, Hashable, Identifiable {
         case .templates: "Templates"
         case .clipboardAndOCR: "Clipboard & OCR"
         case .windows: "Windows"
-        case .battery: "Battery"
         case .api: "API"
         case .webhooks: "Webhooks"
         }
@@ -185,13 +184,11 @@ struct SettingsView: View {
         case .extras:
             SettingsPage(
                 title: "Extras",
-                subtitle: "Clipboard history, text capture, window snapping and battery."
+                subtitle: "Clipboard history, text capture and window snapping."
             ) {
                 SettingsSubNav(pages: SettingsSection.extras.subPages, selection: $session.extrasPane)
                 if session.extrasPane == .windows {
                     WindowSettings()
-                } else if session.extrasPane == .battery {
-                    BatterySettings()
                 } else {
                     ProductivitySettings()
                 }
@@ -1119,141 +1116,6 @@ private struct WindowSettings: View {
                 .compactMap { $0.bundleIdentifier.flatMap { knownConflicts[$0] } }
                 .first
         }
-    }
-}
-
-private struct BatterySettings: View {
-    var body: some View {
-        @Bindable var battery = BatteryService.shared
-        Form {
-            if !battery.snapshot.isPresent {
-                Text("No internal battery — charge limiting is for MacBooks.")
-                    .foregroundStyle(.secondary)
-            } else {
-                LabeledContent("Current charge", value: "\(battery.snapshot.percent)%")
-                if let temp = battery.temperatureC {
-                    LabeledContent("Battery temperature", value: String(format: "%.1f°C", temp))
-                }
-                Toggle("Limit charging", isOn: $battery.limiterEnabled)
-                    .disabled(battery.isCalibrating)
-                if battery.limiterEnabled {
-                    Slider(
-                        value: Binding(
-                            get: { Double(battery.limit) },
-                            set: { battery.limit = Int($0) }),
-                        in: Double(ChargePolicy.minLimit)...Double(ChargePolicy.maxLimit),
-                        step: 5,
-                        onEditingChanged: { editing in
-                            if !editing { battery.tick() }
-                        })
-                    Text("Stop charging at \(battery.limit)%. Discharge while plugged in to come down from a higher level. Top Up charges to 100% once, then the limit returns.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                if battery.canControl {
-                    Section("Battery helper") {
-                        LabeledContent(
-                            "Status",
-                            value: battery.helperEnabled ? "Registered" : "Not registered")
-                        Text(
-                            "Registration reflects macOS Login Items state; it does not confirm the helper is running."
-                        )
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        if let message = battery.helperSetupMessage ?? battery.controlMessage {
-                            Text(message)
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                        }
-                        if battery.helperSetupMessage != nil {
-                            Button("Open Login Items…") {
-                                battery.openHelperApproval()
-                            }
-                        }
-                        Button(
-                            battery.helperEnabled
-                                ? "Repair battery helper…" : "Install battery helper…"
-                        ) {
-                            Task { await battery.repairHelper() }
-                        }
-                        .disabled(battery.helperBusy)
-                        Text(
-                            "Charge-limit writes need a root helper. After installing, approve Grañipa in System Settings → General → Login Items."
-                        )
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    }
-                }
-
-                Section("Heat Protection") {
-                    Toggle("Heat Protection", isOn: $battery.heatProtection)
-                        .disabled(battery.isCalibrating)
-                    if battery.heatProtection {
-                        Stepper(
-                            "Halt charging at \(battery.heatThresholdC)°C",
-                            value: $battery.heatThresholdC, in: 30...45)
-                        Text("Recommended 35°C. Disabled automatically during calibration.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Section("Calibration Mode") {
-                    Text("Charge to 100% → discharge to 10% → charge to 100% → hold 1h → discharge to 75%. Recalibrates the battery gauge. Leave the Mac plugged in.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    HStack(spacing: 6) {
-                        ForEach(CalibrationStep.allCases) { step in
-                            Text(step.title)
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundStyle(
-                                    battery.calibrationStep == step
-                                        ? Theme.accent : Theme.textTertiary)
-                                .multilineTextAlignment(.center)
-                                .frame(maxWidth: .infinity)
-                        }
-                    }
-                    if battery.isCalibrating {
-                        Button("Stop Calibration", role: .destructive) {
-                            battery.stopCalibration()
-                        }
-                    } else {
-                        Button("Start Calibration") {
-                            battery.startCalibration()
-                        }
-                        .disabled(!battery.canControl)
-                    }
-                    LabeledContent("Last calibration") {
-                        if let date = battery.lastCalibrationAt {
-                            Text(date, format: .dateTime.month().day().hour().minute())
-                        } else {
-                            Text("—")
-                        }
-                    }
-                }
-
-                if battery.hasMagSafeLED {
-                    Section("MagSafe LED") {
-                        Picker("LED setting", selection: $battery.magSafeLED) {
-                            ForEach(MagSafeLEDMode.allCases) { mode in
-                                Text(mode.title).tag(mode)
-                            }
-                        }
-                    }
-                }
-
-                if !battery.canControl, let message = battery.controlMessage {
-                    Text(message)
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                }
-                Text("On quit, Grañipa re-enables charging and returns the MagSafe LED to System. macOS 26 also has a system charge limit in System Settings → Battery; the lower of the two wins.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .formStyle(.grouped)
     }
 }
 

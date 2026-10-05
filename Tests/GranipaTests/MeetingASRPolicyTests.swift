@@ -76,7 +76,7 @@ import Testing
 
     /// SettingsView is a private SwiftUI form; `@AppStorage` only writes when a
     /// rendered binding mutates, and this suite has no view host. Same
-    /// source-contract pattern as BatteryHelperTests (read the repo file).
+    /// source-contract pattern as MenuBarViewTests (read the repo file).
     @Test func settingsWritesTheLiveASRKeyPolicyReads() throws {
         let settings = try granipaSource("Sources/Granipa/UI/SettingsView.swift")
         let policy = try granipaSource(

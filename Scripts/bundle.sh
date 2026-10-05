@@ -51,6 +51,8 @@ cp "$BIN" "$APP/Contents/MacOS/Granipa"
 cp "$HELPER" "$APP/Contents/MacOS/GranipaBatteryHelper"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+# Battery control was removed. The plist and a no-op stub helper still ship so
+# LegacyBatteryHelper can unregister daemons registered by earlier builds.
 cp Resources/com.zertyn.granipa.batteryhelper.plist \
   "$APP/Contents/Library/LaunchDaemons/com.zertyn.granipa.batteryhelper.plist"
 
