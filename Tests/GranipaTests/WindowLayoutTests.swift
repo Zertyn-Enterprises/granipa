@@ -94,4 +94,77 @@ import Testing
         #expect(frame.maxX == 1000)
         #expect(frame.height == screen.height)
     }
+
+    @Test func gridShapeFollowsWindowCount() {
+        let shapes = [1, 2, 3, 4, 5, 6, 7, 8, 9].map {
+            WindowLayout.gridShape(count: $0, screen: screen)
+        }
+        #expect(shapes.map(\.columns) == [1, 2, 3, 2, 3, 3, 4, 4, 3])
+        #expect(shapes.map(\.rows) == [1, 1, 1, 2, 2, 2, 2, 2, 3])
+
+        let portrait = CGRect(x: 0, y: 25, width: 1080, height: 1895)
+        let six = WindowLayout.gridShape(count: 6, screen: portrait)
+        #expect(six.columns == 2)
+        #expect(six.rows == 3)
+    }
+
+    @Test func gridFramesCoverScreenWithoutOverlap() {
+        for count in 1...12 {
+            let frames = WindowLayout.gridFrames(count: count, screen: screen)
+            #expect(frames.count == count)
+            let area = frames.reduce(CGFloat(0)) { $0 + $1.width * $1.height }
+            #expect(area == screen.width * screen.height)
+            for (i, a) in frames.enumerated() {
+                #expect(screen.contains(a))
+                for b in frames[(i + 1)...] {
+                    let overlap = a.intersection(b)
+                    #expect(overlap.width * overlap.height == 0)
+                }
+            }
+        }
+    }
+
+    @Test func shortLastRowStretchesToFullWidth() {
+        let five = WindowLayout.gridFrames(count: 5, screen: screen)
+        let bottom = five.suffix(2)
+        #expect(bottom.allSatisfy { $0.width == screen.width / 2 })
+        #expect(bottom.first?.minX == screen.minX)
+        #expect(bottom.last?.maxX == screen.maxX)
+    }
+
+    @Test func retilingKeepsEachWindowInItsCell() {
+        let grid = WindowLayout.gridFrames(count: 6, screen: screen)
+        let shuffled = [grid[4], grid[0], grid[5], grid[2], grid[1], grid[3]]
+        let order = WindowLayout.tileOrder(shuffled)
+        #expect(order.map { shuffled[$0] } == grid)
+    }
+
+    @Test func stageStripReservesItsEdge() {
+        let left = WindowLayout.usableFrame(screen: screen, stageStrip: .left)
+        #expect(left.minX == screen.minX + WindowLayout.stageStripWidth)
+        #expect(left.maxX == screen.maxX)
+        #expect(left.height == screen.height)
+
+        let right = WindowLayout.usableFrame(screen: screen, stageStrip: .right)
+        #expect(right.minX == screen.minX)
+        #expect(right.maxX == screen.maxX - WindowLayout.stageStripWidth)
+
+        #expect(WindowLayout.usableFrame(screen: screen, stageStrip: nil) == screen)
+    }
+
+    @Test func wideStripThumbnailWidensTheReservation() {
+        let thumbnail = CGRect(x: 10, y: 400, width: 170, height: 120)
+        let usable = WindowLayout.usableFrame(
+            screen: screen, stageStrip: .left, stripWindows: [thumbnail])
+        #expect(usable.minX == thumbnail.maxX + WindowLayout.stageStripGap)
+
+        let elsewhere = CGRect(x: 700, y: 400, width: 170, height: 120)
+        let ignored = WindowLayout.usableFrame(
+            screen: screen, stageStrip: .left, stripWindows: [elsewhere])
+        #expect(ignored.minX == screen.minX + WindowLayout.stageStripWidth)
+    }
+
+    @Test func tileHasNoSingleWindowFrame() {
+        #expect(WindowLayout.frame(for: .tileAppWindows, screen: screen, current: .zero) == nil)
+    }
 }

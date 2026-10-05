@@ -33,9 +33,21 @@ final class WindowManager {
         }
 
         guard let screen = visibleFrameAX(forWindowFrame: current) else { return }
-        let occupied = WindowInventory.occupiedFrames(on: screen, ignoring: current)
+        let usable = WindowLayout.usableFrame(
+            screen: screen,
+            stageStrip: WindowInventory.stageStripSide,
+            stripWindows: WindowInventory.onscreenFrames().filter {
+                !WindowLayout.isSame($0, current)
+            })
+
+        if action == .tileAppWindows {
+            tileFrontmostAppWindows(on: screen, into: usable)
+            return
+        }
+
+        let occupied = WindowInventory.occupiedFrames(on: usable, ignoring: current)
         guard let target = WindowLayout.frame(
-            for: action, screen: screen, current: current, occupied: occupied)
+            for: action, screen: usable, current: current, occupied: occupied)
         else { return }
 
         if lastSnap == nil || !CFEqual(lastSnap!.window, window) {
@@ -44,7 +56,49 @@ final class WindowManager {
         setFrame(target, on: window)
     }
 
+    /// Grids the frontmost app's windows that sit on this screen and on the
+    /// current stage; windows parked in the Stage Manager strip stay there.
+    private func tileFrontmostAppWindows(on screen: CGRect, into usable: CGRect) {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return }
+        let onStage = WindowInventory.onscreenFrames(pid: app.processIdentifier)
+        let axApp = AXUIElementCreateApplication(app.processIdentifier)
+        var ref: CFTypeRef?
+        guard
+            AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &ref)
+                == .success,
+            let windows = ref as? [AXUIElement]
+        else { return }
+
+        // Native tabs are separate AX windows sharing one frame; keep one per group.
+        var tileable: [(window: AXUIElement, frame: CGRect)] = []
+        for window in windows {
+            guard isTileable(window), let frame = frame(of: window),
+                screen.contains(CGPoint(x: frame.midX, y: frame.midY)),
+                onStage.contains(where: { WindowLayout.isSame($0, frame) }),
+                !tileable.contains(where: { WindowLayout.isSame($0.frame, frame) })
+            else { continue }
+            tileable.append((window, frame))
+        }
+        let order = WindowLayout.tileOrder(tileable.map(\.frame))
+        let targets = WindowLayout.gridFrames(count: tileable.count, screen: usable)
+        for (target, index) in zip(targets, order) {
+            setFrame(target, on: tileable[index].window)
+        }
+    }
+
     // MARK: - Accessibility plumbing
+
+    private func isTileable(_ window: AXUIElement) -> Bool {
+        var subrole: CFTypeRef?
+        var minimized: CFTypeRef?
+        var fullScreen: CFTypeRef?
+        AXUIElementCopyAttributeValue(window, kAXSubroleAttribute as CFString, &subrole)
+        AXUIElementCopyAttributeValue(window, kAXMinimizedAttribute as CFString, &minimized)
+        AXUIElementCopyAttributeValue(window, "AXFullScreen" as CFString, &fullScreen)
+        return subrole as? String == kAXStandardWindowSubrole as String
+            && minimized as? Bool != true
+            && fullScreen as? Bool != true
+    }
 
     private func focusedWindow() -> AXUIElement? {
         guard let app = NSWorkspace.shared.frontmostApplication else { return nil }

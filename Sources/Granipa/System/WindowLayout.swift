@@ -5,6 +5,7 @@ enum WindowAction: String, CaseIterable, Sendable {
     case topLeft, topRight, bottomLeft, bottomRight
     case firstThird, centerThird, lastThird
     case maximize, center, restore
+    case tileAppWindows
 
     var title: String {
         switch self {
@@ -22,6 +23,7 @@ enum WindowAction: String, CaseIterable, Sendable {
         case .maximize: "Maximize"
         case .center: "Center"
         case .restore: "Restore"
+        case .tileAppWindows: "Tile app windows"
         }
     }
 
@@ -83,8 +85,77 @@ enum WindowLayout {
                 y: s.minY + ((s.height - height) / 2).rounded(),
                 width: width,
                 height: height)
-        case .restore:
+        case .restore, .tileAppWindows:
             return nil
+        }
+    }
+
+    enum StripSide: Sendable { case left, right }
+
+    /// Stage Manager keeps its strip of other app groups on one edge; snaps must
+    /// not cover it. Strip windows wider than the default reservation widen it.
+    static let stageStripWidth: CGFloat = 150
+    static let stageStripGap: CGFloat = 12
+
+    static func usableFrame(
+        screen s: CGRect, stageStrip side: StripSide?, stripWindows: [CGRect] = []
+    ) -> CGRect {
+        guard let side else { return s }
+        let band = max(s.width * 0.15, stageStripWidth)
+        var inset = stageStripWidth
+        for w in stripWindows where w.intersects(s) && w.width < band {
+            switch side {
+            case .left where w.minX < s.minX + band:
+                inset = max(inset, w.maxX - s.minX + stageStripGap)
+            case .right where w.maxX > s.maxX - band:
+                inset = max(inset, s.maxX - w.minX + stageStripGap)
+            default:
+                continue
+            }
+        }
+        inset = min(inset, band)
+        switch side {
+        case .left:
+            return CGRect(x: s.minX + inset, y: s.minY, width: s.width - inset, height: s.height)
+        case .right:
+            return CGRect(x: s.minX, y: s.minY, width: s.width - inset, height: s.height)
+        }
+    }
+
+    /// Up to three windows share one row; beyond that rows grow as √(n/2), so a
+    /// landscape screen gets 4→2×2, 6→3×2, 8→4×2, 9→3×3. Portrait swaps the axes.
+    static func gridShape(count: Int, screen s: CGRect) -> (columns: Int, rows: Int) {
+        guard count > 0 else { return (0, 0) }
+        let rows = count <= 3 ? 1 : Int((Double(count) / 2).squareRoot().rounded(.up))
+        let columns = Int((Double(count) / Double(rows)).rounded(.up))
+        return s.height > s.width ? (rows, columns) : (columns, rows)
+    }
+
+    /// Row-major cells; a short last row stretches its windows to the full width.
+    static func gridFrames(count: Int, screen s: CGRect) -> [CGRect] {
+        let columns = gridShape(count: count, screen: s).columns
+        guard columns > 0 else { return [] }
+        let rows = (count + columns - 1) / columns
+        var frames: [CGRect] = []
+        for row in 0..<rows {
+            let inRow = min(columns, count - row * columns)
+            let top = s.minY + (s.height * CGFloat(row) / CGFloat(rows)).rounded()
+            let bottom = s.minY + (s.height * CGFloat(row + 1) / CGFloat(rows)).rounded()
+            for column in 0..<inRow {
+                let left = s.minX + (s.width * CGFloat(column) / CGFloat(inRow)).rounded()
+                let right = s.minX + (s.width * CGFloat(column + 1) / CGFloat(inRow)).rounded()
+                frames.append(CGRect(x: left, y: top, width: right - left, height: bottom - top))
+            }
+        }
+        return frames
+    }
+
+    /// Reading order (top row first, then left to right) so re-tiling an
+    /// already tiled set keeps every window in its cell.
+    static func tileOrder(_ frames: [CGRect]) -> [Int] {
+        frames.indices.sorted {
+            (frames[$0].minY.rounded(), frames[$0].minX, $0)
+                < (frames[$1].minY.rounded(), frames[$1].minX, $1)
         }
     }
 
