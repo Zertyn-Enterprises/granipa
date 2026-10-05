@@ -5,7 +5,7 @@ import Carbon.HIToolbox
 @MainActor
 final class WindowManager {
     static let shared = WindowManager()
-    private var lastSnap: (window: AXUIElement, frame: CGRect)?
+    private var lastSnap: [(window: AXUIElement, frame: CGRect)] = []
 
     private var isEnabled: Bool {
         UserDefaults.standard.object(forKey: "windowSnappingEnabled") as? Bool ?? true
@@ -25,9 +25,9 @@ final class WindowManager {
         guard let window = focusedWindow(), let current = frame(of: window) else { return }
 
         if action == .restore {
-            if let last = lastSnap, CFEqual(last.window, window) {
-                setFrame(last.frame, on: window)
-                lastSnap = nil
+            if lastSnap.contains(where: { CFEqual($0.window, window) }) {
+                for snap in lastSnap { setFrame(snap.frame, on: snap.window) }
+                lastSnap = []
             }
             return
         }
@@ -50,8 +50,8 @@ final class WindowManager {
             for: action, screen: usable, current: current, occupied: occupied)
         else { return }
 
-        if lastSnap == nil || !CFEqual(lastSnap!.window, window) {
-            lastSnap = (window, current)
+        if lastSnap.count != 1 || !CFEqual(lastSnap[0].window, window) {
+            lastSnap = [(window, current)]
         }
         setFrame(target, on: window)
     }
@@ -69,16 +69,20 @@ final class WindowManager {
             let windows = ref as? [AXUIElement]
         else { return }
 
-        // Native tabs are separate AX windows sharing one frame; keep one per group.
+        // Each AX window must claim a distinct drawn window with its frame, so
+        // windows sharing a frame (e.g. undrawn tabs) tile only as often as drawn.
+        var unclaimed = onStage
         var tileable: [(window: AXUIElement, frame: CGRect)] = []
         for window in windows {
             guard isTileable(window), let frame = frame(of: window),
                 screen.contains(CGPoint(x: frame.midX, y: frame.midY)),
-                onStage.contains(where: { WindowLayout.isSame($0, frame) }),
-                !tileable.contains(where: { WindowLayout.isSame($0.frame, frame) })
+                let claim = unclaimed.firstIndex(where: { WindowLayout.isSame($0, frame) })
             else { continue }
+            unclaimed.remove(at: claim)
             tileable.append((window, frame))
         }
+        guard !tileable.isEmpty else { return }
+        lastSnap = tileable
         let order = WindowLayout.tileOrder(tileable.map(\.frame))
         let targets = WindowLayout.gridFrames(count: tileable.count, screen: usable)
         for (target, index) in zip(targets, order) {
