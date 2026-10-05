@@ -28,7 +28,9 @@ final class ShortcutHub {
             }
         }
 
-        if let hyperCode = WindowHyperKey.current.keyCode {
+        let hyper = WindowHyperKey.current
+        CapsLockRemap.apply(enabled: hyper == .capsLock)
+        if let hyperCode = hyper == .capsLock ? CapsLockRemap.f18KeyCode : hyper.keyCode {
             if !PasteService.isTrusted {
                 PasteService.requestTrust()
             }

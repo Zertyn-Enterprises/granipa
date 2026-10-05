@@ -13,9 +13,7 @@ final class HyperKeyMonitor: @unchecked Sendable {
     private let lock = NSLock()
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
-    private var hyperKeyCode: UInt32 = 0
-    private var bindings: [UInt32: UInt32] = [:]
-    private var hyperDown = false
+    private var layer = HyperLayer(hyperKeyCode: 0, bindings: [:])
     private var onAction: (@MainActor (UInt32) -> Void)?
 
     func start(
@@ -25,10 +23,8 @@ final class HyperKeyMonitor: @unchecked Sendable {
     ) {
         stop()
         lock.lock()
-        self.hyperKeyCode = hyperKeyCode
-        self.bindings = bindings
+        self.layer = HyperLayer(hyperKeyCode: hyperKeyCode, bindings: bindings)
         self.onAction = onAction
-        self.hyperDown = false
         lock.unlock()
 
         let mask =
@@ -68,7 +64,7 @@ final class HyperKeyMonitor: @unchecked Sendable {
         let source = self.source
         self.tap = nil
         self.source = nil
-        self.hyperDown = false
+        self.layer.release()
         lock.unlock()
         if let tap {
             CGEvent.tapEnable(tap: tap, enable: false)
@@ -88,38 +84,58 @@ final class HyperKeyMonitor: @unchecked Sendable {
         }
 
         let code = UInt32(event.getIntegerValueField(.keyboardEventKeycode))
+        let fromSelf =
+            event.getIntegerValueField(.eventSourceUnixProcessID) == Int64(getpid())
         lock.lock()
-        let hyper = hyperKeyCode
-        let bindings = bindings
-        let down = hyperDown
+        let outcome = layer.handle(code: code, type: type, fromSelf: fromSelf)
         let actionMap = onAction
         lock.unlock()
 
-        if code == hyper {
-            lock.lock()
-            if hyper == UInt32(kVK_CapsLock) {
-                // Caps Lock usually arrives as flagsChanged, not keyDown/keyUp.
-                // Toggle a layer: press ⇪ to arm, press ⇪ again to disarm.
-                if type == .flagsChanged { hyperDown.toggle() }
-            } else if type == .keyDown {
-                hyperDown = true
-            } else if type == .keyUp {
-                hyperDown = false
+        switch outcome {
+        case .pass:
+            return Unmanaged.passUnretained(event)
+        case .swallow:
+            return nil
+        case .action(let hotkeyID):
+            if let actionMap {
+                Task { @MainActor in actionMap(hotkeyID) }
             }
-            lock.unlock()
             return nil
         }
+    }
+}
 
-        if type == .flagsChanged {
-            return Unmanaged.passUnretained(event)
-        }
+/// Hold-to-use layer: while the macro key is down, bound keys fire their action
+/// and are swallowed. Events this process posts itself (paste's ⌘V) always
+/// pass, or a held layer would eat the paste and re-open the clipboard.
+struct HyperLayer: Sendable {
+    enum Outcome: Equatable {
+        case pass, swallow
+        case action(UInt32)
+    }
 
-        guard down, type == .keyDown, let hotkeyID = bindings[code] else {
-            return Unmanaged.passUnretained(event)
+    let hyperKeyCode: UInt32
+    let bindings: [UInt32: UInt32]
+    private(set) var isHeld = false
+
+    init(hyperKeyCode: UInt32, bindings: [UInt32: UInt32]) {
+        self.hyperKeyCode = hyperKeyCode
+        self.bindings = bindings
+    }
+
+    mutating func release() { isHeld = false }
+
+    mutating func handle(code: UInt32, type: CGEventType, fromSelf: Bool) -> Outcome {
+        if fromSelf { return .pass }
+        if code == hyperKeyCode {
+            if type == .keyDown {
+                isHeld = true
+            } else if type == .keyUp {
+                isHeld = false
+            }
+            return .swallow
         }
-        if let actionMap {
-            Task { @MainActor in actionMap(hotkeyID) }
-        }
-        return nil
+        guard isHeld, type == .keyDown, let id = bindings[code] else { return .pass }
+        return .action(id)
     }
 }
