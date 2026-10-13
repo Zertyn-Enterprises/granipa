@@ -14,7 +14,7 @@ enum EchoBleedFilter {
     /// segment, so the mic word may trail the system word by up to this much…
     static let wordToleranceSeconds = 4.0
     /// …and appear to lead it by at most this interpolation slack.
-    static let earlySlackSeconds = 2.0
+    static let earlySlackSeconds = 1.0
     /// Below this share of mic words the meeting most likely had no speaker
     /// bleed (headphones), and exact repeats are the user's own read-backs.
     static let minimumBleedShare = 0.25
@@ -36,6 +36,13 @@ enum EchoBleedFilter {
             try JSONEncoder().encode(mic).write(to: backup, options: .atomic)
         }
         try database.replaceSegments(meetingID: meetingID, channel: .mic, with: cleaned)
+    }
+
+    /// Deleting a meeting must not leave its transcript behind.
+    static func removeBackup(meetingID: String, from backupDirectory: URL?) {
+        guard let backupDirectory else { return }
+        try? FileManager.default.removeItem(
+            at: backupDirectory.appendingPathComponent(backupFileName(meetingID: meetingID)))
     }
 
     static func clean(mic: [TranscriptSegment], system: [TranscriptSegment]) -> [TranscriptSegment] {

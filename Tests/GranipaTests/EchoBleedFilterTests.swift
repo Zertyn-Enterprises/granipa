@@ -29,6 +29,35 @@ import Testing
         #expect(EchoBleedFilter.clean(mic: mic, system: system) == mic)
     }
 
+    @Test func anImmediateRepeatByTheOtherSideIsNotBleed() {
+        // Back to back: the user at 3–5 s, the other side echoing the words at 5–7 s.
+        let mic = [segment(.mic, "vale perfecto lo cerramos", 3, 5)]
+        let system = [segment(.system, "vale perfecto lo cerramos", 5, 7)]
+        #expect(EchoBleedFilter.clean(mic: mic, system: system) == mic)
+    }
+
+    @Test func deletingAMeetingRemovesItsTranscriptBackup() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bleed-delete-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let backup = directory.appendingPathComponent(
+            EchoBleedFilter.backupFileName(meetingID: "gone"))
+        try Data("[]".utf8).write(to: backup)
+
+        EchoBleedFilter.removeBackup(meetingID: "gone", from: directory)
+
+        #expect(!FileManager.default.fileExists(atPath: backup.path))
+        let app = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("Sources/Granipa/AppState.swift"),
+            encoding: .utf8)
+        let body = try #require(app.range(of: "func deleteMeeting(id: String)")).upperBound
+        #expect(app[body...].contains("EchoBleedFilter.removeBackup("))
+    }
+
     @Test func userWordsOnBothSidesOfBleedBecomeTwoTimedSegments() {
         let mic = [segment(.mic, "primero yo uno dos tres cuatro luego yo", 0, 8)]
         let system = [segment(.system, "uno dos tres cuatro", 2, 6)]
