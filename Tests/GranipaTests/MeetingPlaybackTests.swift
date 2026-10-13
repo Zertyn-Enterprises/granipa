@@ -277,6 +277,7 @@ enum TestMeetingAudio {
         #expect(combined == [0.1, 0.9, 0.1, 0.1])
     }
 
+#if DEBUG
     @Test @MainActor func resumingAfterTheShorterTrackEndedDoesNotRestartIt() async throws {
         let mic = tempURL("resume-mic")
         let system = tempURL("resume-system")
@@ -285,19 +286,23 @@ enum TestMeetingAudio {
             try? FileManager.default.removeItem(at: system)
         }
         try TestMeetingAudio.writeTone(to: mic, seconds: 0.3, frequency: 440)
-        try TestMeetingAudio.writeTone(to: system, seconds: 1.2, frequency: 660)
+        try TestMeetingAudio.writeTone(to: system, seconds: 6, frequency: 660)
 
         let player = MeetingPlaybackController()
         player.load(micPath: mic.path, systemPath: system.path)
         try await waitUntil(player) { $0 == .ready }
         player.play()
-        try await Task.sleep(for: .milliseconds(500))
+        for _ in 0..<200 where player.currentTime < 0.5 {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(player.currentTime >= 0.5)
         player.pause()
         player.play()
-        try await Task.sleep(for: .milliseconds(100))
+        try await Task.sleep(for: .milliseconds(150))
         #expect(await player.playingTrackCountForTesting() == 1)
         player.stopAndRelease()
     }
+#endif
 
     @Test @MainActor
     func selectingAVanishedChannelFailsReleasesAndKeepsTheDiagnostic() async throws {

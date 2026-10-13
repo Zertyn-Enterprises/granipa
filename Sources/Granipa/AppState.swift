@@ -449,6 +449,9 @@ final class AppState {
         }
         if let live {
             await live.finishAndWait()
+            // The open transcript reloaded when live ASR detached; the drained
+            // tail landed afterwards.
+            transcriptRevisions[id, default: 0] += 1
             await postProcess(meetingID: id, skipLocalDiarize: live.systemUsedMuse)
         } else {
             let outcome = await Task.detached(priority: .utility) {
@@ -487,7 +490,7 @@ final class AppState {
                 "Transcription failed — your audio was saved", style: .warning)
         }
 
-        cleanSpeakerBleed(meetingID: meetingID)
+        await cleanSpeakerBleed(meetingID: meetingID)
 
         if skipLocalDiarize {
             if inferNames {
@@ -535,12 +538,15 @@ final class AppState {
     /// status change, so an open detail view reloads it.
     private(set) var transcriptRevisions: [String: Int] = [:]
 
-    private func cleanSpeakerBleed(meetingID: String) {
+    private func cleanSpeakerBleed(meetingID: String) async {
         guard let db = database else { return }
         do {
-            let rewritten = try EchoBleedFilter.apply(
-                meetingID: meetingID, database: db,
-                backupDirectory: try AppPaths.transcriptBackupDirectory())
+            // Fetch, backup write and rewrite stay off the main actor.
+            let rewritten = try await Task.detached(priority: .utility) {
+                try EchoBleedFilter.apply(
+                    meetingID: meetingID, database: db,
+                    backupDirectory: try AppPaths.transcriptBackupDirectory())
+            }.value
             if rewritten { transcriptRevisions[meetingID, default: 0] += 1 }
         } catch {
             Self.log.error(
@@ -552,7 +558,7 @@ final class AppState {
     /// The notes buttons clean speaker bleed first, so meetings processed
     /// before the filter existed get it too; once cleaned it is a no-op.
     func regenerateNotes(meetingID: String) async {
-        cleanSpeakerBleed(meetingID: meetingID)
+        await cleanSpeakerBleed(meetingID: meetingID)
         await enhance(meetingID: meetingID)
     }
 

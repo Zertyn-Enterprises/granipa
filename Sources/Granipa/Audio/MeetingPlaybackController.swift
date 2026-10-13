@@ -40,6 +40,9 @@ enum MeetingPlaybackState: Equatable, Sendable {
 private actor PlaybackEngine {
     /// Longest recording first: it drives the clock and the end of playback.
     private var players: [AVAudioPlayer] = []
+    /// Intent, not AVAudioPlayer.isPlaying: during the sync lead the players
+    /// are scheduled but report not playing yet.
+    private var running = false
     /// Players started together share one output-device start time, so the
     /// mic and system tracks stay aligned like the meeting itself.
     private static let syncLead: TimeInterval = 0.05
@@ -70,7 +73,8 @@ private actor PlaybackEngine {
         guard let lead = players.first else { return false }
         if players.count == 1 {
             lead.rate = rate
-            return lead.play()
+            running = lead.play()
+            return running
         }
         // A shorter track that already ended reports currentTime 0, so every
         // track is placed at the lead's time; tracks past their end stay quiet.
@@ -83,15 +87,19 @@ private actor PlaybackEngine {
             player.currentTime = position
             started = player.play(atTime: start) && started
         }
+        // A half-started pair would play one track behind a failed facade.
+        if !started { players.forEach { $0.pause() } }
+        running = started
         return started
     }
 
     func pause() {
         players.forEach { $0.pause() }
+        running = false
     }
 
     func seek(to time: TimeInterval) {
-        let wasPlaying = isPlaying()
+        let wasPlaying = running
         let rate = players.first?.rate ?? 1
         if wasPlaying, players.count > 1 { pause() }
         for player in players {
@@ -118,6 +126,7 @@ private actor PlaybackEngine {
 
     func stopPlayback() {
         players.forEach { $0.stop() }
+        running = false
     }
 
     func playingTrackCount() -> Int {
@@ -130,6 +139,7 @@ private actor PlaybackEngine {
             player.delegate = nil
         }
         players = []
+        running = false
     }
 }
 
