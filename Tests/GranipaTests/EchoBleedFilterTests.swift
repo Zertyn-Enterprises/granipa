@@ -241,7 +241,7 @@ import Testing
             encoding: .utf8)
         let body = try #require(source.range(of: "func postProcess(")).upperBound
         let rest = source[body...]
-        let filter = try #require(rest.range(of: "cleanSpeakerBleed(meetingID: meetingID)"))
+        let filter = try #require(rest.range(of: "cleanSpeakerBleed(meetingID: meetingID, allowCoarseTiming: false)"))
         let diarize = try #require(rest.range(of: "DiarizationService.diarize("))
         let notes = try #require(rest.range(of: "await enhance(meetingID: meetingID)"))
         #expect(filter.lowerBound < diarize.lowerBound)
@@ -256,7 +256,7 @@ import Testing
             encoding: .utf8)
         let body = try #require(app.range(of: "func regenerateNotes(")).upperBound
         let rest = app[body...]
-        let clean = try #require(rest.range(of: "cleanSpeakerBleed(meetingID: meetingID)"))
+        let clean = try #require(rest.range(of: "cleanSpeakerBleed(meetingID: meetingID, allowCoarseTiming: true)"))
         let notes = try #require(rest.range(of: "await enhance(meetingID: meetingID)"))
         #expect(clean.lowerBound < notes.lowerBound)
         for view in ["MeetingRecordedViews.swift", "EnhancedNotesView.swift"] {

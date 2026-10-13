@@ -490,7 +490,7 @@ final class AppState {
                 "Transcription failed — your audio was saved", style: .warning)
         }
 
-        await cleanSpeakerBleed(meetingID: meetingID)
+        await cleanSpeakerBleed(meetingID: meetingID, allowCoarseTiming: false)
 
         if skipLocalDiarize {
             if inferNames {
@@ -538,14 +538,15 @@ final class AppState {
     /// status change, so an open detail view reloads it.
     private(set) var transcriptRevisions: [String: Int] = [:]
 
-    private func cleanSpeakerBleed(meetingID: String) async {
+    private func cleanSpeakerBleed(meetingID: String, allowCoarseTiming: Bool) async {
         guard let db = database else { return }
         do {
             // Fetch, backup write and rewrite stay off the main actor.
             let rewritten = try await Task.detached(priority: .utility) {
                 try EchoBleedFilter.apply(
                     meetingID: meetingID, database: db,
-                    backupDirectory: try AppPaths.transcriptBackupDirectory())
+                    backupDirectory: try AppPaths.transcriptBackupDirectory(),
+                    allowCoarseTiming: allowCoarseTiming)
             }.value
             if rewritten { transcriptRevisions[meetingID, default: 0] += 1 }
         } catch {
@@ -558,7 +559,8 @@ final class AppState {
     /// The notes buttons clean speaker bleed first, so meetings processed
     /// before the filter existed get it too; once cleaned it is a no-op.
     func regenerateNotes(meetingID: String) async {
-        await cleanSpeakerBleed(meetingID: meetingID)
+        // Explicit request: meetings without word timings get the coarse matcher.
+        await cleanSpeakerBleed(meetingID: meetingID, allowCoarseTiming: true)
         await enhance(meetingID: meetingID)
     }
 
