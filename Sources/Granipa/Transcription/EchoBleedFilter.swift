@@ -15,6 +15,9 @@ enum EchoBleedFilter {
     static let wordToleranceSeconds = 4.0
     /// …and appear to lead it by at most this interpolation slack.
     static let earlySlackSeconds = 1.0
+    /// With recognizer word timings, echo trails its source by the acoustic
+    /// path plus timestamp jitter; a genuine read-back trails by a whole turn.
+    static let preciseLagRange: ClosedRange<Double> = -0.25...0.8
     /// Below this share of mic words the meeting most likely had no speaker
     /// bleed (headphones), and exact repeats are the user's own read-backs.
     static let minimumBleedShare = 0.25
@@ -88,6 +91,11 @@ enum EchoBleedFilter {
             piece.text = run.map { String($0.token) }.joined(separator: " ")
             piece.startSeconds = run.first?.start ?? segment.startSeconds
             piece.endSeconds = run.last?.end ?? segment.endSeconds
+            if segment.words != nil {
+                piece.words = run.map {
+                    TranscriptWord(text: String($0.token), start: $0.start, end: $0.end)
+                }
+            }
             return piece
         }
     }
@@ -97,10 +105,19 @@ enum EchoBleedFilter {
         let word: String
         let start: Double
         let end: Double
+        /// Recognizer timing rather than an interpolated guess.
+        let isPrecise: Bool
         var seconds: Double { (start + end) / 2 }
     }
 
     private static func timedTokens(_ segment: TranscriptSegment) -> [TimedToken] {
+        if let words = segment.words, !words.isEmpty {
+            return words.map {
+                TimedToken(
+                    token: Substring($0.text), word: normalized(Substring($0.text)),
+                    start: $0.start, end: $0.end, isPrecise: true)
+            }
+        }
         let tokens = segment.text.split(whereSeparator: \.isWhitespace)
         let span = max(segment.endSeconds - segment.startSeconds, 0)
         let step = tokens.isEmpty ? 0 : span / Double(tokens.count)
@@ -109,7 +126,8 @@ enum EchoBleedFilter {
                 token: token,
                 word: normalized(token),
                 start: segment.startSeconds + step * Double(index),
-                end: segment.startSeconds + step * Double(index + 1))
+                end: segment.startSeconds + step * Double(index + 1),
+                isPrecise: false)
         }
     }
 
@@ -165,6 +183,9 @@ enum EchoBleedFilter {
     }
 
     private static func isCausalEcho(_ mine: TimedToken, of heard: TimedToken) -> Bool {
+        if mine.isPrecise, heard.isPrecise {
+            return preciseLagRange.contains(mine.start - heard.start)
+        }
         let lag = mine.seconds - heard.seconds
         return lag >= -earlySlackSeconds && lag <= wordToleranceSeconds
     }

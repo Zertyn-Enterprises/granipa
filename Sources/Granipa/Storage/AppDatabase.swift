@@ -131,6 +131,11 @@ struct AppDatabase: Sendable {
                 t.column("sourceApp", .text)
             }
         }
+        migrator.registerMigration("v9-transcript-word-timings") { db in
+            try db.alter(table: "transcriptSegment") { t in
+                t.add(column: "words", .text)
+            }
+        }
         return migrator
     }
 }

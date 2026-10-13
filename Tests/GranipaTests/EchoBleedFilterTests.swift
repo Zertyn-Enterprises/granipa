@@ -58,6 +58,41 @@ import Testing
         #expect(app[body...].contains("EchoBleedFilter.removeBackup("))
     }
 
+    private func timedSegment(
+        _ channel: AudioChannel, _ words: [(String, Double)], wordSeconds: Double = 0.3
+    ) -> TranscriptSegment {
+        let timed = words.map { TranscriptWord(text: $0.0, start: $0.1, end: $0.1 + wordSeconds) }
+        return TranscriptSegment.new(
+            meetingID: "m", channel: channel, speaker: channel == .mic ? "Me" : "Them",
+            text: timed.map(\.text).joined(separator: " "),
+            startSeconds: timed.first?.start ?? 0, endSeconds: timed.last?.end ?? 0,
+            isFinal: true, words: timed)
+    }
+
+    @Test func wordTimedEchoIsRemoved() {
+        // Speaker bleed: each system word reappears in the mic ~0.15 s later.
+        let system = [timedSegment(.system, [("lo", 1.0), ("enviamos", 1.3), ("el", 1.6), ("lunes", 1.9)])]
+        let mic = [timedSegment(.mic, [("vale", 0.2), ("lo", 1.15), ("enviamos", 1.45), ("el", 1.75), ("lunes", 2.05)])]
+        let cleaned = EchoBleedFilter.clean(mic: mic, system: system)
+        #expect(cleaned.map(\.text) == ["vale"])
+        #expect(cleaned.first?.words?.map(\.text) == ["vale"])
+    }
+
+    @Test func wordTimedReadBackAfterTheOtherTurnStays() {
+        // The user repeats the other side's line right after it ends: a turn
+        // later, not an echo — even though the meeting is mostly bleed.
+        let system = [
+            timedSegment(.system, [("lo", 0.0), ("enviamos", 0.3), ("el", 0.6), ("lunes", 0.9)]),
+            timedSegment(.system, [("y", 5.0), ("el", 5.3), ("contrato", 5.6), ("también", 5.9)]),
+        ]
+        let mic = [
+            timedSegment(.mic, [("lo", 1.4), ("enviamos", 1.7), ("el", 2.0), ("lunes", 2.3)]),
+            timedSegment(.mic, [("y", 5.1), ("el", 5.4), ("contrato", 5.7), ("también", 6.0)]),
+        ]
+        let cleaned = EchoBleedFilter.clean(mic: mic, system: system)
+        #expect(cleaned.map(\.text) == ["lo enviamos el lunes"])
+    }
+
     @Test func userWordsOnBothSidesOfBleedBecomeTwoTimedSegments() {
         let mic = [segment(.mic, "primero yo uno dos tres cuatro luego yo", 0, 8)]
         let system = [segment(.system, "uno dos tres cuatro", 2, 6)]
