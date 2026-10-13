@@ -263,8 +263,40 @@ enum TestMeetingAudio {
     }
 
     @Test func waveformOfBothTracksIsTheLouderBar() {
-        #expect(MeetingWaveform.combined([[0.1, 0.8, 0], [0.5, 0.2, 0]]) == [0.5, 0.8, 0])
+        #expect(
+            MeetingWaveform.combined([([0.1, 0.8, 0], 3), ([0.5, 0.2, 0], 3)]) == [0.5, 0.8, 0])
         #expect(MeetingWaveform.combined([]) == nil)
+    }
+
+    @Test func aShorterTrackSitsAtItsRealTimeInTheWaveform() {
+        // 2 s track loud in its second half, under a quiet 4 s track: the loud
+        // part is at 1–2 s of the meeting, not stretched to 2–4 s.
+        let combined = MeetingWaveform.combined([
+            ([0.1, 0.1, 0.1, 0.1], 4), ([0.1, 0.1, 0.9, 0.9], 2),
+        ])
+        #expect(combined == [0.1, 0.9, 0.1, 0.1])
+    }
+
+    @Test @MainActor func resumingAfterTheShorterTrackEndedDoesNotRestartIt() async throws {
+        let mic = tempURL("resume-mic")
+        let system = tempURL("resume-system")
+        defer {
+            try? FileManager.default.removeItem(at: mic)
+            try? FileManager.default.removeItem(at: system)
+        }
+        try TestMeetingAudio.writeTone(to: mic, seconds: 0.3, frequency: 440)
+        try TestMeetingAudio.writeTone(to: system, seconds: 1.2, frequency: 660)
+
+        let player = MeetingPlaybackController()
+        player.load(micPath: mic.path, systemPath: system.path)
+        try await waitUntil(player) { $0 == .ready }
+        player.play()
+        try await Task.sleep(for: .milliseconds(500))
+        player.pause()
+        player.play()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(await player.playingTrackCountForTesting() == 1)
+        player.stopAndRelease()
     }
 
     @Test @MainActor

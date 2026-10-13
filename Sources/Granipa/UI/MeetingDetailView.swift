@@ -558,7 +558,7 @@ struct MeetingDetailView: View {
     /// Reload segments when the live coordinator detaches (stop) and again
     /// when the pipeline finishes — the local copy can lag both writes.
     private var taskKey: String {
-        "\(liveTranscription != nil)-\(freshStatus.rawValue)"
+        "\(liveTranscription != nil)-\(freshStatus.rawValue)-\(app.transcriptRevisions[meeting.id] ?? 0)"
     }
 
     private var freshStatus: MeetingStatus {

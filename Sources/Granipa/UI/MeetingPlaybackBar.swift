@@ -47,7 +47,13 @@ struct MeetingPlaybackBar: View {
             let urls = playback.loadedURLs
             guard !urls.isEmpty else { return }
             let decoded = await Task.detached(priority: .utility) {
-                MeetingWaveform.combined(urls.compactMap { MeetingWaveform.decode(url: $0) })
+                MeetingWaveform.combined(
+                    urls.compactMap { url in
+                        guard let peaks = MeetingWaveform.decode(url: url),
+                            let duration = MeetingWaveform.duration(url: url)
+                        else { return nil }
+                        return (peaks, duration)
+                    })
             }.value
             guard !Task.isCancelled else { return }
             peaks = decoded

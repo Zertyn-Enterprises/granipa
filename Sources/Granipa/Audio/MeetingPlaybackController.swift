@@ -45,7 +45,10 @@ private actor PlaybackEngine {
     private static let syncLead: TimeInterval = 0.05
 
     /// Tears down any previous players, then opens and prepares the new ones.
-    func replace(urls: [URL], rate: Float, delegate: PlaybackDelegateBox?) throws -> TimeInterval {
+    func replace(
+        urls: [URL], rate: Float, delegate: PlaybackDelegateBox?,
+        secondaryDelegate: PlaybackDelegateBox?
+    ) throws -> TimeInterval {
         reset()
         var opened: [AVAudioPlayer] = []
         for url in urls {
@@ -56,7 +59,9 @@ private actor PlaybackEngine {
             opened.append(audio)
         }
         opened.sort { $0.duration > $1.duration }
-        opened.first?.delegate = delegate
+        for (index, player) in opened.enumerated() {
+            player.delegate = index == 0 ? delegate : secondaryDelegate
+        }
         players = opened
         return opened.first?.duration ?? 0
     }
@@ -67,13 +72,16 @@ private actor PlaybackEngine {
             lead.rate = rate
             return lead.play()
         }
+        // A shorter track that already ended reports currentTime 0, so every
+        // track is placed at the lead's time; tracks past their end stay quiet.
+        let position = lead.currentTime
         let start = lead.deviceCurrentTime + Self.syncLead
         var started = true
         for player in players {
             player.rate = rate
-            if player.currentTime < player.duration {
-                started = player.play(atTime: start) && started
-            }
+            guard position < player.duration else { continue }
+            player.currentTime = position
+            started = player.play(atTime: start) && started
         }
         return started
     }
@@ -112,6 +120,10 @@ private actor PlaybackEngine {
         players.forEach { $0.stop() }
     }
 
+    func playingTrackCount() -> Int {
+        players.filter(\.isPlaying).count
+    }
+
     func reset() {
         for player in players {
             player.stop()
@@ -138,6 +150,7 @@ final class MeetingPlaybackController {
 
     @ObservationIgnored private let engine = PlaybackEngine()
     @ObservationIgnored private var delegateBox: PlaybackDelegateBox?
+    @ObservationIgnored private var secondaryDelegateBox: PlaybackDelegateBox?
     @ObservationIgnored private var tickTask: Task<Void, Never>?
     /// Serializes engine effects so ordered calls (seek then play) and a
     /// channel replacement apply in submission order.
@@ -248,6 +261,13 @@ final class MeetingPlaybackController {
         openCurrentSource(resumingAt: duration > 0 ? min(resumeTime, duration) : nil)
     }
 
+#if DEBUG
+    func playingTrackCountForTesting() async -> Int {
+        await controlTask.value
+        return await engine.playingTrackCount()
+    }
+#endif
+
     func stopAndRelease() {
         cancelOpen()
         micPath = nil
@@ -289,14 +309,19 @@ final class MeetingPlaybackController {
         let urls = present.map { URL(fileURLWithPath: $0) }
         state = .preparing
         delegateBox?.controller = nil
+        secondaryDelegateBox?.controller = nil
         let box = PlaybackDelegateBox()
         box.controller = self
         delegateBox = box
+        let secondaryBox = PlaybackDelegateBox(drivesEnd: false)
+        secondaryBox.controller = self
+        secondaryDelegateBox = secondaryBox
         let appliedRate = rate
         enqueue { engine in
             do {
                 let preparedDuration = try await engine.replace(
-                    urls: urls, rate: appliedRate, delegate: box)
+                    urls: urls, rate: appliedRate, delegate: box,
+                    secondaryDelegate: secondaryBox)
                 guard current == self.generation else { return }
                 self.loadedURLs = urls
                 self.duration = preparedDuration
@@ -331,6 +356,8 @@ final class MeetingPlaybackController {
     private func releaseEngine() {
         delegateBox?.controller = nil
         delegateBox = nil
+        secondaryDelegateBox?.controller = nil
+        secondaryDelegateBox = nil
         loadedURLs = []
         duration = 0
         currentTime = 0
@@ -412,8 +439,16 @@ final class MeetingPlaybackController {
 /// AVAudioPlayer callbacks can arrive off the main actor; hop back in.
 private final class PlaybackDelegateBox: NSObject, AVAudioPlayerDelegate, @unchecked Sendable {
     weak var controller: MeetingPlaybackController?
+    /// Only the longest track's finish ends playback; any track's decode
+    /// error is reported.
+    private let drivesEnd: Bool
+
+    init(drivesEnd: Bool = true) {
+        self.drivesEnd = drivesEnd
+    }
 
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        guard drivesEnd else { return }
         Task { @MainActor in
             controller?.handleFinished(successfully: flag)
         }

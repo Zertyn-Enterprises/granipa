@@ -194,8 +194,14 @@ import Testing
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
 
-        try EchoBleedFilter.apply(
-            meetingID: meeting.id, database: db, backupDirectory: directory, allowCoarseTiming: true)
+        #expect(
+            try EchoBleedFilter.apply(
+                meetingID: meeting.id, database: db, backupDirectory: directory,
+                allowCoarseTiming: true))
+        #expect(
+            !(try EchoBleedFilter.apply(
+                meetingID: meeting.id, database: db, backupDirectory: directory,
+                allowCoarseTiming: true)))
 
         let after = try db.fetchSegments(meetingID: meeting.id)
         #expect(after.filter { $0.channel == .mic }.map(\.text) == ["Hola, hola."])

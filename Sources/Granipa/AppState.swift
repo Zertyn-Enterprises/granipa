@@ -531,12 +531,17 @@ final class AppState {
         }
     }
 
+    /// Bumped when a meeting's stored transcript is rewritten outside a
+    /// status change, so an open detail view reloads it.
+    private(set) var transcriptRevisions: [String: Int] = [:]
+
     private func cleanSpeakerBleed(meetingID: String) {
         guard let db = database else { return }
         do {
-            try EchoBleedFilter.apply(
+            let rewritten = try EchoBleedFilter.apply(
                 meetingID: meetingID, database: db,
                 backupDirectory: try AppPaths.transcriptBackupDirectory())
+            if rewritten { transcriptRevisions[meetingID, default: 0] += 1 }
         } catch {
             Self.log.error(
                 "speaker-bleed cleanup failed for \(meetingID, privacy: .public): \(error.localizedDescription, privacy: .public)"
