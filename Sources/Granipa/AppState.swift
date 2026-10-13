@@ -467,6 +467,14 @@ final class AppState {
                 "Transcription failed — your audio was saved", style: .warning)
         }
 
+        do {
+            try EchoBleedFilter.apply(meetingID: meetingID, database: db)
+        } catch {
+            Self.log.error(
+                "speaker-bleed cleanup failed for \(meetingID, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+        }
+
         if skipLocalDiarize {
             if inferNames {
                 try? await DiarizationService.inferNames(
