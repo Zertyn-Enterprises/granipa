@@ -49,6 +49,20 @@ import Testing
         }
     }
 
+    @Test func timeoutIsReportedWhenTheCLIExitsCleanlyOnSIGTERM() async {
+        // grok traps SIGTERM and exits 143, so the kill looks like a normal exit.
+        do {
+            _ = try await LLMRunner.run(
+                executable: URL(fileURLWithPath: "/bin/sh"),
+                arguments: ["-c", "trap 'exit 143' TERM; while :; do sleep 0.1; done"],
+                stdin: nil,
+                timeout: 0.5)
+            Issue.record("expected a timeout")
+        } catch {
+            #expect(error.localizedDescription.contains("timed out"))
+        }
+    }
+
     @Test func largeStdinDoesNotDeadlock() async throws {
         let big = String(repeating: "x", count: 300_000)
         let output = try await LLMRunner.run(
@@ -57,6 +71,16 @@ import Testing
             stdin: big,
             timeout: 15)
         #expect(output.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "300000")
+    }
+}
+
+@Suite struct LLMProviderTests {
+    @Test func grokRunsTheFastModelAtLowEffort() throws {
+        let grok = try #require(LLMProviders.spec(id: "grok"))
+        #expect(grok.arguments == [
+            "-m", "grok-4.7-build-fast", "--reasoning-effort", "low",
+            "-p", LLMProviderSpec.promptPlaceholder,
+        ])
     }
 }
 
