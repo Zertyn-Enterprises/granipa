@@ -26,6 +26,12 @@ import Testing
         #expect(TranscriptWords.from(AttributedString("sin tiempos")) == nil)
     }
 
+    @Test func partiallyTaggedTextHasNoWordTimings() {
+        var text = timed("hola ", 1.0, 1.4)
+        text.append(AttributedString("mundo"))
+        #expect(TranscriptWords.from(text) == nil)
+    }
+
     @Test func wordTimingsPersistAndOldRowsReadAsNil() throws {
         let db = try AppDatabase(writer: DatabaseQueue())
         let meeting = Meeting.new(title: "Words", language: "es-ES")

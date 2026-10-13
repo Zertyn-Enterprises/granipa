@@ -16,6 +16,15 @@ enum TranscriptWords {
             guard !word.isEmpty, start.isFinite, end.isFinite else { continue }
             words.append(TranscriptWord(text: word, start: start, end: end))
         }
-        return words.isEmpty ? nil : words
+        // Partial tagging would drop untagged words when a filtered segment
+        // is rebuilt from its words, so only a full cover is kept.
+        guard !words.isEmpty,
+            letters(of: words.map(\.text).joined()) == letters(of: String(text.characters))
+        else { return nil }
+        return words
+    }
+
+    private static func letters(of text: String) -> String {
+        String(text.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) })
     }
 }

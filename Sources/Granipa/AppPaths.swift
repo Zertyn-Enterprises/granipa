@@ -20,10 +20,12 @@ enum AppPaths {
     }
 
     /// Outside audio/, so audio retention never removes these.
-    static func transcriptBackupDirectory() throws -> URL {
+    static func transcriptBackupDirectory(create: Bool = true) throws -> URL {
         let dir = try supportDirectory()
             .appendingPathComponent("transcript-backups", isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        if create {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
         return dir
     }
 

@@ -21,8 +21,10 @@ enum EchoBleedFilter {
     /// Below this share of mic words the meeting most likely had no speaker
     /// bleed (headphones), and exact repeats are the user's own read-backs.
     static let minimumBleedShare = 0.25
-    static func backupFileName(meetingID: String) -> String {
-        "\(meetingID)-mic-before-bleed-filter.json"
+    /// One file per rewriting pass (a meeting can be recorded again), so
+    /// every pre-filter version survives.
+    static func backupFileName(meetingID: String, date: Date = .now) -> String {
+        "\(meetingID)-mic-before-bleed-filter-\(Int(date.timeIntervalSince1970 * 1000)).json"
     }
 
     /// Rewrites the mic channel only after saving the original segments to
@@ -35,17 +37,18 @@ enum EchoBleedFilter {
         let cleaned = clean(mic: mic, system: system)
         guard cleaned != mic else { return }
         let backup = backupDirectory.appendingPathComponent(backupFileName(meetingID: meetingID))
-        if !FileManager.default.fileExists(atPath: backup.path) {
-            try JSONEncoder().encode(mic).write(to: backup, options: .atomic)
-        }
+        try JSONEncoder().encode(mic).write(to: backup, options: .atomic)
         try database.replaceSegments(meetingID: meetingID, channel: .mic, with: cleaned)
     }
 
     /// Deleting a meeting must not leave its transcript behind.
-    static func removeBackup(meetingID: String, from backupDirectory: URL?) {
-        guard let backupDirectory else { return }
-        try? FileManager.default.removeItem(
-            at: backupDirectory.appendingPathComponent(backupFileName(meetingID: meetingID)))
+    static func removeBackups(meetingID: String, from backupDirectory: URL?) {
+        guard let backupDirectory,
+            let names = try? FileManager.default.contentsOfDirectory(atPath: backupDirectory.path)
+        else { return }
+        for name in names where name.hasPrefix("\(meetingID)-mic-before-bleed-filter") {
+            try? FileManager.default.removeItem(at: backupDirectory.appendingPathComponent(name))
+        }
     }
 
     static func clean(mic: [TranscriptSegment], system: [TranscriptSegment]) -> [TranscriptSegment] {

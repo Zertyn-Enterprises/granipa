@@ -41,13 +41,19 @@ import Testing
             .appendingPathComponent("bleed-delete-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        let backup = directory.appendingPathComponent(
-            EchoBleedFilter.backupFileName(meetingID: "gone"))
-        try Data("[]".utf8).write(to: backup)
+        let first = directory.appendingPathComponent(
+            EchoBleedFilter.backupFileName(meetingID: "gone", date: Date(timeIntervalSince1970: 1)))
+        let second = directory.appendingPathComponent(
+            EchoBleedFilter.backupFileName(meetingID: "gone", date: Date(timeIntervalSince1970: 2)))
+        let other = directory.appendingPathComponent(
+            EchoBleedFilter.backupFileName(meetingID: "kept"))
+        for url in [first, second, other] { try Data("[]".utf8).write(to: url) }
 
-        EchoBleedFilter.removeBackup(meetingID: "gone", from: directory)
+        EchoBleedFilter.removeBackups(meetingID: "gone", from: directory)
 
-        #expect(!FileManager.default.fileExists(atPath: backup.path))
+        #expect(!FileManager.default.fileExists(atPath: first.path))
+        #expect(!FileManager.default.fileExists(atPath: second.path))
+        #expect(FileManager.default.fileExists(atPath: other.path))
         let app = try String(
             contentsOf: URL(fileURLWithPath: #filePath)
                 .deletingLastPathComponent().deletingLastPathComponent()
@@ -55,7 +61,7 @@ import Testing
                 .appendingPathComponent("Sources/Granipa/AppState.swift"),
             encoding: .utf8)
         let body = try #require(app.range(of: "func deleteMeeting(id: String)")).upperBound
-        #expect(app[body...].contains("EchoBleedFilter.removeBackup("))
+        #expect(app[body...].contains("EchoBleedFilter.removeBackups("))
     }
 
     private func timedSegment(
@@ -171,9 +177,9 @@ import Testing
         let after = try db.fetchSegments(meetingID: meeting.id)
         #expect(after.filter { $0.channel == .mic }.map(\.text) == ["Hola, hola."])
         #expect(after.filter { $0.channel == .system } == [theirs])
-        let backup = try Data(
-            contentsOf: directory.appendingPathComponent(
-                EchoBleedFilter.backupFileName(meetingID: meeting.id)))
+        let backups = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        #expect(backups.count == 1)
+        let backup = try Data(contentsOf: directory.appendingPathComponent(try #require(backups.first)))
         #expect(try JSONDecoder().decode([TranscriptSegment].self, from: backup) == [mine])
     }
 
