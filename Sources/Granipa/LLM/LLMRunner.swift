@@ -140,9 +140,13 @@ enum LLMRunner {
             throw LLMError.terminated
         }
         guard process.terminationStatus == 0 else {
+            // Some CLIs (claude -p) print API errors on stdout and leave
+            // stderr empty; without this the user saw a blank reason.
+            let reason = stderr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? stdout : stderr
             throw LLMError.nonZeroExit(
                 process.terminationStatus,
-                String(stderr.suffix(500)).trimmingCharacters(in: .whitespacesAndNewlines))
+                String(reason.suffix(500)).trimmingCharacters(in: .whitespacesAndNewlines))
         }
         return Output(stdout: stdout)
     }

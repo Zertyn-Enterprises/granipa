@@ -24,6 +24,21 @@ import Testing
         }
     }
 
+    @Test func failureWithoutStderrReportsStdout() async {
+        // The claude CLI prints API errors (e.g. a safeguard refusal) on
+        // stdout and exits 1 with stderr empty.
+        do {
+            _ = try await LLMRunner.run(
+                executable: URL(fileURLWithPath: "/bin/sh"),
+                arguments: ["-c", "echo 'API Error: safeguards flagged this session'; exit 1"],
+                stdin: nil,
+                timeout: 10)
+            Issue.record("expected a failure")
+        } catch {
+            #expect(error.localizedDescription.contains("API Error: safeguards flagged this session"))
+        }
+    }
+
     @Test func timeoutTerminatesProcess() async {
         await #expect(throws: LLMError.self) {
             _ = try await LLMRunner.run(
