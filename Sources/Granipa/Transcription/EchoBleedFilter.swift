@@ -10,15 +10,20 @@ enum EchoBleedFilter {
     static let minRun = 3
     static let maxBridgedGap = 2
     static let windowSeconds = 1.5
-    /// Word times are interpolated across their segment, so matches allow slack.
+    /// Echo comes after its source; word times are interpolated across their
+    /// segment, so the mic word may trail the system word by up to this much…
     static let wordToleranceSeconds = 4.0
+    /// …and appear to lead it by at most this interpolation slack.
+    static let earlySlackSeconds = 2.0
     /// Below this share of mic words the meeting most likely had no speaker
     /// bleed (headphones), and exact repeats are the user's own read-backs.
     static let minimumBleedShare = 0.25
-    static let backupFileName = "mic-transcript-before-bleed-filter.json"
+    static func backupFileName(meetingID: String) -> String {
+        "\(meetingID)-mic-before-bleed-filter.json"
+    }
 
-    /// Rewrites the mic channel only after saving the original segments next
-    /// to the meeting audio; without a backup directory nothing changes.
+    /// Rewrites the mic channel only after saving the original segments to
+    /// the backup directory; without one nothing changes.
     static func apply(meetingID: String, database: AppDatabase, backupDirectory: URL?) throws {
         guard let backupDirectory else { return }
         let segments = try database.fetchSegments(meetingID: meetingID)
@@ -26,7 +31,7 @@ enum EchoBleedFilter {
         let system = segments.filter { $0.channel == .system && $0.isFinal }
         let cleaned = clean(mic: mic, system: system)
         guard cleaned != mic else { return }
-        let backup = backupDirectory.appendingPathComponent(backupFileName)
+        let backup = backupDirectory.appendingPathComponent(backupFileName(meetingID: meetingID))
         if !FileManager.default.fileExists(atPath: backup.path) {
             try JSONEncoder().encode(mic).write(to: backup, options: .atomic)
         }
@@ -46,31 +51,58 @@ enum EchoBleedFilter {
         }
         guard words > 0, Double(bleed) / Double(words) >= minimumBleedShare else { return mic }
 
-        return zip(mic, masks).compactMap { segment, mask in
-            guard let mask, mask.contains(true) else { return segment }
-            let kept = zip(timedTokens(segment), mask).filter { !$0.1 }.map(\.0)
-            guard kept.contains(where: { !$0.word.isEmpty }) else { return nil }
-            var copy = segment
-            copy.text = kept.map { String($0.token) }.joined(separator: " ")
-            return copy
+        return zip(mic, masks).flatMap { segment, mask -> [TranscriptSegment] in
+            guard let mask, mask.contains(true) else { return [segment] }
+            return keptPieces(of: segment, mask: mask)
+        }
+    }
+
+    /// Each contiguous run of kept tokens becomes a segment whose bounds are
+    /// those tokens' interpolated span, so seek and export stay on real speech.
+    private static func keptPieces(of segment: TranscriptSegment, mask: [Bool])
+        -> [TranscriptSegment]
+    {
+        let tokens = timedTokens(segment)
+        var runs: [[TimedToken]] = []
+        var current: [TimedToken] = []
+        for (token, dropped) in zip(tokens, mask) {
+            if dropped {
+                if !current.isEmpty { runs.append(current) }
+                current = []
+            } else {
+                current.append(token)
+            }
+        }
+        if !current.isEmpty { runs.append(current) }
+        let kept = runs.filter { $0.contains { !$0.word.isEmpty } }
+        return kept.enumerated().map { index, run in
+            var piece = segment
+            if index > 0 { piece.id = UUID().uuidString }
+            piece.text = run.map { String($0.token) }.joined(separator: " ")
+            piece.startSeconds = run.first?.start ?? segment.startSeconds
+            piece.endSeconds = run.last?.end ?? segment.endSeconds
+            return piece
         }
     }
 
     private struct TimedToken {
         let token: Substring
         let word: String
-        let seconds: Double
+        let start: Double
+        let end: Double
+        var seconds: Double { (start + end) / 2 }
     }
 
     private static func timedTokens(_ segment: TranscriptSegment) -> [TimedToken] {
         let tokens = segment.text.split(whereSeparator: \.isWhitespace)
         let span = max(segment.endSeconds - segment.startSeconds, 0)
+        let step = tokens.isEmpty ? 0 : span / Double(tokens.count)
         return tokens.enumerated().map { index, token in
             TimedToken(
                 token: token,
                 word: normalized(token),
-                seconds: segment.startSeconds
-                    + span * (Double(index) + 0.5) / Double(tokens.count))
+                start: segment.startSeconds + step * Double(index),
+                end: segment.startSeconds + step * Double(index + 1))
         }
     }
 
@@ -116,14 +148,18 @@ enum EchoBleedFilter {
             var length = 0
             while start + length < mine.count, offset + length < heard.count,
                 mine[start + length].word == heard[offset + length].word,
-                abs(mine[start + length].seconds - heard[offset + length].seconds)
-                    <= wordToleranceSeconds
+                isCausalEcho(mine[start + length], of: heard[offset + length])
             {
                 length += 1
             }
             best = max(best, length)
         }
         return best
+    }
+
+    private static func isCausalEcho(_ mine: TimedToken, of heard: TimedToken) -> Bool {
+        let lag = mine.seconds - heard.seconds
+        return lag >= -earlySlackSeconds && lag <= wordToleranceSeconds
     }
 
     static func normalized(_ token: Substring) -> String {

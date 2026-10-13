@@ -18,6 +18,26 @@ import Testing
         let system = [segment(.system, "Qué tal, cómo estás tú", 1, 4)]
         let cleaned = EchoBleedFilter.clean(mic: mic, system: system)
         #expect(cleaned.map(\.text) == ["Hola, hola."])
+        // Bounds follow the kept words: 2 of 7 interpolated tokens over 0–4 s.
+        #expect(cleaned.first?.startSeconds == 0)
+        #expect(abs((cleaned.first?.endSeconds ?? 0) - 8.0 / 7.0) < 0.001)
+    }
+
+    @Test func theOtherSideRepeatingTheUserLaterIsNotBleed() {
+        let mic = [segment(.mic, "we should go now", 3, 5)]
+        let system = [segment(.system, "we should go now", 5.5, 7.5)]
+        #expect(EchoBleedFilter.clean(mic: mic, system: system) == mic)
+    }
+
+    @Test func userWordsOnBothSidesOfBleedBecomeTwoTimedSegments() {
+        let mic = [segment(.mic, "primero yo uno dos tres cuatro luego yo", 0, 8)]
+        let system = [segment(.system, "uno dos tres cuatro", 2, 6)]
+        let cleaned = EchoBleedFilter.clean(mic: mic, system: system)
+        #expect(cleaned.map(\.text) == ["primero yo", "luego yo"])
+        #expect(cleaned.map(\.startSeconds) == [0, 6])
+        #expect(cleaned.map(\.endSeconds) == [2, 8])
+        #expect(cleaned.first?.id == mic.first?.id)
+        #expect(Set(cleaned.map(\.id)).count == 2)
     }
 
     @Test func dropsASegmentThatIsOnlyBleed() {
@@ -88,7 +108,8 @@ import Testing
         #expect(after.filter { $0.channel == .mic }.map(\.text) == ["Hola, hola."])
         #expect(after.filter { $0.channel == .system } == [theirs])
         let backup = try Data(
-            contentsOf: directory.appendingPathComponent(EchoBleedFilter.backupFileName))
+            contentsOf: directory.appendingPathComponent(
+                EchoBleedFilter.backupFileName(meetingID: meeting.id)))
         #expect(try JSONDecoder().decode([TranscriptSegment].self, from: backup) == [mine])
     }
 

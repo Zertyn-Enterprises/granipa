@@ -19,6 +19,14 @@ enum AppPaths {
         return dir
     }
 
+    /// Outside audio/, so audio retention never removes these.
+    static func transcriptBackupDirectory() throws -> URL {
+        let dir = try supportDirectory()
+            .appendingPathComponent("transcript-backups", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
     static func audioDirectory(meetingID: String) throws -> URL {
         let dir = try supportDirectory()
             .appendingPathComponent("audio", isDirectory: true)
