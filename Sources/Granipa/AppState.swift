@@ -698,9 +698,9 @@ final class AppState {
     func deleteMeeting(id: String) {
         guard let db = database else { return }
         do {
+            try EchoBleedFilter.removeBackups(
+                meetingID: id, from: try AppPaths.transcriptBackupDirectory(create: false))
             try db.deleteMeeting(id: id)
-            EchoBleedFilter.removeBackups(
-                meetingID: id, from: try? AppPaths.transcriptBackupDirectory(create: false))
             meetings.removeAll { $0.id == id }
             if selectedMeetingID == id {
                 selectedMeetingID = nil

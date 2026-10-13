@@ -49,7 +49,7 @@ import Testing
             EchoBleedFilter.backupFileName(meetingID: "kept"))
         for url in [first, second, other] { try Data("[]".utf8).write(to: url) }
 
-        EchoBleedFilter.removeBackups(meetingID: "gone", from: directory)
+        try EchoBleedFilter.removeBackups(meetingID: "gone", from: directory)
 
         #expect(!FileManager.default.fileExists(atPath: first.path))
         #expect(!FileManager.default.fileExists(atPath: second.path))
@@ -61,7 +61,11 @@ import Testing
                 .appendingPathComponent("Sources/Granipa/AppState.swift"),
             encoding: .utf8)
         let body = try #require(app.range(of: "func deleteMeeting(id: String)")).upperBound
-        #expect(app[body...].contains("EchoBleedFilter.removeBackups("))
+        let rest = app[body...]
+        let backups = try #require(rest.range(of: "try EchoBleedFilter.removeBackups("))
+        let row = try #require(rest.range(of: "try db.deleteMeeting(id: id)"))
+        // Backups go first: if they cannot be removed, the meeting stays.
+        #expect(backups.lowerBound < row.lowerBound)
     }
 
     private func timedSegment(

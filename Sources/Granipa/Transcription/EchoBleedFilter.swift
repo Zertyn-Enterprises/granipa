@@ -47,13 +47,15 @@ enum EchoBleedFilter {
         try database.replaceSegments(meetingID: meetingID, channel: .mic, with: cleaned)
     }
 
-    /// Deleting a meeting must not leave its transcript behind.
-    static func removeBackups(meetingID: String, from backupDirectory: URL?) {
+    /// Deleting a meeting must not leave its transcript behind; a failure is
+    /// thrown so the caller can keep the meeting and let the user retry.
+    static func removeBackups(meetingID: String, from backupDirectory: URL?) throws {
         guard let backupDirectory,
-            let names = try? FileManager.default.contentsOfDirectory(atPath: backupDirectory.path)
+            FileManager.default.fileExists(atPath: backupDirectory.path)
         else { return }
+        let names = try FileManager.default.contentsOfDirectory(atPath: backupDirectory.path)
         for name in names where name.hasPrefix("\(meetingID)-mic-before-bleed-filter") {
-            try? FileManager.default.removeItem(at: backupDirectory.appendingPathComponent(name))
+            try FileManager.default.removeItem(at: backupDirectory.appendingPathComponent(name))
         }
     }
 

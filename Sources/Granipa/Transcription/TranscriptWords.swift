@@ -8,9 +8,18 @@ enum TranscriptWords {
     static func from(_ text: AttributedString) -> [TranscriptWord]? {
         var words: [TranscriptWord] = []
         for run in text.runs {
-            guard let range = run.audioTimeRange else { continue }
             let word = String(text[run.range].characters)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
+            // Untimed punctuation rides on the word before it, so a filtered
+            // segment rebuilt from its words keeps it; an untimed word means
+            // the timings do not cover the text.
+            guard let range = run.audioTimeRange else {
+                if !letters(of: word).isEmpty { return nil }
+                if !word.isEmpty, let last = words.indices.last {
+                    words[last].text += word
+                }
+                continue
+            }
             let start = range.start.seconds
             let end = range.end.seconds
             guard !word.isEmpty, start.isFinite, end.isFinite else { continue }

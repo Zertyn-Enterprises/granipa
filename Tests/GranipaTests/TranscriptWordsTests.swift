@@ -26,6 +26,14 @@ import Testing
         #expect(TranscriptWords.from(AttributedString("sin tiempos")) == nil)
     }
 
+    @Test func untimedPunctuationStaysWithItsWord() {
+        var text = timed("Vale", 1.0, 1.3)
+        text.append(AttributedString(", "))
+        text.append(timed("perfecto", 1.4, 1.9))
+        text.append(AttributedString("."))
+        #expect(TranscriptWords.from(text)?.map(\.text) == ["Vale,", "perfecto."])
+    }
+
     @Test func partiallyTaggedTextHasNoWordTimings() {
         var text = timed("hola ", 1.0, 1.4)
         text.append(AttributedString("mundo"))
