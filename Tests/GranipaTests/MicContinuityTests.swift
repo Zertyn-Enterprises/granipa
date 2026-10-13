@@ -78,6 +78,24 @@ import Testing
         #expect(rms(audio, seconds: 0.1..<0.9) > 0.1)
     }
 
+    @Test func lateSystemBufferAfterStopDoesNotTruncateTheRecording() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("system-late-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let session = makeSession(directory: directory)
+
+        session.ingestSystemBufferForTesting(
+            tone(sampleRate: 48_000, channels: 2, seconds: 1.0, amplitude: 0.5), startSeconds: 0)
+        await session.stop()
+        session.ingestSystemBufferForTesting(
+            tone(sampleRate: 48_000, channels: 2, seconds: 0.1, amplitude: 0.5), startSeconds: 1.0)
+
+        let (audio, format) = try readMicAudio(from: session.systemURL)
+        let duration = Double(audio.frameLength) / format.sampleRate
+        #expect(duration > 0.9 && duration < 1.2)
+    }
+
     @Test func defaultInputChangePreservesEarlierAudioAndAppendsNewFormat() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("mic-continuity-\(UUID().uuidString)", isDirectory: true)

@@ -157,6 +157,10 @@ final class RecordingSession: @unchecked Sendable {
     func ingestMicBufferForTesting(_ buffer: AVAudioPCMBuffer, startSeconds: Double?) {
         writer.sync { writeMic(buffer, startSeconds: startSeconds) }
     }
+
+    func ingestSystemBufferForTesting(_ buffer: AVAudioPCMBuffer, startSeconds: Double?) {
+        writer.sync { writeSystem(buffer, startSeconds: startSeconds) }
+    }
 #endif
 
     private func removeDeviceChangeListener() {

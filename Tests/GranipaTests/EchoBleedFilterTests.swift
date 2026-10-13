@@ -44,7 +44,27 @@ import Testing
         #expect(EchoBleedFilter.clean(mic: mic, system: system).isEmpty)
     }
 
-    @Test func applyRewritesOnlyTheMicChannelInTheDatabase() throws {
+    @Test func headphoneMeetingKeepsTheUsersReadBacks() {
+        // Mostly the user's own speech; one genuine read-back of the other side.
+        let mic = [
+            segment(.mic, "Perfecto, yo me encargo de revisar el contrato esta tarde", 0, 4),
+            segment(.mic, "y luego te paso las notas con los cambios que veamos", 5, 9),
+            segment(.mic, "vale entonces enviamos el lunes", 20, 22),
+            segment(.mic, "también quiero hablar del presupuesto del proyecto nuevo", 30, 34),
+        ]
+        let system = [segment(.system, "entonces enviamos el lunes", 18, 20)]
+        #expect(EchoBleedFilter.clean(mic: mic, system: system) == mic)
+    }
+
+    @Test func wordsFarApartInsideALongSystemSegmentAreNotBleed() {
+        let mic = [segment(.mic, "revisamos los números del trimestre", 2, 5)]
+        let long = Array(repeating: "bla", count: 50).joined(separator: " ")
+            + " revisamos los números del trimestre"
+        let system = [segment(.system, long, 0, 60)]
+        #expect(EchoBleedFilter.clean(mic: mic, system: system) == mic)
+    }
+
+    @Test func applyBacksUpTheOriginalAndRewritesOnlyTheMicChannel() throws {
         let db = try AppDatabase(writer: DatabaseQueue())
         let meeting = Meeting.new(title: "Bleed", language: "es-ES")
         try db.save(meeting)
@@ -57,12 +77,39 @@ import Testing
             text: "Qué tal, cómo estás tú", startSeconds: 1, endSeconds: 4, isFinal: true)
         try db.save(mine)
         try db.save(theirs)
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bleed-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
 
-        try EchoBleedFilter.apply(meetingID: meeting.id, database: db)
+        try EchoBleedFilter.apply(meetingID: meeting.id, database: db, backupDirectory: directory)
 
         let after = try db.fetchSegments(meetingID: meeting.id)
         #expect(after.filter { $0.channel == .mic }.map(\.text) == ["Hola, hola."])
         #expect(after.filter { $0.channel == .system } == [theirs])
+        let backup = try Data(
+            contentsOf: directory.appendingPathComponent(EchoBleedFilter.backupFileName))
+        #expect(try JSONDecoder().decode([TranscriptSegment].self, from: backup) == [mine])
+    }
+
+    @Test func applyWithoutABackupLocationChangesNothing() throws {
+        let db = try AppDatabase(writer: DatabaseQueue())
+        let meeting = Meeting.new(title: "Bleed", language: "es-ES")
+        try db.save(meeting)
+        let mine = TranscriptSegment.new(
+            meetingID: meeting.id, channel: .mic, speaker: "Me",
+            text: "te comparto pantalla ahora mismo", startSeconds: 0, endSeconds: 3,
+            isFinal: true)
+        try db.save(mine)
+        try db.save(
+            TranscriptSegment.new(
+                meetingID: meeting.id, channel: .system, speaker: "Them",
+                text: "te comparto pantalla ahora mismo", startSeconds: 0, endSeconds: 3,
+                isFinal: true))
+
+        try EchoBleedFilter.apply(meetingID: meeting.id, database: db, backupDirectory: nil)
+
+        #expect(try db.fetchSegments(meetingID: meeting.id).filter { $0.channel == .mic } == [mine])
     }
 
     @Test func postProcessCleansBleedBeforeDiarizationAndNotes() throws {

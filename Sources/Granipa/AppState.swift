@@ -468,7 +468,10 @@ final class AppState {
         }
 
         do {
-            try EchoBleedFilter.apply(meetingID: meetingID, database: db)
+            let audioDirectory = (try? db.fetchMeeting(id: meetingID))?.audioMicPath
+                .map { URL(fileURLWithPath: $0).deletingLastPathComponent() }
+            try EchoBleedFilter.apply(
+                meetingID: meetingID, database: db, backupDirectory: audioDirectory)
         } catch {
             Self.log.error(
                 "speaker-bleed cleanup failed for \(meetingID, privacy: .public): \(error.localizedDescription, privacy: .public)"
