@@ -129,6 +129,16 @@ import Testing
         #expect(prompt.contains("email_draft"))
     }
 
+    @Test func promptAddressesTheReaderInTheSecondPerson() {
+        let prompt = EnhancementService.buildPrompt(
+            template: nil, notes: "", transcript: "[0:01] Me: te mando el presupuesto")
+        #expect(prompt.contains(#"labelled "Me" is the reader"#))
+        #expect(prompt.contains("second person"))
+        #expect(prompt.contains("never in the third person"))
+        #expect(prompt.contains("email_draft"))
+        #expect(prompt.contains("first person"))
+    }
+
     @Test func templateSeedsExist() throws {
         let db = try AppDatabase(writer: DatabaseQueue())
         let templates = try db.fetchTemplates()
