@@ -7,6 +7,19 @@ enum MeetingPlaybackError: Equatable, Sendable {
     case loadFailed(String)
 }
 
+/// Players started with play(atTime:) report isPlaying == false until the
+/// scheduled time; that window is playing, not end-of-file.
+enum PlaybackClock {
+    static let startGrace: TimeInterval = 0.25
+
+    static func isPlaying(
+        leadIsPlaying: Bool, intendsToPlay: Bool, deviceTime: TimeInterval,
+        scheduledStart: TimeInterval
+    ) -> Bool {
+        leadIsPlaying || (intendsToPlay && deviceTime < scheduledStart + startGrace)
+    }
+}
+
 /// What the meeting player plays: both recordings together (what was heard
 /// in the room), or one channel alone.
 enum PlaybackSource: String, CaseIterable, Sendable {
@@ -43,6 +56,8 @@ private actor PlaybackEngine {
     /// Intent, not AVAudioPlayer.isPlaying: during the sync lead the players
     /// are scheduled but report not playing yet.
     private var running = false
+    /// Output-device time the current start was scheduled for.
+    private var scheduledStart: TimeInterval = 0
     /// Players started together share one output-device start time, so the
     /// mic and system tracks stay aligned like the meeting itself.
     private static let syncLead: TimeInterval = 0.05
@@ -73,6 +88,7 @@ private actor PlaybackEngine {
         guard let lead = players.first else { return false }
         if players.count == 1 {
             lead.rate = rate
+            scheduledStart = lead.deviceCurrentTime
             running = lead.play()
             return running
         }
@@ -80,6 +96,7 @@ private actor PlaybackEngine {
         // track is placed at the lead's time; tracks past their end stay quiet.
         let position = lead.currentTime
         let start = lead.deviceCurrentTime + Self.syncLead
+        scheduledStart = start
         var started = true
         for player in players {
             player.rate = rate
@@ -121,7 +138,17 @@ private actor PlaybackEngine {
     }
 
     func isPlaying() -> Bool {
-        players.first?.isPlaying ?? false
+        guard let lead = players.first else { return false }
+        let playing = PlaybackClock.isPlaying(
+            leadIsPlaying: lead.isPlaying, intendsToPlay: running,
+            deviceTime: lead.deviceCurrentTime, scheduledStart: scheduledStart)
+        if !playing { running = false }
+        return playing
+    }
+
+    /// The lead track finished on its own.
+    func endReached() {
+        running = false
     }
 
     func stopPlayback() {
@@ -387,6 +414,9 @@ final class MeetingPlaybackController {
     fileprivate func handleFinished(successfully: Bool) {
         tickTask?.cancel()
         tickTask = nil
+        enqueue { engine in
+            await engine.endReached()
+        }
         if successfully {
             currentTime = duration
             state = .ended

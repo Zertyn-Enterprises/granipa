@@ -262,6 +262,43 @@ enum TestMeetingAudio {
         #expect(player.currentTime > 0.55)
     }
 
+    @Test func aScheduledStartCountsAsPlayingNotAsEnded() {
+        // Between play(atTime:) and the scheduled time the lead reports not playing.
+        #expect(
+            PlaybackClock.isPlaying(
+                leadIsPlaying: false, intendsToPlay: true, deviceTime: 10.0, scheduledStart: 10.05))
+        #expect(
+            !PlaybackClock.isPlaying(
+                leadIsPlaying: false, intendsToPlay: true, deviceTime: 11.0, scheduledStart: 10.05))
+        #expect(
+            !PlaybackClock.isPlaying(
+                leadIsPlaying: false, intendsToPlay: false, deviceTime: 10.0, scheduledStart: 10.05))
+    }
+
+#if DEBUG
+    @Test @MainActor func seekingBackAfterTheEndStaysSilent() async throws {
+        let mic = tempURL("ended-mic")
+        let system = tempURL("ended-system")
+        defer {
+            try? FileManager.default.removeItem(at: mic)
+            try? FileManager.default.removeItem(at: system)
+        }
+        try TestMeetingAudio.writeTone(to: mic, seconds: 0.3, frequency: 440)
+        try TestMeetingAudio.writeTone(to: system, seconds: 0.5, frequency: 660)
+
+        let player = MeetingPlaybackController()
+        player.load(micPath: mic.path, systemPath: system.path)
+        try await waitUntil(player) { $0 == .ready }
+        player.play()
+        try await waitUntil(player) { $0 == .ended }
+        player.seek(to: 0.1)
+        #expect(player.state == .paused)
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(await player.playingTrackCountForTesting() == 0)
+        player.stopAndRelease()
+    }
+#endif
+
     @Test func waveformOfBothTracksIsTheLouderBar() {
         #expect(
             MeetingWaveform.combined([([0.1, 0.8, 0], 3), ([0.5, 0.2, 0], 3)]) == [0.5, 0.8, 0])
