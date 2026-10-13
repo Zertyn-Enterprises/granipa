@@ -102,7 +102,7 @@ enum TestMeetingAudio {
         #expect(player.state != .ready)
         try await waitUntil(player) { $0 == .ready }
         #expect(player.duration > 0.2)
-        #expect(player.loadedURL?.path == url.path)
+        #expect(player.loadedURLs.map(\.path) == [url.path])
     }
 
     @Test @MainActor func loadPlayPauseSeekRateAndEOFUseAVFoundation() async throws {
@@ -118,11 +118,11 @@ enum TestMeetingAudio {
         let player = MeetingPlaybackController()
         player.load(micPath: url.path, systemPath: nil)
         try await waitUntil(player) { $0 == .ready }
-        #expect(player.channel == .mic)
-        #expect(player.availableChannels == [.mic])
+        #expect(player.source == .mic)
+        #expect(player.availableSources == [.mic])
         #expect(player.duration > 29.8 && player.duration < 30.2)
         #expect(player.currentTime == 0)
-        #expect(player.loadedURL?.path == url.path)
+        #expect(player.loadedURLs.map(\.path) == [url.path])
 
         player.play()
         #expect(player.state == .playing)
@@ -180,7 +180,7 @@ enum TestMeetingAudio {
 
         player.stopAndRelease()
         #expect(player.state == .idle)
-        #expect(player.loadedURL == nil)
+        #expect(player.loadedURLs.isEmpty)
         #expect(player.duration == 0)
     }
 
@@ -202,7 +202,7 @@ enum TestMeetingAudio {
         }
     }
 
-    @Test @MainActor func channelSwitchDoesNotMixAndDoesNotAutoplay() async throws {
+    @Test @MainActor func defaultsToBothTracksAndSwitchesWithoutAutoplay() async throws {
         let mic = tempURL("mic")
         let system = tempURL("system")
         defer {
@@ -216,28 +216,55 @@ enum TestMeetingAudio {
         player.load(micPath: mic.path, systemPath: system.path)
         try await waitUntil(player) { $0 == .ready }
         #expect(!player.isPlaying)
-        #expect(player.availableChannels == [.mic, .system])
-        #expect(player.channel == .system)
+        #expect(player.availableSources == [.both, .mic, .system])
+        #expect(player.source == .both)
+        #expect(Set(player.loadedURLs.map(\.path)) == [mic.path, system.path])
         #expect(player.duration > 0.4)
 
-        player.selectChannel(.mic)
-        #expect(player.channel == .mic)
+        player.selectSource(.mic)
+        #expect(player.source == .mic)
         #expect(!player.isPlaying)
         try await waitUntil(player) { $0 == .ready }
         #expect(player.duration > 0.2 && player.duration < 0.4)
-        #expect(player.loadedURL?.path == mic.path)
+        #expect(player.loadedURLs.map(\.path) == [mic.path])
 
         player.play()
         #expect(player.isPlaying)
-        player.selectChannel(.system)
-        #expect(player.channel == .system)
+        player.selectSource(.system)
+        #expect(player.source == .system)
         #expect(!player.isPlaying)
         try await waitUntil(player) { $0 == .ready }
-        #expect(player.loadedURL?.path == system.path)
+        #expect(player.loadedURLs.map(\.path) == [system.path])
         // The mic file (0.3 s) was playing when the switch happened; if the
         // engine had not stopped it, its EOF would flip this facade.
         try await Task.sleep(for: .milliseconds(500))
         #expect(player.state == .ready)
+    }
+
+    @Test @MainActor func bothTracksPlayUntilTheLongestEnds() async throws {
+        let mic = tempURL("both-mic")
+        let system = tempURL("both-system")
+        defer {
+            try? FileManager.default.removeItem(at: mic)
+            try? FileManager.default.removeItem(at: system)
+        }
+        try TestMeetingAudio.writeTone(to: mic, seconds: 0.3, frequency: 440)
+        try TestMeetingAudio.writeTone(to: system, seconds: 0.6, frequency: 660)
+
+        let player = MeetingPlaybackController()
+        player.load(micPath: mic.path, systemPath: system.path)
+        try await waitUntil(player) { $0 == .ready }
+        let started = Date.now
+        player.play()
+        try await waitUntil(player) { $0 == .ended }
+        // The shorter mic track ending must not end playback.
+        #expect(Date.now.timeIntervalSince(started) > 0.5)
+        #expect(player.currentTime > 0.55)
+    }
+
+    @Test func waveformOfBothTracksIsTheLouderBar() {
+        #expect(MeetingWaveform.combined([[0.1, 0.8, 0], [0.5, 0.2, 0]]) == [0.5, 0.8, 0])
+        #expect(MeetingWaveform.combined([]) == nil)
     }
 
     @Test @MainActor
@@ -254,16 +281,16 @@ enum TestMeetingAudio {
         let player = MeetingPlaybackController()
         player.load(micPath: mic.path, systemPath: system.path, preferred: .mic)
         try await waitUntil(player) { $0 == .ready }
-        #expect(player.channel == .mic)
+        #expect(player.source == .mic)
         player.play()
         #expect(player.state == .playing)
 
         try FileManager.default.removeItem(at: system)
-        player.selectChannel(.system)
+        player.selectSource(.system)
         #expect(player.state == .failed(.missingFile))
         try await Task.sleep(for: .milliseconds(600))
         #expect(player.state == .failed(.missingFile))
-        #expect(player.loadedURL == nil)
+        #expect(player.loadedURLs.isEmpty)
     }
 
     @Test @MainActor func seekClampsAndLoadWithoutPathsStaysIdle() {
@@ -294,7 +321,7 @@ enum TestMeetingAudio {
         #expect(player.state == .idle)
         #expect(player.currentTime == 0)
         #expect(player.duration == 0)
-        #expect(player.loadedURL == nil)
+        #expect(player.loadedURLs.isEmpty)
     }
 
     @Test @MainActor
@@ -330,7 +357,7 @@ enum TestMeetingAudio {
         for _ in 0..<3 {
             player.load(micPath: mic.path, systemPath: system.path)
             try await waitUntil(player) { $0 == .ready }
-            #expect(player.channel == .system)
+            #expect(player.source == .both)
 
             player.play()
             #expect(player.state == .playing)
@@ -347,18 +374,18 @@ enum TestMeetingAudio {
             player.play()
             #expect(player.state == .playing)
 
-            player.selectChannel(.mic)
-            #expect(player.channel == .mic)
+            player.selectSource(.mic)
+            #expect(player.source == .mic)
             #expect(!player.isPlaying)
             try await waitUntil(player) { $0 == .ready }
             player.play()
             #expect(player.state == .playing)
             player.seek(to: 0.9)
 
-            player.selectChannel(.system)
+            player.selectSource(.system)
             #expect(!player.isPlaying)
             try await waitUntil(player) { $0 == .ready }
-            #expect(player.channel == .system)
+            #expect(player.source == .system)
 
             player.stopAndRelease()
             #expect(player.state == .idle)
@@ -366,7 +393,7 @@ enum TestMeetingAudio {
             #expect(player.state == .idle)
             #expect(player.currentTime == 0)
             #expect(player.duration == 0)
-            #expect(player.loadedURL == nil)
+            #expect(player.loadedURLs.isEmpty)
         }
     }
 }

@@ -7,6 +7,20 @@ enum MeetingPlaybackError: Equatable, Sendable {
     case loadFailed(String)
 }
 
+/// What the meeting player plays: both recordings together (what was heard
+/// in the room), or one channel alone.
+enum PlaybackSource: String, CaseIterable, Sendable {
+    case both, mic, system
+
+    var title: String {
+        switch self {
+        case .both: "Both"
+        case .mic: "Mic"
+        case .system: "System"
+        }
+    }
+}
+
 enum MeetingPlaybackState: Equatable, Sendable {
     case idle
     /// A file is being opened and prepared off the main actor.
@@ -18,64 +32,92 @@ enum MeetingPlaybackState: Equatable, Sendable {
     case failed(MeetingPlaybackError)
 }
 
-/// Sole owner of the AVAudioPlayer. Opening and preparing a meeting-length
+/// Sole owner of the AVAudioPlayers. Opening and preparing a meeting-length
 /// recording does real I/O (measured ~150 ms on a one-hour AAC, unbounded on
-/// slow disks); owning the player here keeps that work off the main actor
+/// slow disks); owning the players here keeps that work off the main actor
 /// without any Sendable escape hatch. Calls serialize, so effects issued in
 /// order (seek, then play) apply in order.
 private actor PlaybackEngine {
-    private var player: AVAudioPlayer?
+    /// Longest recording first: it drives the clock and the end of playback.
+    private var players: [AVAudioPlayer] = []
+    /// Players started together share one output-device start time, so the
+    /// mic and system tracks stay aligned like the meeting itself.
+    private static let syncLead: TimeInterval = 0.05
 
-    /// Tears down any previous player, then opens and prepares the new one.
-    func replace(url: URL, rate: Float, delegate: PlaybackDelegateBox?) throws -> TimeInterval {
+    /// Tears down any previous players, then opens and prepares the new ones.
+    func replace(urls: [URL], rate: Float, delegate: PlaybackDelegateBox?) throws -> TimeInterval {
         reset()
-        let audio = try AVAudioPlayer(contentsOf: url)
-        audio.enableRate = true
-        audio.rate = rate
-        audio.delegate = delegate
-        audio.prepareToPlay()
-        player = audio
-        return audio.duration
+        var opened: [AVAudioPlayer] = []
+        for url in urls {
+            let audio = try AVAudioPlayer(contentsOf: url)
+            audio.enableRate = true
+            audio.rate = rate
+            audio.prepareToPlay()
+            opened.append(audio)
+        }
+        opened.sort { $0.duration > $1.duration }
+        opened.first?.delegate = delegate
+        players = opened
+        return opened.first?.duration ?? 0
     }
 
     func play(rate: Float) -> Bool {
-        guard let player else { return false }
-        player.rate = rate
-        return player.play()
+        guard let lead = players.first else { return false }
+        if players.count == 1 {
+            lead.rate = rate
+            return lead.play()
+        }
+        let start = lead.deviceCurrentTime + Self.syncLead
+        var started = true
+        for player in players {
+            player.rate = rate
+            if player.currentTime < player.duration {
+                started = player.play(atTime: start) && started
+            }
+        }
+        return started
     }
 
     func pause() {
-        player?.pause()
+        players.forEach { $0.pause() }
     }
 
     func seek(to time: TimeInterval) {
-        player?.currentTime = time
+        let wasPlaying = isPlaying()
+        let rate = players.first?.rate ?? 1
+        if wasPlaying, players.count > 1 { pause() }
+        for player in players {
+            player.currentTime = min(time, player.duration)
+        }
+        if wasPlaying, players.count > 1 { _ = play(rate: rate) }
     }
 
     func setRate(_ rate: Float) {
-        player?.rate = rate
+        players.forEach { $0.rate = rate }
     }
 
     func currentTime() -> TimeInterval {
-        player?.currentTime ?? 0
+        players.first?.currentTime ?? 0
     }
 
     func duration() -> TimeInterval {
-        player?.duration ?? 0
+        players.first?.duration ?? 0
     }
 
     func isPlaying() -> Bool {
-        player?.isPlaying ?? false
+        players.first?.isPlaying ?? false
     }
 
     func stopPlayback() {
-        player?.stop()
+        players.forEach { $0.stop() }
     }
 
     func reset() {
-        player?.stop()
-        player?.delegate = nil
-        player = nil
+        for player in players {
+            player.stop()
+            player.delegate = nil
+        }
+        players = []
     }
 }
 
@@ -88,9 +130,9 @@ final class MeetingPlaybackController {
     private(set) var currentTime: TimeInterval = 0
     private(set) var duration: TimeInterval = 0
     private(set) var rate: Float = 1
-    private(set) var channel: AudioChannel = .mic
-    private(set) var availableChannels: [AudioChannel] = []
-    private(set) var loadedURL: URL?
+    private(set) var source: PlaybackSource = .both
+    private(set) var availableSources: [PlaybackSource] = []
+    private(set) var loadedURLs: [URL] = []
 
     var isPlaying: Bool { state == .playing }
 
@@ -104,29 +146,25 @@ final class MeetingPlaybackController {
     @ObservationIgnored private var micPath: String?
     @ObservationIgnored private var systemPath: String?
 
-    func load(micPath: String?, systemPath: String?, preferred: AudioChannel? = nil) {
+    func load(micPath: String?, systemPath: String?, preferred: PlaybackSource? = nil) {
         cancelOpen()
         currentTime = 0
         duration = 0
-        loadedURL = nil
+        loadedURLs = []
         self.micPath = micPath
         self.systemPath = systemPath
-        availableChannels = Self.channels(micPath: micPath, systemPath: systemPath)
-        guard !availableChannels.isEmpty else {
+        availableSources = Self.sources(micPath: micPath, systemPath: systemPath)
+        guard let first = availableSources.first else {
             state = .idle
             releaseEngine()
             return
         }
-        let chosen: AudioChannel
-        if let preferred, availableChannels.contains(preferred) {
-            chosen = preferred
-        } else if availableChannels.contains(.system) {
-            chosen = .system
+        if let preferred, availableSources.contains(preferred) {
+            source = preferred
         } else {
-            chosen = availableChannels[0]
+            source = first
         }
-        channel = chosen
-        openCurrentChannel(resumingAt: nil)
+        openCurrentSource(resumingAt: nil)
     }
 
     func play() {
@@ -203,48 +241,52 @@ final class MeetingPlaybackController {
         }
     }
 
-    func selectChannel(_ channel: AudioChannel) {
-        guard channel != self.channel, availableChannels.contains(channel) else { return }
+    func selectSource(_ source: PlaybackSource) {
+        guard source != self.source, availableSources.contains(source) else { return }
         let resumeTime = currentTime
-        self.channel = channel
-        openCurrentChannel(resumingAt: duration > 0 ? min(resumeTime, duration) : nil)
+        self.source = source
+        openCurrentSource(resumingAt: duration > 0 ? min(resumeTime, duration) : nil)
     }
 
     func stopAndRelease() {
         cancelOpen()
         micPath = nil
         systemPath = nil
-        availableChannels = []
+        availableSources = []
         state = .idle
         releaseEngine()
     }
 
     // MARK: - Preparation
 
-    private func openCurrentChannel(resumingAt resume: TimeInterval?) {
-        let path: String?
-        switch channel {
-        case .mic: path = micPath
-        case .system: path = systemPath
+    private func openCurrentSource(resumingAt resume: TimeInterval?) {
+        let paths: [String?]
+        switch source {
+        case .both: paths = [micPath, systemPath]
+        case .mic: paths = [micPath]
+        case .system: paths = [systemPath]
         }
-        guard let path else {
+        let present = paths.compactMap { $0 }
+        guard present.count == paths.count, !present.isEmpty else {
             state = .idle
             releaseEngine()
             return
         }
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
-            !isDirectory.boolValue
-        else {
-            state = .failed(.missingFile)
-            releaseEngine()
-            return
+        for path in present {
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+                !isDirectory.boolValue
+            else {
+                state = .failed(.missingFile)
+                releaseEngine()
+                return
+            }
         }
-        // Also covers selectChannel: anything that abandons the current
-        // player must stop its tick before preparing the replacement.
+        // Also covers selectSource: anything that abandons the current
+        // players must stop its tick before preparing the replacement.
         cancelOpen()
         let current = generation
-        let url = URL(fileURLWithPath: path)
+        let urls = present.map { URL(fileURLWithPath: $0) }
         state = .preparing
         delegateBox?.controller = nil
         let box = PlaybackDelegateBox()
@@ -254,9 +296,9 @@ final class MeetingPlaybackController {
         enqueue { engine in
             do {
                 let preparedDuration = try await engine.replace(
-                    url: url, rate: appliedRate, delegate: box)
+                    urls: urls, rate: appliedRate, delegate: box)
                 guard current == self.generation else { return }
-                self.loadedURL = url
+                self.loadedURLs = urls
                 self.duration = preparedDuration
                 self.currentTime = 0
                 self.state = .ready
@@ -289,7 +331,7 @@ final class MeetingPlaybackController {
     private func releaseEngine() {
         delegateBox?.controller = nil
         delegateBox = nil
-        loadedURL = nil
+        loadedURLs = []
         duration = 0
         currentTime = 0
         enqueue { engine in
@@ -357,11 +399,13 @@ final class MeetingPlaybackController {
         }
     }
 
-    private static func channels(micPath: String?, systemPath: String?) -> [AudioChannel] {
-        var result: [AudioChannel] = []
-        if micPath != nil { result.append(.mic) }
-        if systemPath != nil { result.append(.system) }
-        return result
+    private static func sources(micPath: String?, systemPath: String?) -> [PlaybackSource] {
+        switch (micPath != nil, systemPath != nil) {
+        case (true, true): [.both, .mic, .system]
+        case (true, false): [.mic]
+        case (false, true): [.system]
+        case (false, false): []
+        }
     }
 }
 

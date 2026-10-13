@@ -7,6 +7,15 @@ enum MeetingWaveform {
 
     /// Peak envelope sampled in a bounded number of windows. Returns nil when
     /// the file is missing, unreadable, or empty — callers show a plain slider.
+    /// Both tracks are padded to meeting time, so bar i covers the same
+    /// moment in each; the louder one is what was heard.
+    static func combined(_ tracks: [[Float]]) -> [Float]? {
+        guard let first = tracks.first else { return nil }
+        return first.indices.map { index in
+            tracks.map { index < $0.count ? $0[index] : 0 }.max() ?? 0
+        }
+    }
+
     static func decode(url: URL, barCount: Int = barCount) -> [Float]? {
         let bars = max(1, barCount)
         var isDirectory: ObjCBool = false

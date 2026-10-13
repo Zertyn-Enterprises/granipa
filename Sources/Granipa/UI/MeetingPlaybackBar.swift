@@ -42,11 +42,12 @@ struct MeetingPlaybackBar: View {
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .card(cornerRadius: Theme.radiusL)
-        .task(id: playback.loadedURL?.path) {
+        .task(id: playback.loadedURLs.map(\.path)) {
             peaks = nil
-            guard let url = playback.loadedURL else { return }
+            let urls = playback.loadedURLs
+            guard !urls.isEmpty else { return }
             let decoded = await Task.detached(priority: .utility) {
-                MeetingWaveform.decode(url: url)
+                MeetingWaveform.combined(urls.compactMap { MeetingWaveform.decode(url: $0) })
             }.value
             guard !Task.isCancelled else { return }
             peaks = decoded
@@ -88,8 +89,8 @@ struct MeetingPlaybackBar: View {
 
         let extras = HStack(spacing: 8) {
             rateMenu
-            if playback.availableChannels.count > 1 {
-                channelPicker
+            if playback.availableSources.count > 1 {
+                sourcePicker
             }
             recordButton
         }
@@ -172,21 +173,18 @@ struct MeetingPlaybackBar: View {
         .help("Playback speed")
     }
 
-    private var channelPicker: some View {
-        Picker("Audio channel", selection: channelBinding) {
-            if playback.availableChannels.contains(.mic) {
-                Text("Mic").tag(AudioChannel.mic)
-            }
-            if playback.availableChannels.contains(.system) {
-                Text("System").tag(AudioChannel.system)
+    private var sourcePicker: some View {
+        Picker("Audio", selection: sourceBinding) {
+            ForEach(playback.availableSources, id: \.self) { source in
+                Text(source.title).tag(source)
             }
         }
         .pickerStyle(.segmented)
         .controlSize(.small)
-        .frame(maxWidth: 150)
+        .frame(maxWidth: 210)
         .labelsHidden()
-        .accessibilityLabel("Audio channel")
-        .help("Play the microphone or system recording — not both")
+        .accessibilityLabel("Audio")
+        .help("Play both recordings together, or the microphone or system audio alone")
     }
 
     private var recordButton: some View {
@@ -204,10 +202,10 @@ struct MeetingPlaybackBar: View {
         .accessibilityLabel(app.recorder.isBusy ? "Recording" : "Record")
     }
 
-    private var channelBinding: Binding<AudioChannel> {
+    private var sourceBinding: Binding<PlaybackSource> {
         Binding(
-            get: { playback.channel },
-            set: { playback.selectChannel($0) })
+            get: { playback.source },
+            set: { playback.selectSource($0) })
     }
 
     private var canControl: Bool {
