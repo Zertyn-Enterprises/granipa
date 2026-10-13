@@ -56,6 +56,28 @@ import Testing
         return value
     }
 
+    /// Regression: a mic buffer that lands after stop() (the engine's tap can
+    /// still be in flight) reopened mic.m4a for writing, truncating the whole
+    /// recording to a header-only file.
+    @Test func lateMicBufferAfterStopDoesNotTruncateTheRecording() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mic-late-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let session = makeSession(directory: directory)
+
+        session.ingestMicBufferForTesting(
+            tone(sampleRate: 48_000, channels: 1, seconds: 1.0, amplitude: 0.5), startSeconds: 0)
+        await session.stop()
+        session.ingestMicBufferForTesting(
+            tone(sampleRate: 48_000, channels: 1, seconds: 0.1, amplitude: 0.5), startSeconds: 1.0)
+
+        let (audio, format) = try readMicAudio(from: session.micURL)
+        let duration = Double(audio.frameLength) / format.sampleRate
+        #expect(duration > 0.9 && duration < 1.2)
+        #expect(rms(audio, seconds: 0.1..<0.9) > 0.1)
+    }
+
     @Test func defaultInputChangePreservesEarlierAudioAndAppendsNewFormat() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("mic-continuity-\(UUID().uuidString)", isDirectory: true)
