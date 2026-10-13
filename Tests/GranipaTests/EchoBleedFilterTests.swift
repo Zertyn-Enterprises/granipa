@@ -16,7 +16,7 @@ import Testing
     @Test func removesSpeakerBleedAndKeepsTheUsersWords() {
         let mic = [segment(.mic, "Hola, hola. ¿Qué tal? ¿Cómo estás tú?", 0, 4)]
         let system = [segment(.system, "Qué tal, cómo estás tú", 1, 4)]
-        let cleaned = EchoBleedFilter.clean(mic: mic, system: system)
+        let cleaned = EchoBleedFilter.clean(mic: mic, system: system, allowCoarseTiming: true)
         #expect(cleaned.map(\.text) == ["Hola, hola."])
         // Bounds follow the kept words: 2 of 7 interpolated tokens over 0–4 s.
         #expect(cleaned.first?.startSeconds == 0)
@@ -26,14 +26,14 @@ import Testing
     @Test func theOtherSideRepeatingTheUserLaterIsNotBleed() {
         let mic = [segment(.mic, "we should go now", 3, 5)]
         let system = [segment(.system, "we should go now", 5.5, 7.5)]
-        #expect(EchoBleedFilter.clean(mic: mic, system: system) == mic)
+        #expect(EchoBleedFilter.clean(mic: mic, system: system, allowCoarseTiming: true) == mic)
     }
 
     @Test func anImmediateRepeatByTheOtherSideIsNotBleed() {
         // Back to back: the user at 3–5 s, the other side echoing the words at 5–7 s.
         let mic = [segment(.mic, "vale perfecto lo cerramos", 3, 5)]
         let system = [segment(.system, "vale perfecto lo cerramos", 5, 7)]
-        #expect(EchoBleedFilter.clean(mic: mic, system: system) == mic)
+        #expect(EchoBleedFilter.clean(mic: mic, system: system, allowCoarseTiming: true) == mic)
     }
 
     @Test func deletingAMeetingRemovesItsTranscriptBackup() throws {
@@ -75,6 +75,24 @@ import Testing
             isFinal: true, words: timed)
     }
 
+    @Test func automaticCleanupLeavesCoarseTimedSegmentsAlone() {
+        let mic = [segment(.mic, "te comparto pantalla ahora mismo", 10, 13)]
+        let system = [segment(.system, "Vale, te comparto pantalla ahora mismo.", 9.5, 13)]
+        #expect(EchoBleedFilter.clean(mic: mic, system: system) == mic)
+    }
+
+    @Test func overlappingRecordingPassesAreNotFiltered() {
+        // A second recording pass restarts at 0 s: its mic rows overlap the first's.
+        let mic = [
+            timedSegment(
+                .mic,
+                [("primera", 0.0), ("grabación", 0.8), ("de", 1.6), ("esta", 2.4), ("reunión", 3.2)]),
+            timedSegment(.mic, [("lo", 0.15), ("enviamos", 0.45), ("el", 0.75), ("lunes", 1.05)]),
+        ]
+        let system = [timedSegment(.system, [("lo", 0.0), ("enviamos", 0.3), ("el", 0.6), ("lunes", 0.9)])]
+        #expect(EchoBleedFilter.clean(mic: mic, system: system) == mic)
+    }
+
     @Test func wordTimedEchoIsRemoved() {
         // Speaker bleed: each system word reappears in the mic ~0.15 s later.
         let system = [timedSegment(.system, [("lo", 1.0), ("enviamos", 1.3), ("el", 1.6), ("lunes", 1.9)])]
@@ -102,7 +120,7 @@ import Testing
     @Test func userWordsOnBothSidesOfBleedBecomeTwoTimedSegments() {
         let mic = [segment(.mic, "primero yo uno dos tres cuatro luego yo", 0, 8)]
         let system = [segment(.system, "uno dos tres cuatro", 2, 6)]
-        let cleaned = EchoBleedFilter.clean(mic: mic, system: system)
+        let cleaned = EchoBleedFilter.clean(mic: mic, system: system, allowCoarseTiming: true)
         #expect(cleaned.map(\.text) == ["primero yo", "luego yo"])
         #expect(cleaned.map(\.startSeconds) == [0, 6])
         #expect(cleaned.map(\.endSeconds) == [2, 8])
@@ -113,25 +131,25 @@ import Testing
     @Test func dropsASegmentThatIsOnlyBleed() {
         let mic = [segment(.mic, "te comparto pantalla ahora mismo", 10, 13)]
         let system = [segment(.system, "Vale, te comparto pantalla ahora mismo.", 9.5, 13)]
-        #expect(EchoBleedFilter.clean(mic: mic, system: system).isEmpty)
+        #expect(EchoBleedFilter.clean(mic: mic, system: system, allowCoarseTiming: true).isEmpty)
     }
 
     @Test func sameWordsAtAnotherTimeAreNotBleed() {
         let mic = [segment(.mic, "te comparto pantalla ahora mismo", 10, 13)]
         let system = [segment(.system, "te comparto pantalla ahora mismo", 60, 63)]
-        #expect(EchoBleedFilter.clean(mic: mic, system: system) == mic)
+        #expect(EchoBleedFilter.clean(mic: mic, system: system, allowCoarseTiming: true) == mic)
     }
 
     @Test func shortCoincidencesStay() {
         let mic = [segment(.mic, "Sí, vale.", 5, 6)]
         let system = [segment(.system, "sí vale", 5, 6)]
-        #expect(EchoBleedFilter.clean(mic: mic, system: system) == mic)
+        #expect(EchoBleedFilter.clean(mic: mic, system: system, allowCoarseTiming: true) == mic)
     }
 
     @Test func misheardWordsBetweenBleedRunsGoToo() {
         let mic = [segment(.mic, "uno dos tres cuatro equis cinco seis siete", 0, 5)]
         let system = [segment(.system, "uno dos tres cuatro ye cinco seis siete", 0, 5)]
-        #expect(EchoBleedFilter.clean(mic: mic, system: system).isEmpty)
+        #expect(EchoBleedFilter.clean(mic: mic, system: system, allowCoarseTiming: true).isEmpty)
     }
 
     @Test func headphoneMeetingKeepsTheUsersReadBacks() {
@@ -143,7 +161,7 @@ import Testing
             segment(.mic, "también quiero hablar del presupuesto del proyecto nuevo", 30, 34),
         ]
         let system = [segment(.system, "entonces enviamos el lunes", 18, 20)]
-        #expect(EchoBleedFilter.clean(mic: mic, system: system) == mic)
+        #expect(EchoBleedFilter.clean(mic: mic, system: system, allowCoarseTiming: true) == mic)
     }
 
     @Test func wordsFarApartInsideALongSystemSegmentAreNotBleed() {
@@ -151,7 +169,7 @@ import Testing
         let long = Array(repeating: "bla", count: 50).joined(separator: " ")
             + " revisamos los números del trimestre"
         let system = [segment(.system, long, 0, 60)]
-        #expect(EchoBleedFilter.clean(mic: mic, system: system) == mic)
+        #expect(EchoBleedFilter.clean(mic: mic, system: system, allowCoarseTiming: true) == mic)
     }
 
     @Test func applyBacksUpTheOriginalAndRewritesOnlyTheMicChannel() throws {
@@ -172,7 +190,8 @@ import Testing
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
 
-        try EchoBleedFilter.apply(meetingID: meeting.id, database: db, backupDirectory: directory)
+        try EchoBleedFilter.apply(
+            meetingID: meeting.id, database: db, backupDirectory: directory, allowCoarseTiming: true)
 
         let after = try db.fetchSegments(meetingID: meeting.id)
         #expect(after.filter { $0.channel == .mic }.map(\.text) == ["Hola, hola."])

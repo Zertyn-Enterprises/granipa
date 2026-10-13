@@ -28,13 +28,19 @@ enum EchoBleedFilter {
     }
 
     /// Rewrites the mic channel only after saving the original segments to
-    /// the backup directory; without one nothing changes.
-    static func apply(meetingID: String, database: AppDatabase, backupDirectory: URL?) throws {
+    /// the backup directory; without one nothing changes. Segments without
+    /// recognizer word timings are matched only when `allowCoarseTiming` —
+    /// an explicit user request — since interpolated times can mistake a
+    /// read-back for echo.
+    static func apply(
+        meetingID: String, database: AppDatabase, backupDirectory: URL?,
+        allowCoarseTiming: Bool = false
+    ) throws {
         guard let backupDirectory else { return }
         let segments = try database.fetchSegments(meetingID: meetingID)
         let mic = segments.filter { $0.channel == .mic }
         let system = segments.filter { $0.channel == .system && $0.isFinal }
-        let cleaned = clean(mic: mic, system: system)
+        let cleaned = clean(mic: mic, system: system, allowCoarseTiming: allowCoarseTiming)
         guard cleaned != mic else { return }
         let backup = backupDirectory.appendingPathComponent(backupFileName(meetingID: meetingID))
         try JSONEncoder().encode(mic).write(to: backup, options: .atomic)
@@ -51,8 +57,15 @@ enum EchoBleedFilter {
         }
     }
 
-    static func clean(mic: [TranscriptSegment], system: [TranscriptSegment]) -> [TranscriptSegment] {
-        let masks = mic.map { dropMask(for: $0, system: system) }
+    static func clean(
+        mic: [TranscriptSegment], system: [TranscriptSegment], allowCoarseTiming: Bool = false
+    ) -> [TranscriptSegment] {
+        // Every recording pass restarts meeting time at zero; overlapping
+        // segments on one channel mean several passes whose times collide.
+        guard !hasOverlappingPasses(mic), !hasOverlappingPasses(system) else { return mic }
+        let masks = mic.map {
+            dropMask(for: $0, system: system, allowCoarseTiming: allowCoarseTiming)
+        }
         var words = 0
         var bleed = 0
         for (segment, mask) in zip(mic, masks) {
@@ -135,14 +148,29 @@ enum EchoBleedFilter {
     }
 
     /// nil when no system speech overlaps the segment.
+    static let passOverlapSeconds = 1.0
+
+    private static func hasOverlappingPasses(_ segments: [TranscriptSegment]) -> Bool {
+        let ordered = segments.sorted { $0.startSeconds < $1.startSeconds }
+        return zip(ordered, ordered.dropFirst()).contains {
+            $1.startSeconds < $0.endSeconds - passOverlapSeconds
+        }
+    }
+
     private static func dropMask(
-        for segment: TranscriptSegment, system: [TranscriptSegment]
+        for segment: TranscriptSegment, system: [TranscriptSegment], allowCoarseTiming: Bool
     ) -> [Bool]? {
-        let heard = system
+        let overlapping = system
             .filter {
                 $0.startSeconds <= segment.endSeconds + windowSeconds
                     && $0.endSeconds >= segment.startSeconds - windowSeconds
             }
+        if !allowCoarseTiming,
+            segment.words == nil || overlapping.contains(where: { $0.words == nil })
+        {
+            return nil
+        }
+        let heard = overlapping
             .sorted { $0.startSeconds < $1.startSeconds }
             .flatMap(timedTokens)
             .filter { !$0.word.isEmpty }
