@@ -487,15 +487,7 @@ final class AppState {
                 "Transcription failed — your audio was saved", style: .warning)
         }
 
-        do {
-            try EchoBleedFilter.apply(
-                meetingID: meetingID, database: db,
-                backupDirectory: try AppPaths.transcriptBackupDirectory())
-        } catch {
-            Self.log.error(
-                "speaker-bleed cleanup failed for \(meetingID, privacy: .public): \(error.localizedDescription, privacy: .public)"
-            )
-        }
+        cleanSpeakerBleed(meetingID: meetingID)
 
         if skipLocalDiarize {
             if inferNames {
@@ -537,6 +529,26 @@ final class AppState {
                 database: db)
             Task { await WebhookService.deliverDue(database: db) }
         }
+    }
+
+    private func cleanSpeakerBleed(meetingID: String) {
+        guard let db = database else { return }
+        do {
+            try EchoBleedFilter.apply(
+                meetingID: meetingID, database: db,
+                backupDirectory: try AppPaths.transcriptBackupDirectory())
+        } catch {
+            Self.log.error(
+                "speaker-bleed cleanup failed for \(meetingID, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
+    /// The notes buttons clean speaker bleed first, so meetings processed
+    /// before the filter existed get it too; once cleaned it is a no-op.
+    func regenerateNotes(meetingID: String) async {
+        cleanSpeakerBleed(meetingID: meetingID)
+        await enhance(meetingID: meetingID)
     }
 
     func enhance(meetingID: String) async {

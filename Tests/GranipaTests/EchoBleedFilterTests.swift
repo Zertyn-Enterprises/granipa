@@ -235,10 +235,30 @@ import Testing
             encoding: .utf8)
         let body = try #require(source.range(of: "func postProcess(")).upperBound
         let rest = source[body...]
-        let filter = try #require(rest.range(of: "EchoBleedFilter.apply("))
+        let filter = try #require(rest.range(of: "cleanSpeakerBleed(meetingID: meetingID)"))
         let diarize = try #require(rest.range(of: "DiarizationService.diarize("))
         let notes = try #require(rest.range(of: "await enhance(meetingID: meetingID)"))
         #expect(filter.lowerBound < diarize.lowerBound)
         #expect(filter.lowerBound < notes.lowerBound)
+    }
+
+    @Test func notesButtonsCleanBleedBeforeRegenerating() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let app = try String(
+            contentsOf: root.appendingPathComponent("Sources/Granipa/AppState.swift"),
+            encoding: .utf8)
+        let body = try #require(app.range(of: "func regenerateNotes(")).upperBound
+        let rest = app[body...]
+        let clean = try #require(rest.range(of: "cleanSpeakerBleed(meetingID: meetingID)"))
+        let notes = try #require(rest.range(of: "await enhance(meetingID: meetingID)"))
+        #expect(clean.lowerBound < notes.lowerBound)
+        for view in ["MeetingRecordedViews.swift", "EnhancedNotesView.swift"] {
+            let source = try String(
+                contentsOf: root.appendingPathComponent("Sources/Granipa/UI/\(view)"),
+                encoding: .utf8)
+            #expect(source.contains("app.regenerateNotes(meetingID:"))
+            #expect(!source.contains("app.enhance(meetingID:"))
+        }
     }
 }
