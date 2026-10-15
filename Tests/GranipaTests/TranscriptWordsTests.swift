@@ -34,6 +34,16 @@ import Testing
         #expect(TranscriptWords.from(text)?.map(\.text) == ["Vale,", "perfecto."])
     }
 
+    @Test func openingPunctuationStaysWithTheWordAfterIt() {
+        var text = AttributedString("¿")
+        text.append(timed("Qué", 1.0, 1.3))
+        text.append(timed(" tal", 1.4, 1.7))
+        text.append(AttributedString("? ¡"))
+        text.append(timed("Vale", 2.0, 2.3))
+        text.append(AttributedString("!"))
+        #expect(TranscriptWords.from(text)?.map(\.text) == ["¿Qué", "tal?", "¡Vale!"])
+    }
+
     @Test func partiallyTaggedTextHasNoWordTimings() {
         var text = timed("hola ", 1.0, 1.4)
         text.append(AttributedString("mundo"))
