@@ -44,7 +44,7 @@ enum EchoBleedFilter {
         guard cleaned != mic else { return }
         let backup = backupDirectory.appendingPathComponent(backupFileName(meetingID: meetingID))
         try JSONEncoder().encode(mic).write(to: backup, options: .atomic)
-        try database.replaceSegments(meetingID: meetingID, channel: .mic, with: cleaned)
+        try database.replaceSegments(ids: mic.map(\.id), with: cleaned)
     }
 
     /// Deleting a meeting must not leave its transcript behind; a failure is

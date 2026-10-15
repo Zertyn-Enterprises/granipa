@@ -98,4 +98,25 @@ import Testing
         #expect(all.map(\.text) == ["mine", "new"])
         #expect(all.map(\.speaker) == ["Me", "Speaker 1"])
     }
+
+    @Test func replacingFetchedSegmentsKeepsOnesSavedSince() throws {
+        let db = try makeDatabase()
+        let meeting = Meeting.new(title: "Test", language: "en-US")
+        try db.save(meeting)
+        let fetched = TranscriptSegment.new(
+            meetingID: meeting.id, channel: .mic, speaker: "Me",
+            text: "old", startSeconds: 0, endSeconds: 1, isFinal: true)
+        try db.save(fetched)
+        let savedSince = TranscriptSegment.new(
+            meetingID: meeting.id, channel: .mic, speaker: "Me",
+            text: "arrived later", startSeconds: 5, endSeconds: 6, isFinal: true)
+        try db.save(savedSince)
+
+        var cleaned = fetched
+        cleaned.text = "cleaned"
+        try db.replaceSegments(ids: [fetched.id], with: [cleaned])
+
+        let all = try db.fetchSegments(meetingID: meeting.id)
+        #expect(all.map(\.text) == ["cleaned", "arrived later"])
+    }
 }

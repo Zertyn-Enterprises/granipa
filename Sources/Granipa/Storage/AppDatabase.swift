@@ -522,4 +522,15 @@ extension AppDatabase {
             }
         }
     }
+
+    /// Replaces exactly the given segments, so rows saved after the caller
+    /// fetched them (e.g. a recording that started meanwhile) survive.
+    func replaceSegments(ids: [String], with segments: [TranscriptSegment]) throws {
+        try writer.write { db in
+            _ = try TranscriptSegment.deleteAll(db, keys: ids)
+            for segment in segments {
+                try segment.save(db)
+            }
+        }
+    }
 }
