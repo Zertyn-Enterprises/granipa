@@ -467,6 +467,16 @@ final class AppState {
                 "Transcription failed — your audio was saved", style: .warning)
         }
 
+        do {
+            try EchoBleedFilter.apply(
+                meetingID: meetingID, database: db,
+                backupDirectory: try AppPaths.transcriptBackupDirectory())
+        } catch {
+            Self.log.error(
+                "speaker-bleed cleanup failed for \(meetingID, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+        }
+
         if skipLocalDiarize {
             if inferNames {
                 try? await DiarizationService.inferNames(
@@ -688,6 +698,8 @@ final class AppState {
     func deleteMeeting(id: String) {
         guard let db = database else { return }
         do {
+            try EchoBleedFilter.removeBackups(
+                meetingID: id, from: try AppPaths.transcriptBackupDirectory(create: false))
             try db.deleteMeeting(id: id)
             meetings.removeAll { $0.id == id }
             if selectedMeetingID == id {

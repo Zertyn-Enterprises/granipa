@@ -6,6 +6,13 @@ enum AudioChannel: String, Codable, Sendable {
     case system
 }
 
+/// One recognized word with its meeting-relative audio span.
+struct TranscriptWord: Codable, Hashable, Sendable {
+    var text: String
+    var start: Double
+    var end: Double
+}
+
 struct TranscriptSegment: Codable, Identifiable, Hashable, Sendable, FetchableRecord, PersistableRecord {
     var id: String
     var meetingID: String
@@ -15,6 +22,9 @@ struct TranscriptSegment: Codable, Identifiable, Hashable, Sendable, FetchableRe
     var startSeconds: Double
     var endSeconds: Double
     var isFinal: Bool
+    /// Per-word timing from the recognizer; nil for segments recorded before
+    /// it was stored. Kept out of the public API.
+    var words: [TranscriptWord]? = nil
 
     static func new(
         meetingID: String,
@@ -23,7 +33,8 @@ struct TranscriptSegment: Codable, Identifiable, Hashable, Sendable, FetchableRe
         text: String,
         startSeconds: Double,
         endSeconds: Double,
-        isFinal: Bool
+        isFinal: Bool,
+        words: [TranscriptWord]? = nil
     ) -> TranscriptSegment {
         TranscriptSegment(
             id: UUID().uuidString,
@@ -33,7 +44,8 @@ struct TranscriptSegment: Codable, Identifiable, Hashable, Sendable, FetchableRe
             text: text,
             startSeconds: startSeconds,
             endSeconds: endSeconds,
-            isFinal: isFinal
+            isFinal: isFinal,
+            words: words
         )
     }
 }

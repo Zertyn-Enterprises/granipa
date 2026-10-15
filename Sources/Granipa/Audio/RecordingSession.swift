@@ -40,6 +40,10 @@ final class RecordingSession: @unchecked Sendable {
     private var micConverter = BufferConverter()
     private var micPadSeconds: Double = 0
     private var systemFile: AVAudioFile?
+    /// Writer-queue state. Once stop() closes the files, a buffer still in
+    /// flight from the engine's tap must not reopen them: AVAudioFile(forWriting:)
+    /// replaces the finished recording with a header-only file.
+    private var filesClosed = false
     private var systemFramesWritten: AVAudioFramePosition = 0
     private var sessionStartHostSeconds: Double = 0
     private(set) var systemAudioError: Error?
@@ -153,6 +157,10 @@ final class RecordingSession: @unchecked Sendable {
     func ingestMicBufferForTesting(_ buffer: AVAudioPCMBuffer, startSeconds: Double?) {
         writer.sync { writeMic(buffer, startSeconds: startSeconds) }
     }
+
+    func ingestSystemBufferForTesting(_ buffer: AVAudioPCMBuffer, startSeconds: Double?) {
+        writer.sync { writeSystem(buffer, startSeconds: startSeconds) }
+    }
 #endif
 
     private func removeDeviceChangeListener() {
@@ -259,6 +267,7 @@ final class RecordingSession: @unchecked Sendable {
                 writer.sync {
                     micFile = nil
                     systemFile = nil
+                    filesClosed = true
                 }
                 micContinuation.finish()
                 systemContinuation.finish()
@@ -353,6 +362,7 @@ final class RecordingSession: @unchecked Sendable {
     // stalled route) are padded with silence so file time == meeting time,
     // mirroring writeSystem.
     private func writeMic(_ buffer: AVAudioPCMBuffer, startSeconds: Double?) {
+        guard !filesClosed else { return }
         if micFile == nil {
             micFile = Self.openAudioFile(url: micURL, format: buffer.format, bitRate: 96_000)
             if let file = micFile, micPadSeconds > 0 {
@@ -392,6 +402,7 @@ final class RecordingSession: @unchecked Sendable {
     }
 
     private func writeSystem(_ buffer: AVAudioPCMBuffer, startSeconds: Double?) {
+        guard !filesClosed else { return }
         let sampleRate = buffer.format.sampleRate
         if systemFile == nil {
             systemFile = Self.openAudioFile(url: systemURL, format: buffer.format, bitRate: 128_000)
