@@ -17,6 +17,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         LegacyBatteryHelper.unregisterIfRegistered()
         os_signpost(.event, log: Self.lifecycleLog, name: "appReady")
     }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        #if DEBUG
+        if V2FixtureRuntime.isActive { return }
+        #endif
+        // Give Caps Lock back to the system; the next launch re-applies it.
+        CapsLockRemap.apply(enabled: false)
+    }
 }
 
 @main

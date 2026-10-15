@@ -28,15 +28,21 @@ final class ShortcutHub {
             }
         }
 
-        if let hyperCode = WindowHyperKey.current.keyCode {
+        let hyper = WindowHyperKey.current
+        if let hyperCode = hyper == .capsLock ? CapsLockRemap.f18KeyCode : hyper.keyCode {
             if !PasteService.isTrusted {
                 PasteService.requestTrust()
             }
-            HyperKeyMonitor.shared.start(hyperKeyCode: hyperCode, bindings: keyToID) { id in
+            let started = HyperKeyMonitor.shared.start(
+                hyperKeyCode: hyperCode, bindings: keyToID
+            ) { id in
                 Self.dispatch(id)
             }
+            // Without a running tap, F18 would leave Caps Lock dead.
+            CapsLockRemap.apply(enabled: hyper == .capsLock && started)
             return
         }
+        CapsLockRemap.apply(enabled: false)
 
         for extra in ExtraShortcut.allCases {
             HotkeyManager.shared.register(
