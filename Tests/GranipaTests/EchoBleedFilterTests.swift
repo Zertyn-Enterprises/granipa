@@ -248,6 +248,15 @@ import Testing
         #expect(filter.lowerBound < notes.lowerBound)
     }
 
+    @Test func onlySettledMeetingsMayHaveTheirTranscriptRewritten() {
+        // While recording or processing, finals are still being saved; a
+        // rewrite of the mic channel would delete the ones it did not fetch.
+        #expect(AppState.canRewriteTranscript(status: .ready))
+        #expect(!AppState.canRewriteTranscript(status: .processing))
+        #expect(!AppState.canRewriteTranscript(status: .recording))
+        #expect(!AppState.canRewriteTranscript(status: nil))
+    }
+
     @Test func notesButtonsCleanBleedBeforeRegenerating() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -256,8 +265,10 @@ import Testing
             encoding: .utf8)
         let body = try #require(app.range(of: "func regenerateNotes(")).upperBound
         let rest = app[body...]
+        let gate = try #require(rest.range(of: "Self.canRewriteTranscript(status:"))
         let clean = try #require(rest.range(of: "cleanSpeakerBleed(meetingID: meetingID, allowCoarseTiming: true)"))
         let notes = try #require(rest.range(of: "await enhance(meetingID: meetingID)"))
+        #expect(gate.lowerBound < clean.lowerBound)
         #expect(clean.lowerBound < notes.lowerBound)
         for view in ["MeetingRecordedViews.swift", "EnhancedNotesView.swift"] {
             let source = try String(

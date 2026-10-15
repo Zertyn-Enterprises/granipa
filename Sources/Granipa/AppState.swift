@@ -559,9 +559,18 @@ final class AppState {
     /// The notes buttons clean speaker bleed first, so meetings processed
     /// before the filter existed get it too; once cleaned it is a no-op.
     func regenerateNotes(meetingID: String) async {
-        // Explicit request: meetings without word timings get the coarse matcher.
-        await cleanSpeakerBleed(meetingID: meetingID, allowCoarseTiming: true)
+        let status = try? database?.fetchMeeting(id: meetingID)?.status
+        if Self.canRewriteTranscript(status: status) {
+            // Explicit request: meetings without word timings get the coarse matcher.
+            await cleanSpeakerBleed(meetingID: meetingID, allowCoarseTiming: true)
+        }
         await enhance(meetingID: meetingID)
+    }
+
+    /// The cleanup replaces the whole mic channel, so it would delete finals
+    /// saved after its fetch; until the pipeline settles the meeting, skip it.
+    nonisolated static func canRewriteTranscript(status: MeetingStatus?) -> Bool {
+        status == .ready
     }
 
     func enhance(meetingID: String) async {
