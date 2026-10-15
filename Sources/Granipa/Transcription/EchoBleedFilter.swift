@@ -61,6 +61,15 @@ enum EchoBleedFilter {
         }
     }
 
+    /// A delete that ran while a pass was in flight removed the backups
+    /// before the pass wrote its own; this drops that orphan afterwards.
+    static func removeOrphanedBackups(
+        meetingID: String, database: AppDatabase, backupDirectory: URL?
+    ) throws {
+        guard try database.fetchMeeting(id: meetingID) == nil else { return }
+        try removeBackups(meetingID: meetingID, from: backupDirectory)
+    }
+
     static func clean(
         mic: [TranscriptSegment], system: [TranscriptSegment], allowCoarseTiming: Bool = false
     ) -> [TranscriptSegment] {

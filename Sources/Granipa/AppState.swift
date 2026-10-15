@@ -554,6 +554,17 @@ final class AppState {
                 "speaker-bleed cleanup failed for \(meetingID, privacy: .public): \(error.localizedDescription, privacy: .public)"
             )
         }
+        // deleteMeeting runs on the main actor, so once the pass is awaited
+        // a delete that raced it is visible here.
+        do {
+            try EchoBleedFilter.removeOrphanedBackups(
+                meetingID: meetingID, database: db,
+                backupDirectory: try AppPaths.transcriptBackupDirectory(create: false))
+        } catch {
+            Self.log.error(
+                "bleed backup sweep failed for \(meetingID, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+        }
     }
 
     /// The notes buttons clean speaker bleed first, so meetings processed

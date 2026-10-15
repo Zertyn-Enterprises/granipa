@@ -68,6 +68,43 @@ import Testing
         #expect(backups.lowerBound < row.lowerBound)
     }
 
+    @Test func aPassThatOutlivedItsMeetingLeavesNoBackup() throws {
+        let db = try AppDatabase(writer: DatabaseQueue())
+        let kept = Meeting.new(title: "Kept", language: "es-ES")
+        let deleted = Meeting.new(title: "Deleted", language: "es-ES")
+        try db.save(kept)
+        try db.save(deleted)
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bleed-orphan-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let keptBackup = directory.appendingPathComponent(
+            EchoBleedFilter.backupFileName(meetingID: kept.id))
+        let orphan = directory.appendingPathComponent(
+            EchoBleedFilter.backupFileName(meetingID: deleted.id))
+        for url in [keptBackup, orphan] { try Data("[]".utf8).write(to: url) }
+        try db.deleteMeeting(id: deleted.id)
+
+        for meeting in [kept, deleted] {
+            try EchoBleedFilter.removeOrphanedBackups(
+                meetingID: meeting.id, database: db, backupDirectory: directory)
+        }
+
+        #expect(FileManager.default.fileExists(atPath: keptBackup.path))
+        #expect(!FileManager.default.fileExists(atPath: orphan.path))
+        let app = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("Sources/Granipa/AppState.swift"),
+            encoding: .utf8)
+        let body = try #require(app.range(of: "func cleanSpeakerBleed(")).upperBound
+        let rest = app[body...]
+        let pass = try #require(rest.range(of: "}.value"))
+        let sweep = try #require(rest.range(of: "EchoBleedFilter.removeOrphanedBackups("))
+        #expect(pass.lowerBound < sweep.lowerBound)
+    }
+
     private func timedSegment(
         _ channel: AudioChannel, _ words: [(String, Double)], wordSeconds: Double = 0.3
     ) -> TranscriptSegment {
