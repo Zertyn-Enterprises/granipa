@@ -47,6 +47,15 @@ enum EnhancementService {
             to their boss unedited. Below is a meeting transcript with speaker labels and \
             timestamps, plus the rough notes the user typed live during the meeting.
             \(templateSection)
+            Perspective: the speaker labelled "Me" is the reader of this report — the user \
+            who recorded the meeting. Address them in the second person in "title", \
+            "summary", "enhanced_notes" and "action_items" ("you" in English, "tú" in \
+            Spanish: "Acordaste enviar el presupuesto el lunes"), never in the third person \
+            and never as "Me", "the user" or "el usuario". An action item they own has \
+            owner "You" (or "Tú" in Spanish). Other speakers keep their names or labels. \
+            The "email_draft" is sent by the reader, so it is written in the first person \
+            ("Te envío el presupuesto el lunes").
+
             Non-negotiable quality rules:
             - Be specific. Keep every number, amount, date, deadline, name and metric exactly \
             as said. Never replace specifics with vague summaries.

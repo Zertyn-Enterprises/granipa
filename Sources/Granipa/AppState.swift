@@ -403,11 +403,6 @@ final class AppState {
             return
         }
         processingMeetingID = id
-        defer {
-            if processingMeetingID == id {
-                processingMeetingID = nil
-            }
-        }
         // Re-fetch: the transcription coordinator may have written the detected
         // language while the array copy was stale.
         guard let db = database, var meeting = try? db.fetchMeeting(id: id) else {
@@ -415,6 +410,9 @@ final class AppState {
                 await live.finishAndWait()
             }
             transcription = nil
+            if processingMeetingID == id {
+                processingMeetingID = nil
+            }
             return
         }
         meeting.status = .processing
@@ -423,15 +421,40 @@ final class AppState {
         meeting.audioSystemPath = urls.systemURL.path
         update(meeting)
 
-        if let live = transcription {
+        let live = transcription
+        transcription = nil
+        let language = meeting.language
+        // Post-meeting work (file ASR, diarization, enhancement) runs in an
+        // unawaited utility task. Awaiting a Task's value escalates it to the
+        // awaiter's priority, so awaiting this from the UI's task would run
+        // minutes of transcription and diarization at user-interactive
+        // priority on the performance cores.
+        Task.detached(priority: .utility) { [weak self] in
+            await self?.finishMeeting(
+                meetingID: id, urls: urls, language: language, live: live, database: db)
+        }
+    }
+
+    private func finishMeeting(
+        meetingID id: String,
+        urls: (micURL: URL, systemURL: URL),
+        language: String,
+        live: TranscriptionCoordinator?,
+        database db: AppDatabase
+    ) async {
+        defer {
+            if processingMeetingID == id {
+                processingMeetingID = nil
+            }
+        }
+        if let live {
             await live.finishAndWait()
-            let usedMuseForSystem = live.systemUsedMuse
-            transcription = nil
-            await postProcess(meetingID: id, skipLocalDiarize: usedMuseForSystem)
+            // The open transcript reloaded when live ASR detached; the drained
+            // tail landed afterwards.
+            transcriptRevisions[id, default: 0] += 1
+            await postProcess(meetingID: id, skipLocalDiarize: live.systemUsedMuse)
         } else {
-            transcription = nil
-            let language = meeting.language
-            let outcome = await Task.detached {
+            let outcome = await Task.detached(priority: .utility) {
                 await FileMeetingTranscriber.transcribe(
                     micURL: urls.micURL,
                     systemURL: urls.systemURL,
@@ -467,15 +490,7 @@ final class AppState {
                 "Transcription failed — your audio was saved", style: .warning)
         }
 
-        do {
-            try EchoBleedFilter.apply(
-                meetingID: meetingID, database: db,
-                backupDirectory: try AppPaths.transcriptBackupDirectory())
-        } catch {
-            Self.log.error(
-                "speaker-bleed cleanup failed for \(meetingID, privacy: .public): \(error.localizedDescription, privacy: .public)"
-            )
-        }
+        await cleanSpeakerBleed(meetingID: meetingID, allowCoarseTiming: false)
 
         if skipLocalDiarize {
             if inferNames {
@@ -517,6 +532,56 @@ final class AppState {
                 database: db)
             Task { await WebhookService.deliverDue(database: db) }
         }
+    }
+
+    /// Bumped when a meeting's stored transcript is rewritten outside a
+    /// status change, so an open detail view reloads it.
+    private(set) var transcriptRevisions: [String: Int] = [:]
+
+    private func cleanSpeakerBleed(meetingID: String, allowCoarseTiming: Bool) async {
+        guard let db = database else { return }
+        do {
+            // Fetch, backup write and rewrite stay off the main actor.
+            let rewritten = try await Task.detached(priority: .utility) {
+                try EchoBleedFilter.apply(
+                    meetingID: meetingID, database: db,
+                    backupDirectory: try AppPaths.transcriptBackupDirectory(),
+                    allowCoarseTiming: allowCoarseTiming)
+            }.value
+            if rewritten { transcriptRevisions[meetingID, default: 0] += 1 }
+        } catch {
+            Self.log.error(
+                "speaker-bleed cleanup failed for \(meetingID, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+        }
+        // deleteMeeting runs on the main actor, so once the pass is awaited
+        // a delete that raced it is visible here.
+        do {
+            try EchoBleedFilter.removeOrphanedBackups(
+                meetingID: meetingID, database: db,
+                backupDirectory: try AppPaths.transcriptBackupDirectory(create: false))
+        } catch {
+            Self.log.error(
+                "bleed backup sweep failed for \(meetingID, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
+    /// The notes buttons clean speaker bleed first, so meetings processed
+    /// before the filter existed get it too; once cleaned it is a no-op.
+    func regenerateNotes(meetingID: String) async {
+        let status = try? database?.fetchMeeting(id: meetingID)?.status
+        if Self.canRewriteTranscript(status: status) {
+            // Explicit request: meetings without word timings get the coarse matcher.
+            await cleanSpeakerBleed(meetingID: meetingID, allowCoarseTiming: true)
+        }
+        await enhance(meetingID: meetingID)
+    }
+
+    /// The cleanup replaces the whole mic channel, so it would delete finals
+    /// saved after its fetch; until the pipeline settles the meeting, skip it.
+    nonisolated static func canRewriteTranscript(status: MeetingStatus?) -> Bool {
+        status == .ready
     }
 
     func enhance(meetingID: String) async {

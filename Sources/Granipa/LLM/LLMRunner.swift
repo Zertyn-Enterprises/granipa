@@ -40,6 +40,23 @@ private final class DataBox: @unchecked Sendable {
     }
 }
 
+private final class Flag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+
+    func set() {
+        lock.lock()
+        value = true
+        lock.unlock()
+    }
+
+    func get() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+}
+
 enum LLMRunner {
     struct Output: Sendable {
         let stdout: String
@@ -113,8 +130,10 @@ enum LLMRunner {
             }
         }
 
+        let timedOut = Flag()
         let watchdog = DispatchWorkItem {
             if process.isRunning {
+                timedOut.set()
                 process.terminate()
             }
         }
@@ -136,13 +155,19 @@ enum LLMRunner {
         let stdout = String(decoding: stdoutData, as: UTF8.self)
         let stderr = String(decoding: stderrBox.get(), as: UTF8.self)
 
-        if process.terminationReason == .uncaughtSignal {
+        // A CLI that traps SIGTERM exits normally (grok: 143), so the
+        // termination reason alone does not reveal the timeout.
+        if process.terminationReason == .uncaughtSignal || timedOut.get() {
             throw LLMError.terminated
         }
         guard process.terminationStatus == 0 else {
+            // Some CLIs (claude -p) print API errors on stdout and leave
+            // stderr empty; without this the user saw a blank reason.
+            let reason = stderr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? stdout : stderr
             throw LLMError.nonZeroExit(
                 process.terminationStatus,
-                String(stderr.suffix(500)).trimmingCharacters(in: .whitespacesAndNewlines))
+                String(reason.suffix(500)).trimmingCharacters(in: .whitespacesAndNewlines))
         }
         return Output(stdout: stdout)
     }

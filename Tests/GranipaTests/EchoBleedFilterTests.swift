@@ -68,6 +68,43 @@ import Testing
         #expect(backups.lowerBound < row.lowerBound)
     }
 
+    @Test func aPassThatOutlivedItsMeetingLeavesNoBackup() throws {
+        let db = try AppDatabase(writer: DatabaseQueue())
+        let kept = Meeting.new(title: "Kept", language: "es-ES")
+        let deleted = Meeting.new(title: "Deleted", language: "es-ES")
+        try db.save(kept)
+        try db.save(deleted)
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bleed-orphan-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let keptBackup = directory.appendingPathComponent(
+            EchoBleedFilter.backupFileName(meetingID: kept.id))
+        let orphan = directory.appendingPathComponent(
+            EchoBleedFilter.backupFileName(meetingID: deleted.id))
+        for url in [keptBackup, orphan] { try Data("[]".utf8).write(to: url) }
+        try db.deleteMeeting(id: deleted.id)
+
+        for meeting in [kept, deleted] {
+            try EchoBleedFilter.removeOrphanedBackups(
+                meetingID: meeting.id, database: db, backupDirectory: directory)
+        }
+
+        #expect(FileManager.default.fileExists(atPath: keptBackup.path))
+        #expect(!FileManager.default.fileExists(atPath: orphan.path))
+        let app = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("Sources/Granipa/AppState.swift"),
+            encoding: .utf8)
+        let body = try #require(app.range(of: "func cleanSpeakerBleed(")).upperBound
+        let rest = app[body...]
+        let pass = try #require(rest.range(of: "}.value"))
+        let sweep = try #require(rest.range(of: "EchoBleedFilter.removeOrphanedBackups("))
+        #expect(pass.lowerBound < sweep.lowerBound)
+    }
+
     private func timedSegment(
         _ channel: AudioChannel, _ words: [(String, Double)], wordSeconds: Double = 0.3
     ) -> TranscriptSegment {
@@ -194,8 +231,14 @@ import Testing
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
 
-        try EchoBleedFilter.apply(
-            meetingID: meeting.id, database: db, backupDirectory: directory, allowCoarseTiming: true)
+        #expect(
+            try EchoBleedFilter.apply(
+                meetingID: meeting.id, database: db, backupDirectory: directory,
+                allowCoarseTiming: true))
+        #expect(
+            !(try EchoBleedFilter.apply(
+                meetingID: meeting.id, database: db, backupDirectory: directory,
+                allowCoarseTiming: true)))
 
         let after = try db.fetchSegments(meetingID: meeting.id)
         #expect(after.filter { $0.channel == .mic }.map(\.text) == ["Hola, hola."])
@@ -235,10 +278,41 @@ import Testing
             encoding: .utf8)
         let body = try #require(source.range(of: "func postProcess(")).upperBound
         let rest = source[body...]
-        let filter = try #require(rest.range(of: "EchoBleedFilter.apply("))
+        let filter = try #require(rest.range(of: "cleanSpeakerBleed(meetingID: meetingID, allowCoarseTiming: false)"))
         let diarize = try #require(rest.range(of: "DiarizationService.diarize("))
         let notes = try #require(rest.range(of: "await enhance(meetingID: meetingID)"))
         #expect(filter.lowerBound < diarize.lowerBound)
         #expect(filter.lowerBound < notes.lowerBound)
+    }
+
+    @Test func onlySettledMeetingsMayHaveTheirTranscriptRewritten() {
+        // While recording or processing, finals are still being saved; a
+        // rewrite of the mic channel would delete the ones it did not fetch.
+        #expect(AppState.canRewriteTranscript(status: .ready))
+        #expect(!AppState.canRewriteTranscript(status: .processing))
+        #expect(!AppState.canRewriteTranscript(status: .recording))
+        #expect(!AppState.canRewriteTranscript(status: nil))
+    }
+
+    @Test func notesButtonsCleanBleedBeforeRegenerating() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let app = try String(
+            contentsOf: root.appendingPathComponent("Sources/Granipa/AppState.swift"),
+            encoding: .utf8)
+        let body = try #require(app.range(of: "func regenerateNotes(")).upperBound
+        let rest = app[body...]
+        let gate = try #require(rest.range(of: "Self.canRewriteTranscript(status:"))
+        let clean = try #require(rest.range(of: "cleanSpeakerBleed(meetingID: meetingID, allowCoarseTiming: true)"))
+        let notes = try #require(rest.range(of: "await enhance(meetingID: meetingID)"))
+        #expect(gate.lowerBound < clean.lowerBound)
+        #expect(clean.lowerBound < notes.lowerBound)
+        for view in ["MeetingRecordedViews.swift", "EnhancedNotesView.swift"] {
+            let source = try String(
+                contentsOf: root.appendingPathComponent("Sources/Granipa/UI/\(view)"),
+                encoding: .utf8)
+            #expect(source.contains("app.regenerateNotes(meetingID:"))
+            #expect(!source.contains("app.enhance(meetingID:"))
+        }
     }
 }

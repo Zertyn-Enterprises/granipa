@@ -24,6 +24,21 @@ import Testing
         }
     }
 
+    @Test func failureWithoutStderrReportsStdout() async {
+        // The claude CLI prints API errors (e.g. a safeguard refusal) on
+        // stdout and exits 1 with stderr empty.
+        do {
+            _ = try await LLMRunner.run(
+                executable: URL(fileURLWithPath: "/bin/sh"),
+                arguments: ["-c", "echo 'API Error: safeguards flagged this session'; exit 1"],
+                stdin: nil,
+                timeout: 10)
+            Issue.record("expected a failure")
+        } catch {
+            #expect(error.localizedDescription.contains("API Error: safeguards flagged this session"))
+        }
+    }
+
     @Test func timeoutTerminatesProcess() async {
         await #expect(throws: LLMError.self) {
             _ = try await LLMRunner.run(
@@ -31,6 +46,20 @@ import Testing
                 arguments: ["30"],
                 stdin: nil,
                 timeout: 0.5)
+        }
+    }
+
+    @Test func timeoutIsReportedWhenTheCLIExitsCleanlyOnSIGTERM() async {
+        // grok traps SIGTERM and exits 143, so the kill looks like a normal exit.
+        do {
+            _ = try await LLMRunner.run(
+                executable: URL(fileURLWithPath: "/bin/sh"),
+                arguments: ["-c", "trap 'exit 143' TERM; while :; do sleep 0.1; done"],
+                stdin: nil,
+                timeout: 0.5)
+            Issue.record("expected a timeout")
+        } catch {
+            #expect(error.localizedDescription.contains("timed out"))
         }
     }
 
@@ -42,6 +71,16 @@ import Testing
             stdin: big,
             timeout: 15)
         #expect(output.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "300000")
+    }
+}
+
+@Suite struct LLMProviderTests {
+    @Test func grokRunsTheFastModelAtLowEffort() throws {
+        let grok = try #require(LLMProviders.spec(id: "grok"))
+        #expect(grok.arguments == [
+            "-m", "grok-4.7-build-fast", "--reasoning-effort", "low",
+            "-p", LLMProviderSpec.promptPlaceholder,
+        ])
     }
 }
 
@@ -127,6 +166,16 @@ import Testing
         #expect(prompt.contains("Zero duplication"))
         #expect(prompt.contains("[0:01] Me: hola"))
         #expect(prompt.contains("email_draft"))
+    }
+
+    @Test func promptAddressesTheReaderInTheSecondPerson() {
+        let prompt = EnhancementService.buildPrompt(
+            template: nil, notes: "", transcript: "[0:01] Me: te mando el presupuesto")
+        #expect(prompt.contains(#"labelled "Me" is the reader"#))
+        #expect(prompt.contains("second person"))
+        #expect(prompt.contains("never in the third person"))
+        #expect(prompt.contains("email_draft"))
+        #expect(prompt.contains("first person"))
     }
 
     @Test func templateSeedsExist() throws {
