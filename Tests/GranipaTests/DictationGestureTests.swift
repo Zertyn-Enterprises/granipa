@@ -126,6 +126,23 @@
             }
         }
 
+        @Test func cancelDismissesARetryableFailure() async {
+            let controller = hookedController(captureError: DictationError.empty)
+            defer { controller.cancel() }
+
+            controller.toggleFromMenu()
+            #expect(
+                await waitUntil {
+                    if case .failed = controller.phase { return true }
+                    return false
+                })
+            #expect(controller.lastFailureRetryable)
+
+            controller.cancel()
+            #expect(controller.phase == .idle)
+            #expect(!controller.lastFailureRetryable)
+        }
+
         @Test func holdAfterListeningCommitsBufferedText() async {
             var committed: String?
             let controller = hookedController(transcribe: { chunks in
