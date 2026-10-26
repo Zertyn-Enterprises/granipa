@@ -404,11 +404,6 @@ final class AppState {
             return
         }
         processingMeetingID = id
-        defer {
-            if processingMeetingID == id {
-                processingMeetingID = nil
-            }
-        }
         // Re-fetch: the transcription coordinator may have written the detected
         // language while the array copy was stale.
         guard let db = database, var meeting = try? db.fetchMeeting(id: id) else {
@@ -416,6 +411,9 @@ final class AppState {
                 await live.finishAndWait()
             }
             transcription = nil
+            if processingMeetingID == id {
+                processingMeetingID = nil
+            }
             return
         }
         meeting.status = .processing
@@ -424,15 +422,37 @@ final class AppState {
         meeting.audioSystemPath = urls.systemURL.path
         update(meeting)
 
-        if let live = transcription {
+        let live = transcription
+        transcription = nil
+        let language = meeting.language
+        // Post-meeting work (file ASR, diarization, enhancement) runs in an
+        // unawaited utility task. Awaiting a Task's value escalates it to the
+        // awaiter's priority, so awaiting this from the UI's task would run
+        // minutes of transcription and diarization at user-interactive
+        // priority on the performance cores.
+        Task.detached(priority: .utility) { [weak self] in
+            await self?.finishMeeting(
+                meetingID: id, urls: urls, language: language, live: live, database: db)
+        }
+    }
+
+    private func finishMeeting(
+        meetingID id: String,
+        urls: (micURL: URL, systemURL: URL),
+        language: String,
+        live: TranscriptionCoordinator?,
+        database db: AppDatabase
+    ) async {
+        defer {
+            if processingMeetingID == id {
+                processingMeetingID = nil
+            }
+        }
+        if let live {
             await live.finishAndWait()
-            let usedMuseForSystem = live.systemUsedMuse
-            transcription = nil
-            await postProcess(meetingID: id, skipLocalDiarize: usedMuseForSystem)
+            await postProcess(meetingID: id, skipLocalDiarize: live.systemUsedMuse)
         } else {
-            transcription = nil
-            let language = meeting.language
-            let outcome = await Task.detached {
+            let outcome = await Task.detached(priority: .utility) {
                 await FileMeetingTranscriber.transcribe(
                     micURL: urls.micURL,
                     systemURL: urls.systemURL,

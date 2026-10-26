@@ -6,11 +6,15 @@ import Speech
 enum TranscriptionDelivery {
     case efficient
     case realtime
+    /// Offline probes after Stop: finals only, below foreground work. Volatile
+    /// results cost the recognizer extra decoding nobody reads.
+    case batch
 
     var reportingOptions: Set<SpeechTranscriber.ReportingOption> {
         switch self {
         case .efficient: [.volatileResults]
         case .realtime: [.volatileResults, .fastResults]
+        case .batch: []
         }
     }
 
@@ -18,6 +22,7 @@ enum TranscriptionDelivery {
         switch self {
         case .efficient: .medium
         case .realtime: .high
+        case .batch: .utility
         }
     }
 }
