@@ -181,6 +181,7 @@ final class HotkeyManager: @unchecked Sendable {
             let was = modifierDown[id] ?? false
             guard down != was else { continue }
             modifierDown[id] = down
+            Self.log.info("modifier id=\(id) down=\(down) t=\(timestamp, privacy: .public)")
             guard let handler = handlers[id] else { continue }
             if down {
                 handler.onPress(timestamp)
