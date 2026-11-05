@@ -17,6 +17,8 @@ final class AppState {
     private var clipboardMonitor: ClipboardMonitor?
     private var autoStopTask: Task<Void, Never>?
     @ObservationIgnored private var recordingStartTask: Task<Void, Never>?
+    /// Segments the meeting already had when the current pass started.
+    @ObservationIgnored private var earlierPassSegmentIDs: Set<String> = []
     private(set) var transcription: TranscriptionCoordinator?
     private(set) var processingMeetingID: String?
     let dictation = DictationController.shared
@@ -336,6 +338,9 @@ final class AppState {
         #endif
         guard database != nil else { return }
         guard recordingStartTask == nil, !recorder.isBusy else { return }
+        // A new pass on a meeting still being processed would mix the previous
+        // pass's late transcript into this pass's speaker-bleed cleanup.
+        guard meetingID == nil || meetingID != processingMeetingID else { return }
         let targetID: String
         if let meetingID {
             targetID = meetingID
@@ -355,6 +360,8 @@ final class AppState {
 
     private func activateRecording(targetID: String) async {
         guard var meeting = meetings.first(where: { $0.id == targetID }) else { return }
+        earlierPassSegmentIDs = Set(
+            (try? database?.fetchSegments(meetingID: targetID))?.map(\.id) ?? [])
         do {
             let session = try await recorder.start(meetingID: targetID)
             if MeetingASRPolicy.usesLiveASR(), let db = database {
@@ -397,6 +404,7 @@ final class AppState {
         recordingStartTask?.cancel()
         dictation.meetingIsRecording = false
         CaptionsOverlayController.shared.setVisible(false)
+        let earlierPass = earlierPassSegmentIDs
         guard let id = recorder.meetingID, let urls = await recorder.stop() else { return }
         if wasStarting {
             try? FileManager.default.removeItem(at: urls.micURL.deletingLastPathComponent())
@@ -427,7 +435,8 @@ final class AppState {
             await live.finishAndWait()
             let usedMuseForSystem = live.systemUsedMuse
             transcription = nil
-            await postProcess(meetingID: id, skipLocalDiarize: usedMuseForSystem)
+            await postProcess(
+                meetingID: id, skipLocalDiarize: usedMuseForSystem, earlierPassIDs: earlierPass)
         } else {
             transcription = nil
             let language = meeting.language
@@ -442,14 +451,31 @@ final class AppState {
             await postProcess(
                 meetingID: id,
                 skipLocalDiarize: false,
-                fileTranscription: outcome)
+                fileTranscription: outcome,
+                earlierPassIDs: earlierPass)
+        }
+    }
+
+    private func cleanSpeakerBleed(
+        meetingID: String, database db: AppDatabase, earlierPassIDs: Set<String>
+    ) {
+        do {
+            try EchoBleedFilter.apply(
+                meetingID: meetingID, database: db,
+                backupDirectory: try AppPaths.transcriptBackupDirectory(),
+                earlierPassIDs: earlierPassIDs)
+        } catch {
+            Self.log.error(
+                "speaker-bleed cleanup failed for \(meetingID, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
         }
     }
 
     func postProcess(
         meetingID: String,
         skipLocalDiarize: Bool = false,
-        fileTranscription: FileMeetingTranscriber.Outcome? = nil
+        fileTranscription: FileMeetingTranscriber.Outcome? = nil,
+        earlierPassIDs: Set<String> = []
     ) async {
         guard let db = database else { return }
         let defaults = UserDefaults.standard
@@ -466,6 +492,8 @@ final class AppState {
             ToastController.shared.show(
                 "Transcription failed — your audio was saved", style: .warning)
         }
+
+        cleanSpeakerBleed(meetingID: meetingID, database: db, earlierPassIDs: earlierPassIDs)
 
         if skipLocalDiarize {
             if inferNames {
@@ -688,6 +716,8 @@ final class AppState {
     func deleteMeeting(id: String) {
         guard let db = database else { return }
         do {
+            try EchoBleedFilter.removeBackups(
+                meetingID: id, from: try AppPaths.transcriptBackupDirectory(create: false))
             try db.deleteMeeting(id: id)
             meetings.removeAll { $0.id == id }
             if selectedMeetingID == id {

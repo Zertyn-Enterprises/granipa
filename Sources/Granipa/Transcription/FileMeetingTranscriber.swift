@@ -223,7 +223,8 @@ enum FileMeetingTranscriber {
                     text: text,
                     startSeconds: start.isFinite ? start : 0,
                     endSeconds: end.isFinite ? end : (start.isFinite ? start : 0),
-                    isFinal: true)
+                    isFinal: true,
+                    words: TranscriptWords.from(result.text))
                 try? analysis.database.save(segment)
             }
         }
