@@ -21,8 +21,8 @@ final class AppState {
     @ObservationIgnored private var earlierPassSegmentIDs: Set<String> = []
     private(set) var transcription: TranscriptionCoordinator?
     private(set) var processingMeetingID: String?
-    /// Every meeting whose post-recording work is still running; another
-    /// meeting stopped meanwhile replaces `processingMeetingID`, not this.
+    /// Every meeting whose post-recording work is still running.
+    /// `processingMeetingID` is one of them, nil only when this is empty.
     private(set) var processingMeetingIDs: Set<String> = []
     let dictation = DictationController.shared
     private(set) var enhancingMeetingIDs: Set<String> = []
@@ -418,7 +418,7 @@ final class AppState {
         defer {
             processingMeetingIDs.remove(id)
             if processingMeetingID == id {
-                processingMeetingID = nil
+                processingMeetingID = processingMeetingIDs.first
             }
         }
         // Re-fetch: the transcription coordinator may have written the detected
