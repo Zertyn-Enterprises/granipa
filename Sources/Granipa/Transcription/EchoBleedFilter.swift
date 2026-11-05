@@ -31,13 +31,15 @@ enum EchoBleedFilter {
     /// the backup directory; without one nothing changes. Segments without
     /// recognizer word timings are matched only when `allowCoarseTiming` —
     /// an explicit user request — since interpolated times can mistake a
-    /// read-back for echo.
+    /// read-back for echo. `earlierPassIDs` are segments recorded before this
+    /// pass: their times restart at zero too, so they are never compared.
     static func apply(
         meetingID: String, database: AppDatabase, backupDirectory: URL?,
-        allowCoarseTiming: Bool = false
+        allowCoarseTiming: Bool = false, earlierPassIDs: Set<String> = []
     ) throws {
         guard let backupDirectory else { return }
         let segments = try database.fetchSegments(meetingID: meetingID)
+            .filter { !earlierPassIDs.contains($0.id) }
         let mic = segments.filter { $0.channel == .mic }
         let system = segments.filter { $0.channel == .system && $0.isFinal }
         let cleaned = clean(mic: mic, system: system, allowCoarseTiming: allowCoarseTiming)
@@ -189,9 +191,15 @@ enum EchoBleedFilter {
                 index += 1
             }
         }
+        // A gap is misheard echo only while the other side was speaking;
+        // a short interjection between two echo runs is the user's own.
         let dropped = drop.indices.filter { drop[$0] }
         for (lower, upper) in zip(dropped, dropped.dropFirst())
-        where upper - lower > 1 && upper - lower - 1 <= maxBridgedGap {
+        where upper - lower > 1 && upper - lower - 1 <= maxBridgedGap
+            && ((lower + 1)..<upper).allSatisfy({ position in
+                heard.contains { isCausalEcho(mine[position], of: $0) }
+            })
+        {
             for position in (lower + 1)..<upper { drop[position] = true }
         }
         return drop

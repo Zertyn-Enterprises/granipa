@@ -156,6 +156,22 @@ import Testing
         #expect(EchoBleedFilter.clean(mic: mic, system: system, allowCoarseTiming: true).isEmpty)
     }
 
+    @Test func anInterjectionBetweenEchoRunsWhileTheOtherSideIsSilentStays() {
+        let system = [
+            timedSegment(.system, [("lo", 0.0), ("enviamos", 0.3), ("el", 0.6), ("lunes", 0.9)]),
+            timedSegment(.system, [("y", 3.0), ("el", 3.3), ("contrato", 3.6), ("también", 3.9)]),
+        ]
+        let mic = [
+            timedSegment(
+                .mic,
+                [
+                    ("lo", 0.1), ("enviamos", 0.4), ("el", 0.7), ("lunes", 1.0), ("no", 2.0),
+                    ("y", 3.1), ("el", 3.4), ("contrato", 3.7), ("también", 4.0),
+                ])
+        ]
+        #expect(EchoBleedFilter.clean(mic: mic, system: system).map(\.text) == ["no"])
+    }
+
     @Test func headphoneMeetingKeepsTheUsersReadBacks() {
         // Mostly the user's own speech; one genuine read-back of the other side.
         let mic = [
@@ -204,6 +220,30 @@ import Testing
         #expect(backups.count == 1)
         let backup = try Data(contentsOf: directory.appendingPathComponent(try #require(backups.first)))
         #expect(try JSONDecoder().decode([TranscriptSegment].self, from: backup) == [mine])
+    }
+
+    @Test func applyLeavesEarlierRecordingPassesAlone() throws {
+        // Pass 1 had only the user's speech; pass 2, restarting at 0 s, has the
+        // other side saying the same words at the same relative time.
+        let db = try AppDatabase(writer: DatabaseQueue())
+        let meeting = Meeting.new(title: "Two passes", language: "es-ES")
+        try db.save(meeting)
+        var earlier = timedSegment(.mic, [("lo", 0.15), ("enviamos", 0.45), ("el", 0.75), ("lunes", 1.05)])
+        earlier.meetingID = meeting.id
+        var theirs = timedSegment(.system, [("lo", 0.0), ("enviamos", 0.3), ("el", 0.6), ("lunes", 0.9)])
+        theirs.meetingID = meeting.id
+        try db.save(earlier)
+        try db.save(theirs)
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bleed-pass-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        try EchoBleedFilter.apply(
+            meetingID: meeting.id, database: db, backupDirectory: directory,
+            earlierPassIDs: [earlier.id])
+
+        #expect(try db.fetchSegments(meetingID: meeting.id).filter { $0.channel == .mic } == [earlier])
     }
 
     @Test func applyWithoutABackupLocationChangesNothing() throws {
