@@ -174,9 +174,10 @@ import Testing
         #expect(EchoBleedFilter.clean(mic: mic, system: system).map(\.text) == ["no"])
     }
 
-    @Test func aMisheardWordGoesButAWordSaidInThePauseStays() {
-        // "vale" misheard as "vaya" is echo; "no" a second later, while the
-        // other side is silent, is the user's.
+    @Test func aGapWithAWordSaidInThePauseIsKeptWhole() {
+        // "vaya" is "vale" misheard, but "no" a second later, while the other
+        // side is silent, is the user's: the gap stays whole rather than risk
+        // deleting the user's words from the stored transcript.
         let system = [
             timedSegment(
                 .system,
