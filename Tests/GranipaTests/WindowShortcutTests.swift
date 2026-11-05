@@ -58,6 +58,7 @@ import Testing
     @Test func hotkeyIDsAreStable() {
         #expect(WindowAction.leftHalf.hotkeyID == 100)
         #expect(WindowAction.restore.hotkeyID == 113)
+        #expect(WindowAction.tileAppWindows.hotkeyID == 114)
     }
 
     @Test func storedKeyCodeRoundTrip() {

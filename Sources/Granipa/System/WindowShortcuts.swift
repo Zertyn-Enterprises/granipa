@@ -143,6 +143,7 @@ enum WindowShortcuts {
         case .centerThird: UInt32(kVK_ANSI_F)
         case .lastThird: UInt32(kVK_ANSI_G)
         case .restore: UInt32(kVK_Delete)
+        case .tileAppWindows: UInt32(kVK_ANSI_A)
         }
     }
 

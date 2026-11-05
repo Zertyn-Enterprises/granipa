@@ -57,7 +57,7 @@ First launch is a 3-step tour (welcome, permissions, AI & shortcuts). Cloud engi
 - **Clipboard history** (`⌥⇧V`) — Raycast-style floating panel: search, type filters, image previews, source app, auto-paste into the active app. Respects password-manager confidentiality markers. 100% local.
 - **Screen text capture / OCR** (`⌥⇧T`) — select any screen region, the text lands in your clipboard (Vision framework, follows your selected languages).
 - **Emoji & Symbols** (`⌥⇧E`) — opens the macOS character viewer so you can insert an emoji or symbol in the front app.
-- **Window management** — snap halves / quarters / thirds. If a window is already parked on the left (or right), the next snap that way fills the remaining space instead of covering it.
+- **Window management** — snap halves / quarters / thirds, or tile the frontmost app's windows into an automatic grid (4 → 2×2, 6 → 3×2, 8 → 4×2). If a window is already parked on the left (or right), the next snap that way fills the remaining space instead of covering it. With Stage Manager on, snaps and grids leave its strip uncovered.
 - **Shortcuts** — Settings → Shortcuts. Optional **macro key** (Caps Lock, like Raycast, or Right Shift) applies to clipboard, OCR, emoji, history, and windows so chords never clash with other apps. Defaults stay `⌥⇧` / `⌃⌥` until you pick a macro.
 - **Battery care** — AlDente-style charge limit, heat protection (pause charging above a temperature), calibration cycle, and MagSafe LED. Opt-in; charging is restored when Grañipa quits. On MacBooks, Settings → Extras → Battery → **Install battery helper…** (admin password once) so the 70% limit actually writes to the SMC.
 
@@ -80,6 +80,7 @@ First launch is a 3-step tour (welcome, permissions, AI & shortcuts). Cloud engi
 | `⌃⌥ U` `I` `J` `K` | Window quarters |
 | `⌃⌥ D` `F` `G` | Window thirds |
 | `⌃⌥ ⌫` | Restore previous window size |
+| `⌃⌥ A` | Tile the frontmost app's windows in a grid |
 
 ## Requirements
 

@@ -972,7 +972,7 @@ private struct ShortcutsSettings: View {
                     ForEach(
                         [
                             WindowAction.leftHalf, .rightHalf, .topHalf, .bottomHalf,
-                            .maximize, .center, .restore,
+                            .maximize, .center, .restore, .tileAppWindows,
                         ], id: \.self
                     ) { windowRow($0) }
                 }
