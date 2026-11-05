@@ -313,6 +313,15 @@ class BundleSigningTests(unittest.TestCase):
         self.assertEqual(len(helper_calls), 1)
         self.assertIn("--identifier", helper_calls[0])
 
+    def test_legacy_helper_descriptor_ships_for_unregister(self):
+        proc = self.run_bundle()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        contents = self.app() / "Contents"
+        self.assertTrue(
+            (contents / "Library" / "LaunchDaemons"
+             / "com.zertyn.granipa.batteryhelper.plist").exists())
+        self.assertTrue((contents / "MacOS" / "GranipaBatteryHelper").exists())
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

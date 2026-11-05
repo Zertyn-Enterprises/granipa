@@ -48,7 +48,7 @@ A control may carry two classes (example: Tasks tab = `new-reversible` IA + `hum
 1. **Honest mock.** Empty, loading, error, and live states are real. Do not paint chrome that no-ops (`⌘F` with no search, Pause with no engine, play on a row with no file, “2 of 6” that is not the count).
 2. **Complete product, not the easiest subset.** Every real feature implied by images 01–10 stays in the inventory: Tasks, Notes, Files, Pause/Resume, Accuracy, playback channels, tags/favorites, dictation audio, sharing, participants, integrations. Absence of a table today is not “out of V2”.
 3. **Do not fake.** No invented people, photos, billing, quotas, accuracy percentages, Synced-to providers, Google Doc/Slides stand-ins, live AI paragraphs, or health math that contradicts `PermissionState`.
-4. **Preserve working behavior** (§1.4). V2 redesigns the shell; it does not rip out dictation, clipboard, recording, local storage, export, email draft, or battery.
+4. **Preserve working behavior** (§1.4). V2 redesigns the shell; it does not rip out dictation, clipboard, recording, local storage, export, email draft, or battery. *(Battery: superseded 2026-10-05 — the user dropped battery control; macOS's native charge limit replaces it. See CONTEXT.md "Battery control removed".)*
 5. **Capture pipeline freeze.** No writer / coalescing / padding / AEC / live-ASR-default change without a Record profile. `usesLiveASR` stays default **false** (**V** `MeetingASRPolicy.swift:13-17`). Meeting AEC stays hard-off (**V** `RecordingEngine.swift:65-69`). Hang pids **25501 / 62139** remain binding (**V-prev** hang-handoff).
 6. **Single capture.** One mic at a time. Meeting recording wins (`DictationError.micBusy`, **V** `DictationController.swift:161`). Overlay and inspector bind the same `DictationController`. No second engine.
 7. **Timestamps** are meeting-relative seconds everywhere (transcript, diarization, API, bookmarks, player). **V** `AGENTS.md`.
@@ -101,7 +101,7 @@ Do not regress these. T1–T10 add around them.
 | Export Markdown via save panel; copy transcript. | **V** `MeetingExporter.swift:54-75` |
 | Email draft on Enhanced notes (absent from refs — **keep**). | **V** `EnhancedNotesView.swift:84-109` |
 | Enhance now / Re-enhance. | **V** `EnhancedNotesView.swift:43, 131-141` |
-| Battery readout + optional SMC charge limit via `GranipaBatteryHelper`; restore charging on quit. | **V** `GranipaApp.swift:8-9`, `BatteryService.swift`, Settings Extras → Battery |
+| Battery readout + optional SMC charge limit via `GranipaBatteryHelper`; restore charging on quit. | **V** `GranipaApp.swift:8-9`, `BatteryService.swift`, Settings Extras → Battery — **removed 2026-10-05** (see CONTEXT.md) |
 | Clipboard history panel ⌥⇧V; OCR ⌥⇧T; emoji ⌥⇧E; dictation history panel ⌥⇧H. | **V** `MenuBarView.swift:65-80`, `ShortcutHub.swift:62-71` |
 | Floating recording HUD (compact pill / expanded 520). Do not delete it if a live stage ships. | **V** `RecordingHUD.swift:66-183`, `GranipaApp.swift:45-53` |
 | Captions overlay when live ASR + captions prefs. | **V** `MeetingASRPolicy.swift:19-39` |
@@ -768,7 +768,7 @@ Legend: `current` · `presentation-only` · `new-reversible` · `new-persisted` 
 | Rewrite HTTP + Sparkle | current + external-contract | C7 |
 | Right Command dictation | current | Preserve |
 | Clipboard paste | current | Preserve |
-| Battery controls | current | Preserve |
+| Battery controls | current | Removed 2026-10-05 (user decision; see CONTEXT.md) |
 | Local storage | current | Preserve |
 | Email draft | current | Preserve |
 

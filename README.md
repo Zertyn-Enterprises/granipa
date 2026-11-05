@@ -59,7 +59,6 @@ First launch is a 3-step tour (welcome, permissions, AI & shortcuts). Cloud engi
 - **Emoji & Symbols** (`⌥⇧E`) — opens the macOS character viewer so you can insert an emoji or symbol in the front app.
 - **Window management** — snap halves / quarters / thirds, or tile the frontmost app's windows into an automatic grid (4 → 2×2, 6 → 3×2, 8 → 4×2). If a window is already parked on the left (or right), the next snap that way fills the remaining space instead of covering it. With Stage Manager on, snaps and grids leave its strip uncovered.
 - **Shortcuts** — Settings → Shortcuts. Optional **macro key** (Caps Lock, like Raycast, or Right Shift) applies to clipboard, OCR, emoji, history, and windows so chords never clash with other apps. Defaults stay `⌥⇧` / `⌃⌥` until you pick a macro.
-- **Battery care** — AlDente-style charge limit, heat protection (pause charging above a temperature), calibration cycle, and MagSafe LED. Opt-in; charging is restored when Grañipa quits. On MacBooks, Settings → Extras → Battery → **Install battery helper…** (admin password once) so the 70% limit actually writes to the SMC.
 
 ### 🔌 Integrations
 
@@ -151,7 +150,7 @@ valid = hmac.compare_digest(expected, request.headers["X-Granipa-Signature"])
 
 ```sh
 swift build        # compile
-swift test         # swift-testing: storage, API, dictation, meetings, battery helper…
+swift test         # swift-testing: storage, API, dictation, meetings, windows…
 ./Scripts/bundle.sh  # debug .app bundle
 ```
 

@@ -1,8 +1,8 @@
 # Grañipa — agent notes
 
-Native macOS (26+) SwiftUI meeting recorder/transcriber. SPM executable targets
-`Granipa` and `GranipaBatteryHelper`, bundled into `build/Grañipa.app` by
-`Scripts/bundle.sh`. No Xcode project. Product state: `CONTEXT.md`.
+Native macOS (26+) SwiftUI meeting recorder/transcriber. SPM executable target
+`Granipa` (plus a no-op legacy helper stub), bundled into `build/Grañipa.app` by `Scripts/bundle.sh`. No Xcode
+project. Product state: `CONTEXT.md`.
 
 ## Commands
 
@@ -42,9 +42,10 @@ Native macOS (26+) SwiftUI meeting recorder/transcriber. SPM executable targets
   Dictation library, meeting detail/live, in-app `SettingsView`, `Theme`.
   Sidebar destinations are Home and Dictation only.
 - `System/` — hotkeys/macro key, Sparkle, permission health, window manager.
-  `BatteryService` is IOKit readout + optional SMC charge limit (opt-in).
-  Writes go through `GranipaBatteryHelper` (SMAppService daemon). Restores
-  charging on quit.
+  Battery control was removed (macOS 27 blocks the SMC charge keys; macOS
+  has a native charge limit). `LegacyBatteryHelper` unregisters the root
+  daemon earlier builds registered; its launchd plist and the no-op stub
+  `GranipaBatteryHelper` still ship for that.
 - `Fixture/` — DEBUG-only `--v2-fixture`. Refuses to open the production DB.
 
 ## Conventions

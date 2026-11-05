@@ -14,21 +14,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         #endif
         AppRelocator.offerMoveIfNeeded()
+        LegacyBatteryHelper.unregisterIfRegistered()
         os_signpost(.event, log: Self.lifecycleLog, name: "appReady")
-    }
-
-    func applicationWillTerminate(_ notification: Notification) {
-        #if DEBUG
-        if V2FixtureRuntime.isActive { return }
-        #endif
-        BatteryService.shared.stop()
-    }
-
-    func applicationDidBecomeActive(_ notification: Notification) {
-        #if DEBUG
-        if V2FixtureRuntime.isActive { return }
-        #endif
-        BatteryHelperClient.shared.invalidateStatusCache()
     }
 }
 
