@@ -199,7 +199,7 @@ struct MeetingPlaybackBar: View {
         }
         .granipaPrimaryControl()
         .controlSize(.small)
-        .disabled(app.recorder.isBusy || app.processingMeetingID == meeting.id)
+        .disabled(app.recorder.isBusy || app.processingMeetingIDs.contains(meeting.id))
         .help(app.recorder.isBusy ? "Recording" : "Record")
         .accessibilityLabel(app.recorder.isBusy ? "Recording" : "Record")
     }

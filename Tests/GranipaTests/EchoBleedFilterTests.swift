@@ -174,6 +174,28 @@ import Testing
         #expect(EchoBleedFilter.clean(mic: mic, system: system).map(\.text) == ["no"])
     }
 
+    @Test func aMisheardWordGoesButAWordSaidInThePauseStays() {
+        // "vale" misheard as "vaya" is echo; "no" a second later, while the
+        // other side is silent, is the user's.
+        let system = [
+            timedSegment(
+                .system,
+                [
+                    ("lo", 0.0), ("enviamos", 0.3), ("el", 0.6), ("lunes", 0.9), ("vale", 1.2),
+                    ("y", 3.5), ("el", 3.8), ("contrato", 4.1), ("también", 4.4),
+                ])
+        ]
+        let mic = [
+            timedSegment(
+                .mic,
+                [
+                    ("lo", 0.1), ("enviamos", 0.4), ("el", 0.7), ("lunes", 1.0), ("vaya", 1.3),
+                    ("no", 2.4), ("y", 3.6), ("el", 3.9), ("contrato", 4.2), ("también", 4.5),
+                ])
+        ]
+        #expect(EchoBleedFilter.clean(mic: mic, system: system).map(\.text) == ["vaya no"])
+    }
+
     @Test func headphoneMeetingKeepsTheUsersReadBacks() {
         // Mostly the user's own speech; one genuine read-back of the other side.
         let mic = [

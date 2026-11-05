@@ -185,7 +185,8 @@ enum EchoBleedFilter {
         for run in runs {
             for position in run.mine..<(run.mine + run.length) { drop[position] = true }
         }
-        for (before, after) in zip(runs, runs.dropFirst()) where isMisheardGap(before, after) {
+        for (before, after) in zip(runs, runs.dropFirst())
+        where isMisheardGap(before, after, mine: mine, heard: heard) {
             for position in (before.mine + before.length)..<after.mine { drop[position] = true }
         }
         return drop
@@ -214,12 +215,21 @@ enum EchoBleedFilter {
     }
 
     /// Mic words between two echo runs are misheard echo only when the system
-    /// said other words between the runs' sources too. Back-to-back sources
-    /// mean the mic words were inserted: the user's own interjection.
-    private static func isMisheardGap(_ before: EchoRun, _ after: EchoRun) -> Bool {
-        let micGap = after.mine - (before.mine + before.length)
-        let heardGap = after.heard - (before.heard + before.length)
-        return (1...maxBridgedGap).contains(micGap) && (1...maxBridgedGap).contains(heardGap)
+    /// said other words between the runs' sources too, each mic word timed as
+    /// an echo of one of them. Back-to-back sources mean the mic words were
+    /// inserted, and an untimely word was said in a pause: the user's own.
+    private static func isMisheardGap(
+        _ before: EchoRun, _ after: EchoRun, mine: [TimedToken], heard: [TimedToken]
+    ) -> Bool {
+        let gap = (before.mine + before.length)..<after.mine
+        let heardStart = before.heard + before.length
+        guard (1...maxBridgedGap).contains(gap.count),
+            (1...maxBridgedGap).contains(after.heard - heardStart)
+        else { return false }
+        let sources = heard[heardStart..<after.heard]
+        return gap.allSatisfy { position in
+            sources.contains { isCausalEcho(mine[position], of: $0) }
+        }
     }
 
     private static func longestRun(from start: Int, in mine: [TimedToken], heard: [TimedToken])

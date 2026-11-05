@@ -21,6 +21,9 @@ final class AppState {
     @ObservationIgnored private var earlierPassSegmentIDs: Set<String> = []
     private(set) var transcription: TranscriptionCoordinator?
     private(set) var processingMeetingID: String?
+    /// Every meeting whose post-recording work is still running; another
+    /// meeting stopped meanwhile replaces `processingMeetingID`, not this.
+    private(set) var processingMeetingIDs: Set<String> = []
     let dictation = DictationController.shared
     private(set) var enhancingMeetingIDs: Set<String> = []
     var meetings: [Meeting] = []
@@ -340,7 +343,7 @@ final class AppState {
         guard recordingStartTask == nil, !recorder.isBusy else { return }
         // A new pass on a meeting still being processed would mix the previous
         // pass's late transcript into this pass's speaker-bleed cleanup.
-        guard meetingID == nil || meetingID != processingMeetingID else { return }
+        guard meetingID.map({ !processingMeetingIDs.contains($0) }) ?? true else { return }
         let targetID: String
         if let meetingID {
             targetID = meetingID
@@ -411,7 +414,9 @@ final class AppState {
             return
         }
         processingMeetingID = id
+        processingMeetingIDs.insert(id)
         defer {
+            processingMeetingIDs.remove(id)
             if processingMeetingID == id {
                 processingMeetingID = nil
             }

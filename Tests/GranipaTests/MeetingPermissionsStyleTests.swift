@@ -8,7 +8,7 @@ import Testing
         let source = try granipaSource("Sources/Granipa/UI/MeetingPlaybackBar.swift")
         #expect(source.contains("granipaPrimaryControl()"))
         #expect(!source.contains(".buttonStyle(.bordered)"))
-        #expect(source.contains(".disabled(app.recorder.isBusy || app.processingMeetingID == meeting.id)"))
+        #expect(source.contains(".disabled(app.recorder.isBusy || app.processingMeetingIDs.contains(meeting.id))"))
         #expect(source.contains("app.startRecording(meetingID: meeting.id)"))
         #expect(source.contains("frame(height: 44)"))
         #expect(source.contains("PlaybackTransport.ringSize"))
