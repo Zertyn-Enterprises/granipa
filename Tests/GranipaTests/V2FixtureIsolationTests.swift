@@ -44,6 +44,11 @@ import Testing
             launching.range(of: "LegacyBatteryHelper.unregisterIfRegistered()"))
         #expect(skipLaunch.lowerBound < relocator.lowerBound)
         #expect(skipLaunch.lowerBound < cleanup.lowerBound)
+
+        let terminating = try #require(methodBody(source, named: "applicationWillTerminate"))
+        let skipTerminate = try #require(terminating.range(of: "V2FixtureRuntime.isActive"))
+        let remap = try #require(terminating.range(of: "CapsLockRemap.apply(enabled: false)"))
+        #expect(skipTerminate.lowerBound < remap.lowerBound)
     }
 
     @Test func fixtureCaptureStartsFailBeforeHardware() throws {
