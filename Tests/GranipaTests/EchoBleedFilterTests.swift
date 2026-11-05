@@ -344,6 +344,9 @@ import Testing
         let body = try #require(source.range(of: "func postProcess(")).upperBound
         let rest = source[body...]
         let filter = try #require(rest.range(of: "await cleanSpeakerBleed("))
+        // Automatic post-meeting cleanup must stay on recognizer word timings.
+        let call = rest[filter.upperBound...].prefix { $0 != ")" }
+        #expect(call.contains("allowCoarseTiming: false"))
         let diarize = try #require(rest.range(of: "DiarizationService.diarize("))
         let notes = try #require(rest.range(of: "await enhance(meetingID: meetingID)"))
         #expect(filter.lowerBound < diarize.lowerBound)
