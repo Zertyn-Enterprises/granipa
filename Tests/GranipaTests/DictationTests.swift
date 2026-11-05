@@ -25,13 +25,25 @@ import Testing
     }
 
     @Test func shortHoldBecomesToggle() {
-        #expect(DictationTrigger.actionOnRelease(held: 0.05) == .keepAsToggle)
-        #expect(DictationTrigger.actionOnRelease(held: 0.21) == .keepAsToggle)
+        for heard in [true, false] {
+            #expect(DictationTrigger.actionOnRelease(held: 0.05, heardSpeech: heard) == .keepAsToggle)
+            #expect(DictationTrigger.actionOnRelease(held: 0.21, heardSpeech: heard) == .keepAsToggle)
+        }
     }
 
     @Test func longHoldStopsOnRelease() {
-        #expect(DictationTrigger.actionOnRelease(held: 0.22) == .stop)
-        #expect(DictationTrigger.actionOnRelease(held: 1.4) == .stop)
+        #expect(DictationTrigger.actionOnRelease(held: 0.22, heardSpeech: true) == .stop)
+        #expect(DictationTrigger.actionOnRelease(held: 1.4, heardSpeech: true) == .stop)
+        #expect(DictationTrigger.actionOnRelease(held: 1.5, heardSpeech: false) == .stop)
+        #expect(DictationTrigger.actionOnRelease(held: 6.5, heardSpeech: false) == .stop)
+    }
+
+    @Test func slowTapWithNothingHeardKeepsListening() {
+        // Right ⌘ taps measured on the user's Mac: 0.40–0.60 s, before the
+        // AirPods mic was even running.
+        for held in [0.40, 0.60, 1.09, 1.49] {
+            #expect(DictationTrigger.actionOnRelease(held: held, heardSpeech: false) == .keepAsToggle)
+        }
     }
 
     @Test func eventTimestampsClassifyTapEvenWhenHandlingIsLate() {
@@ -40,16 +52,23 @@ import Testing
         let handlingDelay: TimeInterval = 1.5
         #expect(handlingDelay > DictationTrigger.toggleThreshold)
         #expect(
-            DictationTrigger.actionOnRelease(press: press, release: release) == .keepAsToggle)
+            DictationTrigger.actionOnRelease(press: press, release: release, heardSpeech: true)
+                == .keepAsToggle)
         #expect(
-            DictationTrigger.actionOnRelease(held: (release + handlingDelay) - press) == .stop)
+            DictationTrigger.actionOnRelease(
+                held: (release + handlingDelay) - press, heardSpeech: true) == .stop)
     }
 
     @Test func eventTimestampHoldBoundaryMatchesDurationPolicy() {
         #expect(
-            DictationTrigger.actionOnRelease(press: 10.0, release: 10.219) == .keepAsToggle)
-        #expect(DictationTrigger.actionOnRelease(press: 10.0, release: 10.22) == .stop)
-        #expect(DictationTrigger.actionOnRelease(press: 10.0, release: 9.5) == .keepAsToggle)
+            DictationTrigger.actionOnRelease(press: 10.0, release: 10.219, heardSpeech: true)
+                == .keepAsToggle)
+        #expect(
+            DictationTrigger.actionOnRelease(press: 10.0, release: 10.22, heardSpeech: true)
+                == .stop)
+        #expect(
+            DictationTrigger.actionOnRelease(press: 10.0, release: 9.5, heardSpeech: true)
+                == .keepAsToggle)
     }
 
     @Test func museParsesHandshakeWithoutType() {

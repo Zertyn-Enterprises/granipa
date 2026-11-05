@@ -64,7 +64,7 @@
 
             controller.handlePress(at: 10.0)
             #expect(controller.phase == .preparing)
-            controller.handleRelease(at: 10.40)
+            controller.handleRelease(at: 11.60)
             #expect(
                 await waitUntil {
                     controller.phase != .preparing && controller.phase != .listening
@@ -77,6 +77,42 @@
             if case .failed(let message) = controller.phase {
                 #expect(!message.contains("Didn't catch that"))
             }
+        }
+
+        @Test func slowTapBeforeTheMicIsReadyKeepsListening() async {
+            let gate = CaptureGate()
+            let controller = hookedController(beforeCapture: { await gate.wait() })
+            defer {
+                gate.open()
+                controller.cancel()
+            }
+
+            controller.handlePress(at: 20.0)
+            #expect(controller.phase == .preparing)
+            controller.handleRelease(at: 20.45)
+            gate.open()
+
+            #expect(await waitUntil { controller.phase == .listening })
+            #expect(controller.isToggle)
+        }
+
+        @Test func shortHoldAfterSpeechStillStops() async {
+            var committed: String?
+            let controller = hookedController(transcribe: { chunks in
+                for await _ in chunks {}
+                return "sí"
+            })
+            controller.onCommitted = { text, _, _ in committed = text }
+            defer { controller.cancel() }
+
+            controller.handlePress(at: 30.0)
+            #expect(await waitUntil { controller.phase == .listening })
+            controller.publishPreviewForTesting("sí", generation: controller.testSessionGeneration)
+            controller.handleRelease(at: 30.60)
+
+            #expect(await waitUntil { committed != nil })
+            #expect(committed == "sí")
+            #expect(!controller.isToggle)
         }
 
         @Test func secondPressWhilePreparingDoesNotReopenCapture() async {
@@ -154,7 +190,7 @@
 
             controller.handlePress(at: 8.0)
             #expect(await waitUntil { controller.phase == .listening })
-            controller.handleRelease(at: 8.50)
+            controller.handleRelease(at: 9.60)
             #expect(await waitUntil { controller.phase == .done || committed != nil })
             #expect(committed == "hello")
             #expect(controller.preview == "hello")

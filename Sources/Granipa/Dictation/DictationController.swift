@@ -82,7 +82,9 @@ final class DictationController {
     func handleRelease(at timestamp: TimeInterval) {
         guard phase == .listening || phase == .preparing, !isToggle else { return }
         guard let pressed = pressEventTimestamp else { return }
-        let action = DictationTrigger.actionOnRelease(press: pressed, release: timestamp)
+        let heardSpeech = !preview.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let action = DictationTrigger.actionOnRelease(
+            press: pressed, release: timestamp, heardSpeech: heardSpeech)
         Self.log.info("release held=\(timestamp - pressed, privacy: .public)s phase=\(String(describing: self.phase), privacy: .public) -> \(String(describing: action), privacy: .public)")
         switch action {
         case .keepAsToggle:

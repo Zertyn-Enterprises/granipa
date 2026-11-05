@@ -91,9 +91,14 @@ Stack on `feat/granipa-v2`: #28 windows → #29 battery → `fix/v2-dictation-mi
 - Caps Lock macro works while held (HID remap to F18, owned and removed by
   Grañipa); the dictation failure overlay can be dismissed.
 
-Open: AirPods single-tap dictation ends ~120 ms after start ("Didn't catch
-that"); logging is in, cause not found. Live transcription on one mixed
-stream is not started (CPU to be measured first).
+- Single taps that "didn't catch that": the user's Right ⌘ taps last
+  0.40–0.60 s (logs), over the 0.22 s tap threshold, so they stopped as
+  holds before anything was heard. A release under 1.5 s with nothing
+  recognized now keeps listening (`fix/v2-dictation-tap`).
+
+Open: holds of 2.2 s and 6.5 s with AirPods also ended empty on 2026-10-16;
+not known whether the user spoke. Live transcription on one mixed stream is
+not started (CPU to be measured first).
 
 Last recorded suite (2026-09-06, not re-run this session): 465 tests /
 77 suites, `swift test --no-parallel`. 49 test files are in
