@@ -155,20 +155,28 @@ enum LLMRunner {
         let stdout = String(decoding: stdoutData, as: UTF8.self)
         let stderr = String(decoding: stderrBox.get(), as: UTF8.self)
 
-        // A CLI that traps SIGTERM exits normally (grok: 143), so the
-        // termination reason alone does not reveal the timeout.
-        if process.terminationReason == .uncaughtSignal || timedOut.get() {
-            throw LLMError.terminated
-        }
-        guard process.terminationStatus == 0 else {
-            // Some CLIs (claude -p) print API errors on stdout and leave
-            // stderr empty; without this the user saw a blank reason.
-            let reason = stderr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? stdout : stderr
-            throw LLMError.nonZeroExit(
-                process.terminationStatus,
-                String(reason.suffix(500)).trimmingCharacters(in: .whitespacesAndNewlines))
+        if let error = exitError(
+            signalled: process.terminationReason == .uncaughtSignal, timedOut: timedOut.get(),
+            status: process.terminationStatus, stdout: stdout, stderr: stderr)
+        {
+            throw error
         }
         return Output(stdout: stdout)
+    }
+
+    /// The error a finished CLI process stands for, nil when it succeeded.
+    static func exitError(
+        signalled: Bool, timedOut: Bool, status: Int32, stdout: String, stderr: String
+    ) -> LLMError? {
+        // A CLI that traps SIGTERM exits normally (grok: 143), so the
+        // termination reason alone does not reveal the timeout.
+        if signalled || timedOut { return .terminated }
+        guard status != 0 else { return nil }
+        // Some CLIs (claude -p) print API errors on stdout and leave
+        // stderr empty; without this the user saw a blank reason.
+        let reason = stderr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? stdout : stderr
+        return .nonZeroExit(
+            status, String(reason.suffix(500)).trimmingCharacters(in: .whitespacesAndNewlines))
     }
 }
