@@ -31,14 +31,17 @@ enum EchoBleedFilter {
     /// the backup directory; without one nothing changes. Segments without
     /// recognizer word timings are matched only when `allowCoarseTiming` —
     /// an explicit user request — since interpolated times can mistake a
-    /// read-back for echo. Returns whether the mic transcript was rewritten.
+    /// read-back for echo. `earlierPassIDs` are segments recorded before this
+    /// pass: their times restart at zero too, so they are never compared.
+    /// Returns whether the mic transcript was rewritten.
     @discardableResult
     static func apply(
         meetingID: String, database: AppDatabase, backupDirectory: URL?,
-        allowCoarseTiming: Bool = false
+        allowCoarseTiming: Bool = false, earlierPassIDs: Set<String> = []
     ) throws -> Bool {
         guard let backupDirectory else { return false }
         let segments = try database.fetchSegments(meetingID: meetingID)
+            .filter { !earlierPassIDs.contains($0.id) }
         let mic = segments.filter { $0.channel == .mic }
         let system = segments.filter { $0.channel == .system && $0.isFinal }
         let cleaned = clean(mic: mic, system: system, allowCoarseTiming: allowCoarseTiming)
@@ -189,30 +192,63 @@ enum EchoBleedFilter {
             .filter { !$0.word.isEmpty }
         guard !heard.isEmpty else { return nil }
         let mine = timedTokens(segment)
+        let runs = echoRuns(mine: mine, heard: heard)
         var drop = Array(repeating: false, count: mine.count)
-        var index = 0
-        while index < mine.count {
-            let run = longestRun(from: index, in: mine, heard: heard)
-            if run >= minRun {
-                for position in index..<(index + run) { drop[position] = true }
-                index += run
-            } else {
-                index += 1
-            }
+        for run in runs {
+            for position in run.mine..<(run.mine + run.length) { drop[position] = true }
         }
-        let dropped = drop.indices.filter { drop[$0] }
-        for (lower, upper) in zip(dropped, dropped.dropFirst())
-        where upper - lower > 1 && upper - lower - 1 <= maxBridgedGap {
-            for position in (lower + 1)..<upper { drop[position] = true }
+        for (before, after) in zip(runs, runs.dropFirst())
+        where isMisheardGap(before, after, mine: mine, heard: heard) {
+            for position in (before.mine + before.length)..<after.mine { drop[position] = true }
         }
         return drop
     }
 
+    /// A run of mic tokens starting at `mine` that repeats `heard` from `heard`.
+    private struct EchoRun {
+        let mine: Int
+        let heard: Int
+        let length: Int
+    }
+
+    private static func echoRuns(mine: [TimedToken], heard: [TimedToken]) -> [EchoRun] {
+        var runs: [EchoRun] = []
+        var index = 0
+        while index < mine.count {
+            let run = longestRun(from: index, in: mine, heard: heard)
+            if run.length >= minRun {
+                runs.append(run)
+                index += run.length
+            } else {
+                index += 1
+            }
+        }
+        return runs
+    }
+
+    /// Mic words between two echo runs are misheard echo only when the system
+    /// said other words between the runs' sources too, each mic word timed as
+    /// an echo of one of them. Back-to-back sources mean the mic words were
+    /// inserted, and an untimely word was said in a pause: the user's own.
+    private static func isMisheardGap(
+        _ before: EchoRun, _ after: EchoRun, mine: [TimedToken], heard: [TimedToken]
+    ) -> Bool {
+        let gap = (before.mine + before.length)..<after.mine
+        let heardStart = before.heard + before.length
+        guard (1...maxBridgedGap).contains(gap.count),
+            (1...maxBridgedGap).contains(after.heard - heardStart)
+        else { return false }
+        let sources = heard[heardStart..<after.heard]
+        return gap.allSatisfy { position in
+            sources.contains { isCausalEcho(mine[position], of: $0) }
+        }
+    }
+
     private static func longestRun(from start: Int, in mine: [TimedToken], heard: [TimedToken])
-        -> Int
+        -> EchoRun
     {
-        guard !mine[start].word.isEmpty else { return 0 }
-        var best = 0
+        var best = EchoRun(mine: start, heard: 0, length: 0)
+        guard !mine[start].word.isEmpty else { return best }
         for offset in heard.indices {
             var length = 0
             while start + length < mine.count, offset + length < heard.count,
@@ -221,7 +257,7 @@ enum EchoBleedFilter {
             {
                 length += 1
             }
-            best = max(best, length)
+            if length > best.length { best = EchoRun(mine: start, heard: offset, length: length) }
         }
         return best
     }

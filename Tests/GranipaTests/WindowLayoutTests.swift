@@ -152,6 +152,36 @@ import Testing
         #expect(WindowLayout.usableFrame(screen: screen, stageStrip: nil) == screen)
     }
 
+    @Test(arguments: [
+        // (AX frames, drawn frames, expected claiming indices)
+        ([CGRect(x: 0, y: 0, width: 800, height: 600)],
+         [CGRect(x: 0, y: 0, width: 800, height: 600)], [0]),
+        // Two tabs share one drawn window: only the first claims it.
+        ([CGRect(x: 0, y: 0, width: 800, height: 600), CGRect(x: 1, y: 1, width: 802, height: 598)],
+         [CGRect(x: 0, y: 0, width: 800, height: 600)], [0]),
+        // Two coincident drawn windows: both AX windows tile.
+        ([CGRect(x: 0, y: 0, width: 800, height: 600), CGRect(x: 0, y: 0, width: 800, height: 600)],
+         [CGRect(x: 0, y: 0, width: 800, height: 600), CGRect(x: 0, y: 0, width: 800, height: 600)],
+         [0, 1]),
+        // Not drawn on this stage (Stage Manager strip): skipped.
+        ([CGRect(x: 0, y: 0, width: 800, height: 600), CGRect(x: 900, y: 0, width: 400, height: 300)],
+         [CGRect(x: 900, y: 0, width: 400, height: 300)], [1]),
+    ])
+    func eachWindowClaimsADistinctDrawnWindow(ax: [CGRect], drawn: [CGRect], expected: [Int]) {
+        #expect(WindowLayout.claimDrawn(ax, drawn: drawn) == expected)
+    }
+
+    @Test func reTilingKeepsTheFirstRememberedFrame() {
+        let first = [("a", CGRect(x: 0, y: 0, width: 500, height: 400))]
+        let moved = [
+            ("a", CGRect(x: 0, y: 0, width: 800, height: 975)),
+            ("b", CGRect(x: 10, y: 10, width: 300, height: 300)),
+        ]
+        let snapshot = WindowLayout.remembering(moved, previous: first) { $0.0 == $1.0 }
+        #expect(snapshot.map(\.0) == ["a", "b"])
+        #expect(snapshot.map(\.1) == [first[0].1, moved[1].1])
+    }
+
     @Test func tileHasNoSingleWindowFrame() {
         #expect(WindowLayout.frame(for: .tileAppWindows, screen: screen, current: .zero) == nil)
     }

@@ -80,6 +80,7 @@ final class HyperKeyMonitor: @unchecked Sendable {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             lock.lock()
             let tap = self.tap
+            _ = layer.handle(code: 0, type: type, fromSelf: false)
             lock.unlock()
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
             return Unmanaged.passUnretained(event)
@@ -128,6 +129,12 @@ struct HyperLayer: Sendable {
     mutating func release() { isHeld = false }
 
     mutating func handle(code: UInt32, type: CGEventType, fromSelf: Bool) -> Outcome {
+        // A disabled tap may have lost the macro key's keyUp; staying held would
+        // keep swallowing plain bound keys until the next macro press.
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            isHeld = false
+            return .pass
+        }
         if fromSelf { return .pass }
         if code == hyperKeyCode {
             if type == .keyDown {

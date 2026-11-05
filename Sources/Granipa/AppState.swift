@@ -17,8 +17,13 @@ final class AppState {
     private var clipboardMonitor: ClipboardMonitor?
     private var autoStopTask: Task<Void, Never>?
     @ObservationIgnored private var recordingStartTask: Task<Void, Never>?
+    /// Segments the meeting already had when the current pass started.
+    @ObservationIgnored private var earlierPassSegmentIDs: Set<String> = []
     private(set) var transcription: TranscriptionCoordinator?
     private(set) var processingMeetingID: String?
+    /// Every meeting whose post-recording work is still running.
+    /// `processingMeetingID` is one of them, nil only when this is empty.
+    private(set) var processingMeetingIDs: Set<String> = []
     let dictation = DictationController.shared
     private(set) var enhancingMeetingIDs: Set<String> = []
     var meetings: [Meeting] = []
@@ -336,6 +341,9 @@ final class AppState {
         #endif
         guard database != nil else { return }
         guard recordingStartTask == nil, !recorder.isBusy else { return }
+        // A new pass on a meeting still being processed would mix the previous
+        // pass's late transcript into this pass's speaker-bleed cleanup.
+        guard meetingID.map({ !processingMeetingIDs.contains($0) }) ?? true else { return }
         let targetID: String
         if let meetingID {
             targetID = meetingID
@@ -355,6 +363,8 @@ final class AppState {
 
     private func activateRecording(targetID: String) async {
         guard var meeting = meetings.first(where: { $0.id == targetID }) else { return }
+        earlierPassSegmentIDs = Set(
+            (try? database?.fetchSegments(meetingID: targetID))?.map(\.id) ?? [])
         do {
             let session = try await recorder.start(meetingID: targetID)
             if MeetingASRPolicy.usesLiveASR(), let db = database {
@@ -397,12 +407,14 @@ final class AppState {
         recordingStartTask?.cancel()
         dictation.meetingIsRecording = false
         CaptionsOverlayController.shared.setVisible(false)
+        let earlierPass = earlierPassSegmentIDs
         guard let id = recorder.meetingID, let urls = await recorder.stop() else { return }
         if wasStarting {
             try? FileManager.default.removeItem(at: urls.micURL.deletingLastPathComponent())
             return
         }
         processingMeetingID = id
+        processingMeetingIDs.insert(id)
         // Re-fetch: the transcription coordinator may have written the detected
         // language while the array copy was stale.
         guard let db = database, var meeting = try? db.fetchMeeting(id: id) else {
@@ -410,9 +422,7 @@ final class AppState {
                 await live.finishAndWait()
             }
             transcription = nil
-            if processingMeetingID == id {
-                processingMeetingID = nil
-            }
+            endProcessing(id)
             return
         }
         meeting.status = .processing
@@ -431,7 +441,16 @@ final class AppState {
         // priority on the performance cores.
         Task.detached(priority: .utility) { [weak self] in
             await self?.finishMeeting(
-                meetingID: id, urls: urls, language: language, live: live, database: db)
+                meetingID: id, urls: urls, language: language, live: live, database: db,
+                earlierPassIDs: earlierPass)
+        }
+    }
+
+    /// The meeting shown as processing moves to another one still running.
+    private func endProcessing(_ id: String) {
+        processingMeetingIDs.remove(id)
+        if processingMeetingID == id {
+            processingMeetingID = processingMeetingIDs.first
         }
     }
 
@@ -440,19 +459,17 @@ final class AppState {
         urls: (micURL: URL, systemURL: URL),
         language: String,
         live: TranscriptionCoordinator?,
-        database db: AppDatabase
+        database db: AppDatabase,
+        earlierPassIDs earlierPass: Set<String>
     ) async {
-        defer {
-            if processingMeetingID == id {
-                processingMeetingID = nil
-            }
-        }
+        defer { endProcessing(id) }
         if let live {
             await live.finishAndWait()
             // The open transcript reloaded when live ASR detached; the drained
             // tail landed afterwards.
             transcriptRevisions[id, default: 0] += 1
-            await postProcess(meetingID: id, skipLocalDiarize: live.systemUsedMuse)
+            await postProcess(
+                meetingID: id, skipLocalDiarize: live.systemUsedMuse, earlierPassIDs: earlierPass)
         } else {
             let outcome = await Task.detached(priority: .utility) {
                 await FileMeetingTranscriber.transcribe(
@@ -465,14 +482,16 @@ final class AppState {
             await postProcess(
                 meetingID: id,
                 skipLocalDiarize: false,
-                fileTranscription: outcome)
+                fileTranscription: outcome,
+                earlierPassIDs: earlierPass)
         }
     }
 
     func postProcess(
         meetingID: String,
         skipLocalDiarize: Bool = false,
-        fileTranscription: FileMeetingTranscriber.Outcome? = nil
+        fileTranscription: FileMeetingTranscriber.Outcome? = nil,
+        earlierPassIDs: Set<String> = []
     ) async {
         guard let db = database else { return }
         let defaults = UserDefaults.standard
@@ -490,7 +509,8 @@ final class AppState {
                 "Transcription failed — your audio was saved", style: .warning)
         }
 
-        await cleanSpeakerBleed(meetingID: meetingID, allowCoarseTiming: false)
+        await cleanSpeakerBleed(
+            meetingID: meetingID, allowCoarseTiming: false, earlierPassIDs: earlierPassIDs)
 
         if skipLocalDiarize {
             if inferNames {
@@ -538,7 +558,9 @@ final class AppState {
     /// status change, so an open detail view reloads it.
     private(set) var transcriptRevisions: [String: Int] = [:]
 
-    private func cleanSpeakerBleed(meetingID: String, allowCoarseTiming: Bool) async {
+    private func cleanSpeakerBleed(
+        meetingID: String, allowCoarseTiming: Bool, earlierPassIDs: Set<String> = []
+    ) async {
         guard let db = database else { return }
         do {
             // Fetch, backup write and rewrite stay off the main actor.
@@ -546,7 +568,7 @@ final class AppState {
                 try EchoBleedFilter.apply(
                     meetingID: meetingID, database: db,
                     backupDirectory: try AppPaths.transcriptBackupDirectory(),
-                    allowCoarseTiming: allowCoarseTiming)
+                    allowCoarseTiming: allowCoarseTiming, earlierPassIDs: earlierPassIDs)
             }.value
             if rewritten { transcriptRevisions[meetingID, default: 0] += 1 }
         } catch {

@@ -193,6 +193,47 @@ import Testing
         #expect(EchoBleedFilter.clean(mic: mic, system: system, allowCoarseTiming: true).isEmpty)
     }
 
+    @Test func anInterjectionBetweenEchoRunsWhileTheOtherSideIsSilentStays() {
+        let system = [
+            timedSegment(.system, [("lo", 0.0), ("enviamos", 0.3), ("el", 0.6), ("lunes", 0.9)]),
+            timedSegment(.system, [("y", 3.0), ("el", 3.3), ("contrato", 3.6), ("también", 3.9)]),
+        ]
+        let mic = [
+            timedSegment(
+                .mic,
+                [
+                    // "no" sits inside the echo-lag window of "lunes": timing alone
+                    // cannot tell it from misheard echo, the back-to-back sources can.
+                    ("lo", 0.1), ("enviamos", 0.4), ("el", 0.7), ("lunes", 1.0), ("no", 1.4),
+                    ("y", 3.1), ("el", 3.4), ("contrato", 3.7), ("también", 4.0),
+                ])
+        ]
+        #expect(EchoBleedFilter.clean(mic: mic, system: system).map(\.text) == ["no"])
+    }
+
+    @Test func aGapWithAWordSaidInThePauseIsKeptWhole() {
+        // "vaya" is "vale" misheard, but "no" a second later, while the other
+        // side is silent, is the user's: the gap stays whole rather than risk
+        // deleting the user's words from the stored transcript.
+        let system = [
+            timedSegment(
+                .system,
+                [
+                    ("lo", 0.0), ("enviamos", 0.3), ("el", 0.6), ("lunes", 0.9), ("vale", 1.2),
+                    ("y", 3.5), ("el", 3.8), ("contrato", 4.1), ("también", 4.4),
+                ])
+        ]
+        let mic = [
+            timedSegment(
+                .mic,
+                [
+                    ("lo", 0.1), ("enviamos", 0.4), ("el", 0.7), ("lunes", 1.0), ("vaya", 1.3),
+                    ("no", 2.4), ("y", 3.6), ("el", 3.9), ("contrato", 4.2), ("también", 4.5),
+                ])
+        ]
+        #expect(EchoBleedFilter.clean(mic: mic, system: system).map(\.text) == ["vaya no"])
+    }
+
     @Test func headphoneMeetingKeepsTheUsersReadBacks() {
         // Mostly the user's own speech; one genuine read-back of the other side.
         let mic = [
@@ -249,6 +290,30 @@ import Testing
         #expect(try JSONDecoder().decode([TranscriptSegment].self, from: backup) == [mine])
     }
 
+    @Test func applyLeavesEarlierRecordingPassesAlone() throws {
+        // Pass 1 had only the user's speech; pass 2, restarting at 0 s, has the
+        // other side saying the same words at the same relative time.
+        let db = try AppDatabase(writer: DatabaseQueue())
+        let meeting = Meeting.new(title: "Two passes", language: "es-ES")
+        try db.save(meeting)
+        var earlier = timedSegment(.mic, [("lo", 0.15), ("enviamos", 0.45), ("el", 0.75), ("lunes", 1.05)])
+        earlier.meetingID = meeting.id
+        var theirs = timedSegment(.system, [("lo", 0.0), ("enviamos", 0.3), ("el", 0.6), ("lunes", 0.9)])
+        theirs.meetingID = meeting.id
+        try db.save(earlier)
+        try db.save(theirs)
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bleed-pass-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        try EchoBleedFilter.apply(
+            meetingID: meeting.id, database: db, backupDirectory: directory,
+            earlierPassIDs: [earlier.id])
+
+        #expect(try db.fetchSegments(meetingID: meeting.id).filter { $0.channel == .mic } == [earlier])
+    }
+
     @Test func applyWithoutABackupLocationChangesNothing() throws {
         let db = try AppDatabase(writer: DatabaseQueue())
         let meeting = Meeting.new(title: "Bleed", language: "es-ES")
@@ -278,7 +343,7 @@ import Testing
             encoding: .utf8)
         let body = try #require(source.range(of: "func postProcess(")).upperBound
         let rest = source[body...]
-        let filter = try #require(rest.range(of: "cleanSpeakerBleed(meetingID: meetingID, allowCoarseTiming: false)"))
+        let filter = try #require(rest.range(of: "await cleanSpeakerBleed("))
         let diarize = try #require(rest.range(of: "DiarizationService.diarize("))
         let notes = try #require(rest.range(of: "await enhance(meetingID: meetingID)"))
         #expect(filter.lowerBound < diarize.lowerBound)

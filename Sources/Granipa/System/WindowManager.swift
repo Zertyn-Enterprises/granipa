@@ -63,18 +63,14 @@ final class WindowManager {
             let windows = ref as? [AXUIElement]
         else { return }
 
-        // Each AX window must claim a distinct drawn window with its frame, so
-        // windows sharing a frame (e.g. undrawn tabs) tile only as often as drawn.
-        var unclaimed = onStage
-        var tileable: [(window: AXUIElement, frame: CGRect)] = []
-        for window in windows {
+        let candidates: [(window: AXUIElement, frame: CGRect)] = windows.compactMap { window in
             guard isTileable(window), let frame = frame(of: window),
-                screen.contains(CGPoint(x: frame.midX, y: frame.midY)),
-                let claim = unclaimed.firstIndex(where: { WindowLayout.isSame($0, frame) })
-            else { continue }
-            unclaimed.remove(at: claim)
-            tileable.append((window, frame))
+                screen.contains(CGPoint(x: frame.midX, y: frame.midY))
+            else { return nil }
+            return (window, frame)
         }
+        let tileable = WindowLayout.claimDrawn(candidates.map(\.frame), drawn: onStage)
+            .map { candidates[$0] }
         guard !tileable.isEmpty else { return }
         remember(tileable)
         let order = WindowLayout.tileOrder(tileable.map(\.frame))
@@ -86,8 +82,8 @@ final class WindowManager {
 
     /// Windows already moved since their last restore keep their original frame.
     private func remember(_ moved: [(window: AXUIElement, frame: CGRect)]) {
-        lastSnap = moved.map { item in
-            lastSnap.first(where: { CFEqual($0.window, item.window) }) ?? item
+        lastSnap = WindowLayout.remembering(moved, previous: lastSnap) {
+            CFEqual($0.window, $1.window)
         }
     }
 

@@ -37,7 +37,7 @@ struct RecordingBar: View {
                             .font(.system(size: 13, weight: .semibold))
                     }
                     .granipaPrimaryControl()
-                    .disabled(app.recorder.isBusy)
+                    .disabled(app.recorder.isBusy || app.processingMeetingIDs.contains(meeting.id))
                     Spacer()
                 }
             }
