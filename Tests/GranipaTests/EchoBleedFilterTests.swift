@@ -165,7 +165,9 @@ import Testing
             timedSegment(
                 .mic,
                 [
-                    ("lo", 0.1), ("enviamos", 0.4), ("el", 0.7), ("lunes", 1.0), ("no", 2.0),
+                    // "no" sits inside the echo-lag window of "lunes": timing alone
+                    // cannot tell it from misheard echo, the back-to-back sources can.
+                    ("lo", 0.1), ("enviamos", 0.4), ("el", 0.7), ("lunes", 1.0), ("no", 1.4),
                     ("y", 3.1), ("el", 3.4), ("contrato", 3.7), ("también", 4.0),
                 ])
         ]
@@ -275,7 +277,7 @@ import Testing
             encoding: .utf8)
         let body = try #require(source.range(of: "func postProcess(")).upperBound
         let rest = source[body...]
-        let filter = try #require(rest.range(of: "EchoBleedFilter.apply("))
+        let filter = try #require(rest.range(of: "cleanSpeakerBleed(meetingID:"))
         let diarize = try #require(rest.range(of: "DiarizationService.diarize("))
         let notes = try #require(rest.range(of: "await enhance(meetingID: meetingID)"))
         #expect(filter.lowerBound < diarize.lowerBound)

@@ -338,6 +338,9 @@ final class AppState {
         #endif
         guard database != nil else { return }
         guard recordingStartTask == nil, !recorder.isBusy else { return }
+        // A new pass on a meeting still being processed would mix the previous
+        // pass's late transcript into this pass's speaker-bleed cleanup.
+        guard meetingID == nil || meetingID != processingMeetingID else { return }
         let targetID: String
         if let meetingID {
             targetID = meetingID
@@ -453,6 +456,21 @@ final class AppState {
         }
     }
 
+    private func cleanSpeakerBleed(
+        meetingID: String, database db: AppDatabase, earlierPassIDs: Set<String>
+    ) {
+        do {
+            try EchoBleedFilter.apply(
+                meetingID: meetingID, database: db,
+                backupDirectory: try AppPaths.transcriptBackupDirectory(),
+                earlierPassIDs: earlierPassIDs)
+        } catch {
+            Self.log.error(
+                "speaker-bleed cleanup failed for \(meetingID, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
     func postProcess(
         meetingID: String,
         skipLocalDiarize: Bool = false,
@@ -475,16 +493,7 @@ final class AppState {
                 "Transcription failed — your audio was saved", style: .warning)
         }
 
-        do {
-            try EchoBleedFilter.apply(
-                meetingID: meetingID, database: db,
-                backupDirectory: try AppPaths.transcriptBackupDirectory(),
-                earlierPassIDs: earlierPassIDs)
-        } catch {
-            Self.log.error(
-                "speaker-bleed cleanup failed for \(meetingID, privacy: .public): \(error.localizedDescription, privacy: .public)"
-            )
-        }
+        cleanSpeakerBleed(meetingID: meetingID, database: db, earlierPassIDs: earlierPassIDs)
 
         if skipLocalDiarize {
             if inferNames {

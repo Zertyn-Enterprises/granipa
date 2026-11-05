@@ -180,36 +180,53 @@ enum EchoBleedFilter {
             .filter { !$0.word.isEmpty }
         guard !heard.isEmpty else { return nil }
         let mine = timedTokens(segment)
+        let runs = echoRuns(mine: mine, heard: heard)
         var drop = Array(repeating: false, count: mine.count)
-        var index = 0
-        while index < mine.count {
-            let run = longestRun(from: index, in: mine, heard: heard)
-            if run >= minRun {
-                for position in index..<(index + run) { drop[position] = true }
-                index += run
-            } else {
-                index += 1
-            }
+        for run in runs {
+            for position in run.mine..<(run.mine + run.length) { drop[position] = true }
         }
-        // A gap is misheard echo only while the other side was speaking;
-        // a short interjection between two echo runs is the user's own.
-        let dropped = drop.indices.filter { drop[$0] }
-        for (lower, upper) in zip(dropped, dropped.dropFirst())
-        where upper - lower > 1 && upper - lower - 1 <= maxBridgedGap
-            && ((lower + 1)..<upper).allSatisfy({ position in
-                heard.contains { isCausalEcho(mine[position], of: $0) }
-            })
-        {
-            for position in (lower + 1)..<upper { drop[position] = true }
+        for (before, after) in zip(runs, runs.dropFirst()) where isMisheardGap(before, after) {
+            for position in (before.mine + before.length)..<after.mine { drop[position] = true }
         }
         return drop
     }
 
+    /// A run of mic tokens starting at `mine` that repeats `heard` from `heard`.
+    private struct EchoRun {
+        let mine: Int
+        let heard: Int
+        let length: Int
+    }
+
+    private static func echoRuns(mine: [TimedToken], heard: [TimedToken]) -> [EchoRun] {
+        var runs: [EchoRun] = []
+        var index = 0
+        while index < mine.count {
+            let run = longestRun(from: index, in: mine, heard: heard)
+            if run.length >= minRun {
+                runs.append(run)
+                index += run.length
+            } else {
+                index += 1
+            }
+        }
+        return runs
+    }
+
+    /// Mic words between two echo runs are misheard echo only when the system
+    /// said other words between the runs' sources too. Back-to-back sources
+    /// mean the mic words were inserted: the user's own interjection.
+    private static func isMisheardGap(_ before: EchoRun, _ after: EchoRun) -> Bool {
+        let micGap = after.mine - (before.mine + before.length)
+        let heardGap = after.heard - (before.heard + before.length)
+        return (1...maxBridgedGap).contains(micGap) && (1...maxBridgedGap).contains(heardGap)
+    }
+
     private static func longestRun(from start: Int, in mine: [TimedToken], heard: [TimedToken])
-        -> Int
+        -> EchoRun
     {
-        guard !mine[start].word.isEmpty else { return 0 }
-        var best = 0
+        var best = EchoRun(mine: start, heard: 0, length: 0)
+        guard !mine[start].word.isEmpty else { return best }
         for offset in heard.indices {
             var length = 0
             while start + length < mine.count, offset + length < heard.count,
@@ -218,7 +235,7 @@ enum EchoBleedFilter {
             {
                 length += 1
             }
-            best = max(best, length)
+            if length > best.length { best = EchoRun(mine: start, heard: offset, length: length) }
         }
         return best
     }
