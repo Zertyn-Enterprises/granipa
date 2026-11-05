@@ -29,7 +29,7 @@ final class ShortcutHub {
         }
 
         let hyper = WindowHyperKey.current
-        if let hyperCode = hyper == .capsLock ? CapsLockRemap.f18KeyCode : hyper.keyCode {
+        if let hyperCode = hyper.tapKeyCode {
             if !PasteService.isTrusted {
                 PasteService.requestTrust()
             }

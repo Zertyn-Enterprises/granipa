@@ -30,6 +30,11 @@ enum WindowHyperKey: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// The code the event tap sees: Caps Lock arrives remapped to F18.
+    var tapKeyCode: UInt32? {
+        self == .capsLock ? CapsLockRemap.f18KeyCode : keyCode
+    }
+
     var glyph: String {
         switch self {
         case .off: "⌃⌥"

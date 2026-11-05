@@ -32,6 +32,13 @@ import Testing
         #expect(layer.isHeld)
     }
 
+    @Test func aDisabledTapReleasesTheLayer() {
+        var layer = layer()
+        _ = layer.handle(code: f18, type: .keyDown, fromSelf: false)
+        #expect(layer.handle(code: 0, type: .tapDisabledByTimeout, fromSelf: false) == .pass)
+        #expect(layer.handle(code: v, type: .keyDown, fromSelf: false) == .pass)
+    }
+
     @Test func autoRepeatKeepsTheLayerHeld() {
         var layer = layer()
         _ = layer.handle(code: f18, type: .keyDown, fromSelf: false)
