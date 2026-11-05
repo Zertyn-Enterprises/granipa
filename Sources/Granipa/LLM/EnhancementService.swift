@@ -73,22 +73,7 @@ enum EnhancementService {
             The notes start directly at the first topic section - no intro, no TL;DR, no \
             recap - and no fact appears twice anywhere in the report.
 
-            Respond with ONLY a single JSON object - no markdown fences, no commentary. \
-            It must be valid JSON: escape every double quote and line break inside string \
-            values, and use single quotes for any speech you quote verbatim. \
-            Use exactly these keys:
-            - "title": specific and content-bearing, max 8 words. Never generic like \
-            "Team meeting" or "Weekly sync".
-            - "summary": 2-4 sentences a busy executive could read instead of attending. \
-            Lead with the most consequential outcome, not with context.
-            - "enhanced_notes": the full report in markdown, following the report structure \
-            above when one is given.
-            - "action_items": array of {"text": string, "owner": string or null}. Every \
-            commitment, task or follow-up - phrased as a verifiable task ("Send the revised \
-            quote to Acme", never "follow up"), with the due date in the text when one was \
-            mentioned.
-            - "email_draft": ready-to-send follow-up email: 2-3 sentence recap leading with \
-            decisions, then a bullet list of next steps with owners. No pleasantry padding.
+            \(outputFormatSection)
 
             Write all output in the dominant language of the meeting (e.g. English or Spanish).
 
@@ -110,6 +95,26 @@ enum EnhancementService {
         owner "You" (or "Tú" in Spanish). Other speakers keep their names or labels. \
         The "email_draft" is sent by the reader, so it is written in the first person \
         ("Te envío el presupuesto el lunes").
+        """
+
+    /// The JSON contract `parse` reads.
+    static let outputFormatSection = """
+        Respond with ONLY a single JSON object - no markdown fences, no commentary. \
+        It must be valid JSON: escape every double quote and line break inside string \
+        values, and use single quotes for any speech you quote verbatim. \
+        Use exactly these keys:
+        - "title": specific and content-bearing, max 8 words. Never generic like \
+        "Team meeting" or "Weekly sync".
+        - "summary": 2-4 sentences a busy executive could read instead of attending. \
+        Lead with the most consequential outcome, not with context.
+        - "enhanced_notes": the full report in markdown, following the report structure \
+        above when one is given.
+        - "action_items": array of {"text": string, "owner": string or null}. Every \
+        commitment, task or follow-up - phrased as a verifiable task ("Send the revised \
+        quote to Acme", never "follow up"), with the due date in the text when one was \
+        mentioned.
+        - "email_draft": ready-to-send follow-up email: 2-3 sentence recap leading with \
+        decisions, then a bullet list of next steps with owners. No pleasantry padding.
         """
 
     static func parse(_ raw: String) throws -> EnhancementResult {
