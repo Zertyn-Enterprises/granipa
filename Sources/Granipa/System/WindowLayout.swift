@@ -147,6 +147,26 @@ enum WindowLayout {
         }
     }
 
+    /// Indices of `candidates` that each claim a distinct `drawn` frame, in order,
+    /// so windows sharing a frame (e.g. undrawn tabs) count only as often as drawn.
+    static func claimDrawn(_ candidates: [CGRect], drawn: [CGRect]) -> [Int] {
+        var unclaimed = drawn
+        return candidates.indices.filter { index in
+            guard let claim = unclaimed.firstIndex(where: { isSame($0, candidates[index]) })
+            else { return false }
+            unclaimed.remove(at: claim)
+            return true
+        }
+    }
+
+    /// The new snapshot after `moved` windows move: one already in `previous`
+    /// keeps its earlier entry, so re-tiling never loses the original frame.
+    static func remembering<Entry>(
+        _ moved: [Entry], previous: [Entry], same: (Entry, Entry) -> Bool
+    ) -> [Entry] {
+        moved.map { item in previous.first(where: { same($0, item) }) ?? item }
+    }
+
     /// If another window is docked to the left edge, fill everything to its right
     /// instead of covering it. Empty screen → nil (caller uses the classic half).
     static func remainder(
