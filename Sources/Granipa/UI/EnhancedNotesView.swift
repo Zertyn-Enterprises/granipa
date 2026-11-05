@@ -191,7 +191,7 @@ struct EnhancedNotesView: View {
 
     private func enhanceButton(title: String) -> some View {
         Button {
-            Task { await app.enhance(meetingID: meetingID) }
+            Task { await app.regenerateNotes(meetingID: meetingID) }
         } label: {
             Label(title, systemImage: "wand.and.stars")
                 .font(.system(size: 13, weight: .medium))

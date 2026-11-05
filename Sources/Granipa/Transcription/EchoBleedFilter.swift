@@ -33,20 +33,23 @@ enum EchoBleedFilter {
     /// an explicit user request — since interpolated times can mistake a
     /// read-back for echo. `earlierPassIDs` are segments recorded before this
     /// pass: their times restart at zero too, so they are never compared.
+    /// Returns whether the mic transcript was rewritten.
+    @discardableResult
     static func apply(
         meetingID: String, database: AppDatabase, backupDirectory: URL?,
         allowCoarseTiming: Bool = false, earlierPassIDs: Set<String> = []
-    ) throws {
-        guard let backupDirectory else { return }
+    ) throws -> Bool {
+        guard let backupDirectory else { return false }
         let segments = try database.fetchSegments(meetingID: meetingID)
             .filter { !earlierPassIDs.contains($0.id) }
         let mic = segments.filter { $0.channel == .mic }
         let system = segments.filter { $0.channel == .system && $0.isFinal }
         let cleaned = clean(mic: mic, system: system, allowCoarseTiming: allowCoarseTiming)
-        guard cleaned != mic else { return }
+        guard cleaned != mic else { return false }
         let backup = backupDirectory.appendingPathComponent(backupFileName(meetingID: meetingID))
         try JSONEncoder().encode(mic).write(to: backup, options: .atomic)
         try database.replaceSegments(ids: mic.map(\.id), with: cleaned)
+        return true
     }
 
     /// Deleting a meeting must not leave its transcript behind; a failure is
@@ -59,6 +62,15 @@ enum EchoBleedFilter {
         for name in names where name.hasPrefix("\(meetingID)-mic-before-bleed-filter") {
             try FileManager.default.removeItem(at: backupDirectory.appendingPathComponent(name))
         }
+    }
+
+    /// A delete that ran while a pass was in flight removed the backups
+    /// before the pass wrote its own; this drops that orphan afterwards.
+    static func removeOrphanedBackups(
+        meetingID: String, database: AppDatabase, backupDirectory: URL?
+    ) throws {
+        guard try database.fetchMeeting(id: meetingID) == nil else { return }
+        try removeBackups(meetingID: meetingID, from: backupDirectory)
     }
 
     static func clean(

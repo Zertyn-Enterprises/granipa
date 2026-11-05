@@ -69,6 +69,32 @@ System Settings → Battery). The user chose to drop battery control from
 Grañipa. `LegacyBatteryHelper` unregisters a daemon left by 2.0.0/2.0.1
 builds; the plist and stub must keep shipping until no such installs remain.
 
+### Meeting audio, notes and shortcuts (2026-10-16, stacked hold PRs)
+
+Stack on `feat/granipa-v2`: #28 windows → #29 battery → `fix/v2-dictation-mic`
+→ `fix/v2-macro-hold` → `fix/v2-meeting-mic-file` → `feat/v2-meeting-voice`
+(this branch also carries #26's two commits).
+
+- Meetings since 2026-09-28 had a 557-byte `mic.m4a` (a late tap buffer
+  reopened the file after stop); fixed, so "Me" is transcribed again.
+- Meetings record the mic without echo cancellation. After a meeting,
+  `EchoBleedFilter` removes "Me" words the system channel said at the same
+  time, using recognizer word timings (migration `v9`,
+  `transcriptSegment.words`). Each rewrite is backed up to
+  `transcript-backups/` and deleted with its meeting. Live-ASR finals carry no
+  word timings yet, so the automatic pass skips them.
+- Playback plays mic + system together by default (Both / Mic / System).
+- AI notes address the user ("Me") in the second person; the email draft is
+  first person. Re-enhance cleans bleed first.
+- Grok runs `grok-4.7-build-fast --reasoning-effort low` (~2 min on a 50-min
+  meeting; the CLI default hit the 600 s timeout).
+- Caps Lock macro works while held (HID remap to F18, owned and removed by
+  Grañipa); the dictation failure overlay can be dismissed.
+
+Open: AirPods single-tap dictation ends ~120 ms after start ("Didn't catch
+that"); logging is in, cause not found. Live transcription on one mixed
+stream is not started (CPU to be measured first).
+
 Last recorded suite (2026-09-06, not re-run this session): 465 tests /
 77 suites, `swift test --no-parallel`. 49 test files are in
 `Tests/GranipaTests/` on this branch.

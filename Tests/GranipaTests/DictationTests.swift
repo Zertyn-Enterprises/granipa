@@ -19,6 +19,11 @@ import Testing
         #expect(TranscriptionDelivery.efficient.taskPriority == .medium)
     }
 
+    @Test func batchDeliverySkipsVolatileResultsBelowForegroundWork() {
+        #expect(TranscriptionDelivery.batch.reportingOptions.isEmpty)
+        #expect(TranscriptionDelivery.batch.taskPriority == .utility)
+    }
+
     @Test func shortHoldBecomesToggle() {
         #expect(DictationTrigger.actionOnRelease(held: 0.05) == .keepAsToggle)
         #expect(DictationTrigger.actionOnRelease(held: 0.21) == .keepAsToggle)
