@@ -541,6 +541,8 @@ private struct PermissionLanguagesCard: View {
     @State private var installedIDs: Set<String>?
     @State private var checkedLocaleIDs: [String] = []
     @State private var refreshTick = 0
+    @State private var downloadErrors: [String: String] = [:]
+    @State private var downloading: Set<String> = []
 
     private var localeIDs: [String] {
         LanguageDetection.parseProbeLocales(probeLocalesRaw)
@@ -568,16 +570,21 @@ private struct PermissionLanguagesCard: View {
                         knownInstalled: installedIDs, localeID: id)
                     let name = languageName(id)
                     HStack(spacing: 6) {
-                        Text(name)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(Theme.textPrimary)
-                        chipAccessory(status, name: name)
+                        HStack(spacing: 6) {
+                            Text(name)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Theme.textPrimary)
+                            chipAccessory(status, name: name)
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("\(name) \(status.accessibilityStatus)")
+                        if status == .absent {
+                            downloadControl(id, name: name)
+                        }
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .background(Theme.fillSubtle, in: Capsule())
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel("\(name) \(status.accessibilityStatus)")
                 }
             }
         }
@@ -610,6 +617,40 @@ private struct PermissionLanguagesCard: View {
             Text(status.label)
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(Theme.textTertiary)
+        }
+    }
+
+    @ViewBuilder
+    private func downloadControl(_ id: String, name: String) -> some View {
+        if downloading.contains(id) {
+            ProgressView()
+                .controlSize(.mini)
+                .accessibilityLabel("Downloading \(name)")
+        } else {
+            let error = downloadErrors[id]
+            Button(error == nil ? "Download" : "Retry") { download(id) }
+                .buttonStyle(.borderless)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(error == nil ? Theme.accent : .orange)
+                .help(error.map { "Download failed: \($0)" } ?? "Download the on-device model for \(name).")
+                .accessibilityLabel(error == nil ? "Download \(name)" : "Retry downloading \(name)")
+        }
+    }
+
+    private func download(_ id: String) {
+        downloading.insert(id)
+        downloadErrors[id] = nil
+        Task {
+            do {
+                // Model downloads are long; keep them off the main actor.
+                try await Task.detached {
+                    try await SpeechModels.ensureInstalled(locale: Locale(identifier: id))
+                }.value
+            } catch {
+                downloadErrors[id] = error.localizedDescription
+            }
+            downloading.remove(id)
+            refreshTick += 1
         }
     }
 
