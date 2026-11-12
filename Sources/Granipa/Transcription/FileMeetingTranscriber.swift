@@ -38,6 +38,12 @@ enum FileMeetingTranscriber {
         case failed(Failure)
     }
 
+    /// Some final segments could not be written; the channel's transcript is partial.
+    struct SegmentSaveFailure: LocalizedError {
+        let count: Int
+        var errorDescription: String? { "\(count) transcript segment(s) could not be saved" }
+    }
+
     enum Failure: Sendable, Equatable {
         /// ensureInstalled threw before any audio ran.
         case modelInstall(localeID: String)
@@ -193,6 +199,34 @@ enum FileMeetingTranscriber {
         return chunks
     }
 
+    /// Saves each final result as a segment; returns how many saves failed.
+    private static func persistFinals(
+        of transcriber: SpeechTranscriber, _ analysis: ChannelAnalysis
+    ) async throws -> Int {
+        var failedSaves = 0
+        for try await result in transcriber.results {
+            let text = String(result.text.characters)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty, result.isFinal else { continue }
+            let start = result.range.start.seconds
+            let end = result.range.end.seconds
+            let segment = TranscriptSegment.new(
+                meetingID: analysis.meetingID,
+                channel: analysis.channel,
+                speaker: analysis.channel == .mic ? "Me" : "Them",
+                text: text,
+                startSeconds: start.isFinite ? start : 0,
+                endSeconds: end.isFinite ? end : (start.isFinite ? start : 0),
+                isFinal: true)
+            do {
+                try analysis.database.save(segment)
+            } catch {
+                failedSaves += 1
+            }
+        }
+        return failedSaves
+    }
+
     /// Live per-channel analysis: open the recording, run the SpeechAnalyzer,
     /// persist final segments. Throws on any analyzer error so the caller can
     /// report it; a zero-length file is simply "no audio", not an error.
@@ -209,24 +243,7 @@ enum FileMeetingTranscriber {
             options: SpeechAnalyzer.Options(
                 priority: .utility,
                 modelRetention: .lingering))
-        let resultsTask = Task {
-            for try await result in transcriber.results {
-                let text = String(result.text.characters)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !text.isEmpty, result.isFinal else { continue }
-                let start = result.range.start.seconds
-                let end = result.range.end.seconds
-                let segment = TranscriptSegment.new(
-                    meetingID: analysis.meetingID,
-                    channel: analysis.channel,
-                    speaker: analysis.channel == .mic ? "Me" : "Them",
-                    text: text,
-                    startSeconds: start.isFinite ? start : 0,
-                    endSeconds: end.isFinite ? end : (start.isFinite ? start : 0),
-                    isFinal: true)
-                try? analysis.database.save(segment)
-            }
-        }
+        let resultsTask = Task { try await persistFinals(of: transcriber, analysis) }
         // Every exit path must wind the analyzer down (finalize or cancel) and
         // join the results pump. A stranded task or lingering analyzer —
         // modelRetention is .lingering — would bleed into the next channel's
@@ -249,7 +266,10 @@ enum FileMeetingTranscriber {
             // A throw here means the results stream itself broke mid-meeting;
             // surfacing it marks the channel failed instead of silently
             // keeping whatever finals the pump already persisted.
-            try await resultsTask.value
+            let failedSaves = try await resultsTask.value
+            if failedSaves > 0 {
+                throw SegmentSaveFailure(count: failedSaves)
+            }
         } catch {
             if !analyzerFinished {
                 await analyzer.cancelAndFinishNow()
