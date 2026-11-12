@@ -10,7 +10,12 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
+      - name: Check shell scripts parse
+        run: for f in Scripts/*.sh; do bash -n "$f"; done
       - name: Build
         run: swift build
+      # Release-only paths (`#else` of `#if DEBUG`) only compile here.
+      - name: Build release
+        run: swift build -c release
       - name: Test
         run: swift test

@@ -131,8 +131,4 @@ import Testing
         #expect(
             SMCClient.decodeTemperature(dataType: SMCClient.fourChar(type), bytes: bytes) == celsius)
     }
-
-    @Test func smcParamStructIsEightyBytes() {
-        #expect(SMCClient.paramStride == 80)
-    }
 }

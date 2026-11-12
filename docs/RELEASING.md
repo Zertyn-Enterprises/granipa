@@ -26,7 +26,9 @@
    ```
    This builds, signs (Developer ID + hardened runtime, Sparkle framework
    included), notarizes, staples, zips, and generates `build/appcast.xml`
-   (signed with your Sparkle key).
+   (signed with your Sparkle key). It refuses to start on a dirty git tree
+   (uncommitted or untracked changes), and the bundle fails hard if
+   `Sparkle.framework` is missing.
    Signing requires a Developer ID Application certificate for team
    `R4V252C833`; `Scripts/bundle.sh` validates the identity (override with
    `CODESIGN_ID`, given as exact certificate name or hash) before building

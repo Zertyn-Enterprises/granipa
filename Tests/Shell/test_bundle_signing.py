@@ -66,6 +66,7 @@ bin_dir="$STUB_HOME/.build/$3"
 mkdir -p "$bin_dir"
 : > "$bin_dir/Granipa"
 : > "$bin_dir/GranipaBatteryHelper"
+[ -n "${STUB_NO_SPARKLE:-}" ] && exit 0
 fw="$STUB_HOME/.build/macos/$3/Sparkle.framework"
 mkdir -p "$fw/XPCServices/org.sparkle-project.SparkleUpdater.xpc" \\
   "$fw/Resources" "$fw/Versions/A/Updater.app/Contents/MacOS"
@@ -124,6 +125,7 @@ class BundleSigningTests(unittest.TestCase):
         self.identities = FULL_LISTING
         self.codesign_id = None
         self.codesign_fail_target = None
+        self.no_sparkle = False
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -147,6 +149,8 @@ class BundleSigningTests(unittest.TestCase):
             env["CODESIGN_ID"] = self.codesign_id
         if self.codesign_fail_target is not None:
             env["STUB_CODESIGN_FAIL_TARGET"] = str(self.codesign_fail_target)
+        if self.no_sparkle:
+            env["STUB_NO_SPARKLE"] = "1"
         return subprocess.run(
             ["bash", str(self.tmp / "Scripts" / "bundle.sh"), config],
             capture_output=True,
@@ -256,6 +260,17 @@ class BundleSigningTests(unittest.TestCase):
         self.codesign_id = f"Developer ID Application: NOT PRESENT ({TEAM})"
         marker = self.plant_old_bundle()
         self.assert_hard_failure(self.run_bundle(), marker)
+
+    # -- Sparkle is mandatory ----------------------------------------------
+
+    def test_missing_sparkle_fails_before_signing_and_keeps_old_bundle(self):
+        self.no_sparkle = True
+        marker = self.plant_old_bundle()
+        proc = self.run_bundle()
+        self.assertNotEqual(proc.returncode, 0, proc.stdout)
+        self.assertIn("ERROR: Sparkle.framework", proc.stderr)
+        self.assertEqual(self.codesign_signs(), [])
+        self.assertTrue(marker.exists())
 
     # -- signing failures abort at the first failing nested target ---------
 

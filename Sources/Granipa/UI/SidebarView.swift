@@ -261,7 +261,6 @@ private struct SideItem: View {
     var indented = false
     var dimmed = false
     var quiet = false
-    var iconTint: Color?
     var accessory: String? = nil
     let action: () -> Void
 
@@ -311,7 +310,6 @@ private struct SideItem: View {
     }
 
     private var iconColor: Color {
-        if let iconTint { return iconTint }
         if dimmed || (quiet && !isActive) { return Theme.textTertiary }
         return isActive ? Theme.accent : Theme.textSecondary
     }

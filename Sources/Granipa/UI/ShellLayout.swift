@@ -28,17 +28,6 @@ enum ShellLayout {
         windowWidth >= inspectorBreakWidth
     }
 
-    static func presentation(
-        windowWidth: CGFloat,
-        userExpanded: Bool?,
-        hasContent: Bool
-    ) -> InspectorPresentation {
-        presentation(
-            windowWidth: windowWidth,
-            userExpanded: userExpanded,
-            kind: hasContent ? .meeting : .none)
-    }
-
     /// Occupancy (`kind`) is separate from docking. Idle Dictation can be
     /// opened explicitly; it does not inherit the wide-window default used
     /// by live Dictation and the meeting inspector.

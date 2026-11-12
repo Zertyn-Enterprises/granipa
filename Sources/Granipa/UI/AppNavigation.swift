@@ -149,15 +149,6 @@ enum AppNavigation {
     /// Collections stay on Home so the header is never a Meetings page.
     static let folderRevealDestination: SidebarDestination = .home
 
-    static func isPrimaryActive(
-        item: SidebarDestination,
-        destination: SidebarDestination,
-        selectedFolderID: String?
-    ) -> Bool {
-        highlight(destination: destination, selectedFolderID: selectedFolderID)
-            == .destination(item)
-    }
-
     static func dictationShowsInspector(_ phase: DictationPhase) -> Bool {
         switch phase {
         case .preparing, .listening, .processing, .failed: true
@@ -186,10 +177,6 @@ enum AppNavigation {
             return dictationShowsInspector ? .dictationLive : .dictationIdle
         }
         return meetingSelected ? .meeting : .none
-    }
-
-    static func showsAppSidebar(for destination: SidebarDestination) -> Bool {
-        destination != .settings
     }
 
     struct SettingsReturn: Equatable, Sendable {
@@ -295,18 +282,6 @@ enum MeetingLibrary {
             }
         }
         return counts
-    }
-
-    static func searchNotes(query: String, database: AppDatabase) -> [Meeting] {
-        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !needle.isEmpty else { return [] }
-        return notes(in: (try? database.searchMeetings(query: needle)) ?? [])
-    }
-
-    static func searchRecordings(query: String, database: AppDatabase) -> [Meeting] {
-        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !needle.isEmpty else { return [] }
-        return recordings(in: (try? database.searchMeetings(query: needle)) ?? [])
     }
 
     static func dayGroups(from meetings: [Meeting]) -> [(day: Date, meetings: [Meeting])] {

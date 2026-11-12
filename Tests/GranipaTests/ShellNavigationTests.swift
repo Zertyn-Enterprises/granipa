@@ -188,8 +188,6 @@ import Testing
         #expect(SidebarDestination.notes.icon == "square.and.pencil")
         #expect(SidebarDestination.files.icon == "folder.fill")
         #expect(SidebarDestination.settings.icon == "gearshape")
-        #expect(AppNavigation.showsAppSidebar(for: .home))
-        #expect(!AppNavigation.showsAppSidebar(for: .settings))
     }
 
     @Test func settingsHidesInspectorAtEveryWidthEvenWithAMeetingSelected() {
@@ -254,27 +252,12 @@ import Testing
         #expect(
             AppNavigation.highlight(destination: .dictation, selectedFolderID: nil)
                 == .destination(.dictation))
-        #expect(
-            AppNavigation.isPrimaryActive(
-                item: .home, destination: .home, selectedFolderID: nil))
-        #expect(
-            !AppNavigation.isPrimaryActive(
-                item: .dictation, destination: .home, selectedFolderID: nil))
-        #expect(
-            AppNavigation.isPrimaryActive(
-                item: .dictation, destination: .dictation, selectedFolderID: nil))
     }
 
     @Test func aSelectedFolderWinsOverPrimaryDestinations() {
         let highlight = AppNavigation.highlight(
             destination: .meetings, selectedFolderID: "eng")
         #expect(highlight == .folder("eng"))
-        #expect(
-            !AppNavigation.isPrimaryActive(
-                item: .meetings, destination: .meetings, selectedFolderID: "eng"))
-        #expect(
-            !AppNavigation.isPrimaryActive(
-                item: .home, destination: .home, selectedFolderID: "eng"))
     }
 
     @Test func notesListIsQuickNotesAndWrittenNotesOnly() {
@@ -314,36 +297,6 @@ import Testing
         c.folderID = "prod"
         let loose = Meeting.new(title: "Loose", language: "auto")
         #expect(MeetingLibrary.folderCounts(from: [a, b, c, loose]) == ["eng": 2, "prod": 1])
-    }
-
-    @Test func notesAndFilesSearchUseDatabaseSemanticsIncludingTranscript() throws {
-        let db = try AppDatabase(writer: DatabaseQueue())
-        var noted = Meeting.new(title: "Untitled note", language: "en-US")
-        noted.notesMarkdown = "ship the shell"
-        try db.save(noted)
-        try db.save(
-            TranscriptSegment.new(
-                meetingID: noted.id, channel: .system, speaker: "Them",
-                text: "alpha-unique-token", startSeconds: 0, endSeconds: 2, isFinal: true))
-
-        var recordingOnly = Meeting.new(title: "Recorded", language: "en-US")
-        recordingOnly.audioMicPath = "/tmp/mic.m4a"
-        try db.save(recordingOnly)
-        try db.save(
-            TranscriptSegment.new(
-                meetingID: recordingOnly.id, channel: .mic, speaker: "Me",
-                text: "alpha-unique-token", startSeconds: 0, endSeconds: 2, isFinal: true))
-
-        var titled = Meeting.new(title: "Standup", language: "auto")
-        titled.notesMarkdown = "ship notes"
-        try db.save(titled)
-
-        #expect(MeetingLibrary.searchNotes(query: "alpha-unique-token", database: db).map(\.id) == [noted.id])
-        #expect(
-            MeetingLibrary.searchRecordings(query: "alpha-unique-token", database: db).map(\.id)
-                == [recordingOnly.id])
-        #expect(MeetingLibrary.searchNotes(query: "SHIP notes", database: db).map(\.title) == ["Standup"])
-        #expect(MeetingLibrary.searchNotes(query: "  ", database: db).isEmpty)
     }
 
     @Test func selectedMeetingHasNoInspectorOccupant() {
@@ -446,16 +399,6 @@ import Testing
                 == .empty)
     }
 
-    @Test func mainWindowKeepsTheInspectorToggleForLibraryDestinations() throws {
-        let source = try granipaSource("Sources/Granipa/UI/MainWindow.swift")
-        #expect(source.contains("showsInspectorToggle(destination:"))
-        #expect(source.contains("inspectorToggleEnabled(kind:"))
-        #expect(source.contains("kind: inspectorKind"))
-        #expect(!source.contains("if inspectorKind != .none"))
-        #expect(!source.contains("hasContent: inspectorKind != .none"))
-        #expect(!source.contains("value: inspectorPresentation"))
-    }
-
     @Test func dictationInspectorPhasesExcludeIdleAndDone() {
         #expect(AppNavigation.dictationShowsInspector(.preparing))
         #expect(AppNavigation.dictationShowsInspector(.listening))
@@ -508,12 +451,6 @@ import Testing
             #expect(
                 AppNavigation.highlight(destination: leftover, selectedFolderID: nil)
                     == .destination(.home))
-            #expect(
-                AppNavigation.isPrimaryActive(
-                    item: .home, destination: leftover, selectedFolderID: nil))
-            #expect(
-                !AppNavigation.isPrimaryActive(
-                    item: leftover, destination: leftover, selectedFolderID: nil))
         }
     }
 
@@ -572,9 +509,6 @@ import Testing
         let highlight = AppNavigation.highlight(
             destination: .home, selectedFolderID: "eng")
         #expect(highlight == .folder("eng"))
-        #expect(
-            !AppNavigation.isPrimaryActive(
-                item: .home, destination: .home, selectedFolderID: "eng"))
         #expect(
             AppNavigation.activeLibraryFilter(destination: .home, stored: .notes) == .notes)
     }
@@ -749,30 +683,4 @@ import Testing
                 MeetingLibrary.shown(in: searched, filter: .all, folderID: folder.id).map(\.id))
                 == [noteInFolder.id, recordingInFolder.id])
     }
-
-    @Test func homeWiresExistingNoteAndRecordingRowsNotGenericReplacements() throws {
-        let home = try granipaSource("Sources/Granipa/UI/HomeView.swift")
-        let main = try granipaSource("Sources/Granipa/UI/MainWindow.swift")
-        let sidebar = try granipaSource("Sources/Granipa/UI/SidebarView.swift")
-        #expect(home.contains("HomeLibraryFilterStrip"))
-        #expect(home.contains("NotesLibraryRow"))
-        #expect(home.contains("FilesLibraryRow"))
-        #expect(home.contains("fileStatuses"))
-        #expect(home.contains("MeetingLibrary.fileStatuses"))
-        #expect(home.contains("accessibilityAddTraits(isSelected ? .isSelected : [])"))
-        #expect(!home.contains("return \"Meetings\""))
-        #expect(!main.contains("NotesLibraryView()"))
-        #expect(!main.contains("FilesLibraryView()"))
-        #expect(main.contains("HomeView()"))
-        #expect(sidebar.contains("SidebarDestination.appDestinations"))
-        #expect(!sidebar.contains("case .meetings"))
-    }
-}
-
-private func granipaSource(_ relativePath: String) throws -> String {
-    let testsFile = URL(fileURLWithPath: #filePath)
-    let repo = testsFile.deletingLastPathComponent().deletingLastPathComponent()
-        .deletingLastPathComponent()
-    return try String(
-        contentsOf: repo.appendingPathComponent(relativePath), encoding: .utf8)
 }

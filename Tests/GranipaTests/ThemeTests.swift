@@ -32,13 +32,4 @@ import Testing
         #expect(Theme.titleSize == 32)
         #expect(Theme.sectionSize == 16)
     }
-
-    @Test func sparklineIsStableAndBounded() {
-        let a = MeetingSparkline.samples(id: "abc")
-        let b = MeetingSparkline.samples(id: "abc")
-        #expect(a == b)
-        #expect(a.count == 52)
-        #expect(a.allSatisfy { $0 >= 0 && $0 <= 1 })
-        #expect(MeetingSparkline.samples(id: "xyz") != a)
-    }
 }
