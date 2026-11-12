@@ -514,8 +514,21 @@ final class AppState {
         }
     }
 
-    func enhance(meetingID: String) async {
+    @discardableResult
+    func enhance(meetingID: String) async -> MeetingProcessor.EnhanceOutcome? {
         await processor?.enhance(meetingID: meetingID)
+    }
+
+    /// Enhance buttons: say why nothing happened instead of staying silent.
+    func enhanceNow(meetingID: String) async {
+        switch await enhance(meetingID: meetingID) {
+        case .nothingToEnhance:
+            ToastController.shared.show("No transcript or notes to enhance", style: .warning)
+        case .alreadyRunning:
+            ToastController.shared.show("Notes are already being written")
+        case .ran, .failed, nil:
+            break
+        }
     }
 
     /// The meeting's recorded files when at least one is still on disk.
@@ -529,7 +542,7 @@ final class AppState {
 
     func canTranscribeAgain(_ meeting: Meeting) -> Bool {
         meeting.status == .ready && recorder.meetingID != meeting.id
-            && recordedAudio(of: meeting) != nil
+            && !enhancingMeetingIDs.contains(meeting.id) && recordedAudio(of: meeting) != nil
     }
 
     /// Replaces the transcript with a fresh one from the saved audio, then

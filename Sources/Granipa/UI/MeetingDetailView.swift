@@ -129,7 +129,9 @@ struct MeetingDetailView: View {
                         onOpenEnhanced: { tab = .enhanced },
                         onOpenActionItems: { tab = .actionItems })
                 case .enhanced:
-                    EnhancedNotesView(meetingID: meeting.id, document: enhancedDocument)
+                    EnhancedNotesView(
+                        meetingID: meeting.id, document: enhancedDocument,
+                        isProcessing: isPostStopProcessing)
                 case .transcript:
                     MeetingTranscriptView(
                         segments: transcript.segments,

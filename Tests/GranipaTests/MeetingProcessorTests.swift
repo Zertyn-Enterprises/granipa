@@ -50,4 +50,27 @@ import Testing
         #expect(try db.fetchMeeting(id: meetings[1].id)?.status == .ready)
         #expect(try db.fetchMeeting(id: meetings[2].id)?.status == .processing)
     }
+
+    @Test func enhanceSaysWhyNothingRan() async throws {
+        let db = try AppDatabase(writer: DatabaseQueue())
+        let meeting = Meeting.new(title: "Empty", language: "en-US")
+        try db.save(meeting)
+        let processor = MeetingProcessor(
+            database: db,
+            host: .init(update: { try? db.save($0) }, folder: { _ in nil }, reportError: { _ in }))
+        #expect(await processor.enhance(meetingID: meeting.id) == .nothingToEnhance)
+
+        let (gate, release) = AsyncStream.makeStream(of: Void.self)
+        let job = Task {
+            await processor.process(meetingID: meeting.id, source: .live {
+                for await _ in gate {}
+                return false
+            })
+        }
+        while processor.processingMeetingID != meeting.id { await Task.yield() }
+        // The pipeline enhances after diarization; an early request must not race it.
+        #expect(await processor.enhance(meetingID: meeting.id) == .alreadyRunning)
+        release.finish()
+        await job.value
+    }
 }

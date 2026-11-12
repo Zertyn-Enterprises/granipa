@@ -31,7 +31,7 @@ import Testing
         #expect(source.contains("Button(\"Retry\""))
         #expect(source.contains("Button(\"Try Again\""))
         #expect(source.contains("enhanceButton("))
-        #expect(source.contains("OverviewPresentation.enhanceDisabled("))
+        #expect(source.contains("OverviewPresentation.enhanceDisabledReason("))
     }
 
     @Test func permissionsRescanFixAndSystemSettingsUseSharedControls() throws {

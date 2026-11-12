@@ -24,6 +24,13 @@ final class MeetingProcessor {
         case live(drain: @MainActor () async -> Bool)
     }
 
+    enum EnhanceOutcome: Equatable {
+        case ran
+        case nothingToEnhance
+        case alreadyRunning
+        case failed(String)
+    }
+
     private static let log = Logger(subsystem: "com.zertyn.granipa", category: "transcription")
 
     private(set) var processingMeetingID: String?
@@ -33,6 +40,7 @@ final class MeetingProcessor {
     @ObservationIgnored private let host: Host
     @ObservationIgnored private var jobs: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var tail: Task<Void, Never>?
+    @ObservationIgnored private var enhanceTasks: [String: Task<EnhanceOutcome, Never>] = [:]
 
     init(database: AppDatabase, host: Host) {
         self.database = database
@@ -115,7 +123,12 @@ final class MeetingProcessor {
                 "Transcription failed — your audio was saved", style: .warning)
         }
         await diarize(meetingID: meetingID, skipLocalDiarize: skipLocalDiarize)
-        await enhance(meetingID: meetingID)
+        // A request that started before this job must not stand in for the
+        // pipeline's pass: it read the transcript before diarization.
+        if let running = enhanceTasks[meetingID] {
+            _ = await running.value
+        }
+        _ = await runEnhance(meetingID: meetingID)
         finish(meetingID: meetingID)
     }
 
@@ -170,13 +183,30 @@ final class MeetingProcessor {
         }
     }
 
-    func enhance(meetingID: String) async {
+    /// Manual and API requests. While the pipeline owns the meeting they are
+    /// refused: its own pass runs once speakers are relabelled.
+    @discardableResult
+    func enhance(meetingID: String) async -> EnhanceOutcome {
+        guard jobs[meetingID] == nil, enhanceTasks[meetingID] == nil else { return .alreadyRunning }
+        return await runEnhance(meetingID: meetingID)
+    }
+
+    private func runEnhance(meetingID: String) async -> EnhanceOutcome {
+        let task = Task { await generateNotes(meetingID: meetingID) }
+        enhanceTasks[meetingID] = task
+        let outcome = await task.value
+        if enhanceTasks[meetingID] == task {
+            enhanceTasks[meetingID] = nil
+        }
+        return outcome
+    }
+
+    private func generateNotes(meetingID: String) async -> EnhanceOutcome {
         let db = database
-        guard !enhancingMeetingIDs.contains(meetingID) else { return }
-        guard let meeting = try? db.fetchMeeting(id: meetingID) else { return }
+        guard let meeting = try? db.fetchMeeting(id: meetingID) else { return .nothingToEnhance }
         let segments = (try? db.fetchSegments(meetingID: meetingID, finalOnly: true)) ?? []
         let hasNotes = !meeting.notesMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        guard !segments.isEmpty || hasNotes else { return }
+        guard !segments.isEmpty || hasNotes else { return .nothingToEnhance }
 
         enhancingMeetingIDs.insert(meetingID)
         defer { enhancingMeetingIDs.remove(meetingID) }
@@ -194,10 +224,12 @@ final class MeetingProcessor {
         do {
             raw = try await LLMService.generate(providerID: providerID, prompt: prompt)
         } catch {
-            host.reportError(Self.enhancementFailureMessage(error))
-            return
+            let message = Self.enhancementFailureMessage(error)
+            host.reportError(message)
+            return .failed(message)
         }
         applyEnhancement(raw: raw, meetingID: meetingID)
+        return .ran
     }
 
     private static func enhancementFailureMessage(_ error: Error) -> String {

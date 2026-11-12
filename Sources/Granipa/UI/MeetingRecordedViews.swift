@@ -70,12 +70,17 @@ enum OverviewPresentation {
         return .fullProgress(busy)
     }
 
-    static func enhanceDisabled(
+    /// Why both enhance buttons are disabled (their help text); nil when
+    /// enhancing can run.
+    static func enhanceDisabledReason(
         isEnhancing: Bool,
         isProcessing: Bool,
         isRecordingThisMeeting: Bool
-    ) -> Bool {
-        isEnhancing || isProcessing || isRecordingThisMeeting
+    ) -> String? {
+        if isRecordingThisMeeting { return "Available once the recording stops." }
+        if isEnhancing { return "Notes are being written." }
+        if isProcessing { return "Available once processing finishes — it writes the notes itself." }
+        return nil
     }
 }
 
@@ -347,21 +352,20 @@ struct MeetingOverviewView: View {
     }
 
     private func enhanceButton(title: String) -> some View {
-        Button {
-            Task { await app.enhance(meetingID: meeting.id) }
+        let blocked = OverviewPresentation.enhanceDisabledReason(
+            isEnhancing: isEnhancing,
+            isProcessing: isProcessing,
+            isRecordingThisMeeting: app.recorder.meetingID == meeting.id)
+        return Button {
+            Task { await app.enhanceNow(meetingID: meeting.id) }
         } label: {
             Label(title, systemImage: "wand.and.stars")
                 .font(.system(size: 12, weight: .medium))
         }
         .granipaSecondaryControl()
         .controlSize(.small)
-        .disabled(
-            OverviewPresentation.enhanceDisabled(
-                isEnhancing: isEnhancing,
-                isProcessing: isProcessing,
-                isRecordingThisMeeting: app.recorder.meetingID == meeting.id
-            )
-        )
+        .disabled(blocked != nil)
+        .help(blocked ?? "Write the summary and notes from the transcript and your notes")
         .accessibilityLabel(title == "Re-enhance" ? "Regenerate summary" : "Enhance now")
     }
 }

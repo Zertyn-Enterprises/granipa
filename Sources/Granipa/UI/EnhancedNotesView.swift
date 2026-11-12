@@ -50,6 +50,7 @@ struct EnhancedNotesView: View {
     @Environment(AppState.self) private var app
     let meetingID: String
     let document: EnhancedNotesDocument
+    let isProcessing: Bool
 
     @State private var emailExpanded = false
 
@@ -190,15 +191,20 @@ struct EnhancedNotesView: View {
     }
 
     private func enhanceButton(title: String) -> some View {
-        Button {
-            Task { await app.enhance(meetingID: meetingID) }
+        let blocked = OverviewPresentation.enhanceDisabledReason(
+            isEnhancing: isEnhancing,
+            isProcessing: isProcessing,
+            isRecordingThisMeeting: app.recorder.meetingID == meetingID)
+        return Button {
+            Task { await app.enhanceNow(meetingID: meetingID) }
         } label: {
             Label(title, systemImage: "wand.and.stars")
                 .font(.system(size: 13, weight: .medium))
         }
         .buttonStyle(.borderedProminent)
         .tint(Theme.accent)
-        .disabled(isEnhancing || app.recorder.meetingID == meetingID)
+        .disabled(blocked != nil)
+        .help(blocked ?? "Write the summary and notes from the transcript and your notes")
     }
 
     private func providerName() -> String {
