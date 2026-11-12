@@ -112,6 +112,24 @@ import Testing
                 == expected)
     }
 
+    /// The record is what stops a meeting that kills the app from being
+    /// re-run at every launch: written before the run, removed after it.
+    @Test func recoveryAttemptRecordSurvivesUntilTheRunEnds() throws {
+        let suite = "granipa-recovery-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        MeetingReprocessing.recordAttempt(meetingID: "a", unfinished: true, defaults)
+        MeetingReprocessing.recordAttempt(meetingID: "b", unfinished: true, defaults)
+        #expect(MeetingReprocessing.unfinishedAttempts(defaults) == ["a", "b"])
+
+        MeetingReprocessing.recordAttempt(meetingID: "a", unfinished: false, defaults)
+        #expect(MeetingReprocessing.unfinishedAttempts(defaults) == ["b"])
+
+        MeetingReprocessing.forgetAttempts(defaults)
+        #expect(MeetingReprocessing.unfinishedAttempts(defaults).isEmpty)
+    }
+
     @Test(arguments: [
         (MeetingStatus.ready, false, false, true, true),
         (.processing, false, false, true, false),

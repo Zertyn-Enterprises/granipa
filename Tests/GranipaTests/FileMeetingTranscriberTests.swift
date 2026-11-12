@@ -221,6 +221,33 @@ import Testing
         #expect(defaults.string(forKey: "lastSpeechLocale") == "fr-FR")
     }
 
+    /// An explicitly requested language is the only candidate, so it is
+    /// handed back for the meeting row without touching the next-meeting hint.
+    @Test func singleCandidateLanguageIsReturnedForTheMeeting() async throws {
+        let db = try AppDatabase(writer: DatabaseQueue())
+        let meeting = Meeting.new(title: "T", language: "es-ES")
+        try db.save(meeting)
+        let missing = URL(fileURLWithPath: "/tmp/granipa-no-such-\(UUID().uuidString).m4a")
+        let defaults = UserDefaults.standard
+        let previous = defaults.object(forKey: "lastSpeechLocale")
+        defaults.set("fr-FR", forKey: "lastSpeechLocale")
+        defer { restoreLastSpeechLocale(previous) }
+        let boundary = FileMeetingTranscriber.Boundary(
+            installModel: { _ in }, analyzeChannel: { _ in [] })
+
+        let result = await FileMeetingTranscriber.transcribe(
+            micURL: missing,
+            systemURL: missing,
+            meetingID: meeting.id,
+            language: "es-ES",
+            database: db,
+            boundary: boundary)
+
+        #expect(result.outcome == .completed(localeID: "es-ES"))
+        #expect(result.language == "es-ES")
+        #expect(defaults.string(forKey: "lastSpeechLocale") == "fr-FR")
+    }
+
     @Test func modelInstallFailureLeavesLocaleHintUntouched() async throws {
         let db = try AppDatabase(writer: DatabaseQueue())
         let meeting = Meeting.new(title: "T", language: "en-US")
