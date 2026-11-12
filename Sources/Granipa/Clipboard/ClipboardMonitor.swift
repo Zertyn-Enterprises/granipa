@@ -40,13 +40,16 @@ final class ClipboardMonitor {
     func start() {
         guard isEnabled else { return }
         guard task == nil else { return }
+        // Whatever was copied while capture was off stays out of history.
+        lastChangeCount = NSPasteboard.general.changeCount
         task = Task {
-            while !Task.isCancelled {
-                if isEnabled { poll() }
+            while !Task.isCancelled, isEnabled {
+                poll()
                 // NSPasteboard exposes no change notification; 1 s is the
                 // fastest poll that still feels instant on paste.
-                try? await Task.sleep(for: .milliseconds(isEnabled ? 1_000 : 2_000))
+                try? await Task.sleep(for: .milliseconds(1_000))
             }
+            if !Task.isCancelled { task = nil }
         }
     }
 
@@ -61,9 +64,9 @@ final class ClipboardMonitor {
 
     private func poll() {
         let pasteboard = NSPasteboard.general
-        guard pasteboard.changeCount != lastChangeCount else { return }
-        lastChangeCount = pasteboard.changeCount
-        guard isEnabled else { return }
+        let changeCount = pasteboard.changeCount
+        guard changeCount != lastChangeCount else { return }
+        lastChangeCount = changeCount
 
         let typeIDs = (pasteboard.types ?? []).map(\.rawValue)
         guard !ClipboardCapturePolicy.isPrivate(typeIDs) else { return }
