@@ -18,10 +18,20 @@ final class BatteryHelperService: NSObject, GranipaBatteryHelping, @unchecked Se
     private let smc = HelperSMC()
     private let lock = NSLock()
     private var lastUsingCHTE = false
+    private var served = false
+
+    /// True once this connection delivered a message, which the code-signing
+    /// requirement only lets the signed app do.
+    var didServe: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return served
+    }
 
     func applyAction(_ raw: Int, usingCHTE: Bool, reply: @escaping (Bool, String?) -> Void) {
         lock.lock()
         defer { lock.unlock() }
+        served = true
         do {
             switch raw {
             case 0:  // ChargeAction.charge.helperRaw
@@ -49,6 +59,7 @@ final class BatteryHelperService: NSObject, GranipaBatteryHelping, @unchecked Se
     func applyLED(_ value: UInt8, reply: @escaping (Bool, String?) -> Void) {
         lock.lock()
         defer { lock.unlock() }
+        served = true
         do {
             try smc.writeU8("ACLC", value)
             log.info("applyLED \(value, privacy: .public) ok")
@@ -101,7 +112,10 @@ final class ListenerDelegate: NSObject, NSXPCListenerDelegate {
         connection.setCodeSigningRequirement(clientRequirement)
         connection.exportedInterface = NSXPCInterface(with: GranipaBatteryHelping.self)
         connection.exportedObject = service
+        // A caller that fails the code-signing requirement can still connect
+        // and drop; only the app's own connection may end the charge limit.
         connection.invalidationHandler = {
+            guard service.didServe else { return }
             service.restoreDefaults()
             exit(EXIT_SUCCESS)
         }
