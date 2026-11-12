@@ -433,7 +433,7 @@ final class DictationController {
 
     private func rewriteIfNeeded(_ text: String) async -> String {
         #if DEBUG
-            if testHooks != nil { return text }
+            if testHooks != nil { return await testHooks?.rewrite?(text) ?? text }
         #endif
         let provider = UserDefaults.standard.string(forKey: "dictationRewrite") ?? "off"
         guard provider != "off" else { return text }
@@ -609,5 +609,6 @@ extension DictationError {
         var presentsOverlay = false
         var pastes = false
         var micStallLimit: Duration?
+        var rewrite: (@MainActor (String) async -> String)?
     }
 #endif

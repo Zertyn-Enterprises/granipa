@@ -161,6 +161,55 @@
             #expect(committed == nil)
         }
 
+        @Test func escDuringRewriteNeitherCommitsNorFinishes() async {
+            var committed: String?
+            var rewriting = false
+            let gate = CaptureGate()
+            let controller = DictationController(
+                testHooks: DictationTestHooks(
+                    transcribe: saysHello,
+                    rewrite: { text in
+                        rewriting = true
+                        await gate.wait()
+                        return text + " rewritten"
+                    }))
+            controller.onCommitted = { text, _, _ in committed = text }
+            defer {
+                gate.open()
+                controller.cancel()
+            }
+
+            controller.toggleFromMenu()
+            #expect(await waitUntil { controller.phase == .listening })
+            controller.toggleFromMenu()
+            #expect(await waitUntil { rewriting })
+            controller.cancel()
+            gate.open()
+            try? await Task.sleep(for: .milliseconds(40))
+
+            #expect(committed == nil)
+            #expect(controller.phase == .idle)
+        }
+
+        @Test func storedDurationExcludesRewriteTime() async {
+            var duration: TimeInterval?
+            let controller = DictationController(
+                testHooks: DictationTestHooks(
+                    transcribe: saysHello,
+                    rewrite: { text in
+                        try? await Task.sleep(for: .milliseconds(400))
+                        return text
+                    }))
+            controller.onCommitted = { _, seconds, _ in duration = seconds }
+            defer { controller.cancel() }
+
+            controller.toggleFromMenu()
+            #expect(await waitUntil { controller.phase == .listening })
+            controller.toggleFromMenu()
+            #expect(await waitUntil(timeout: .seconds(2)) { duration != nil })
+            #expect((duration ?? .infinity) < 0.3)
+        }
+
         @Test func holdAfterListeningCommitsBufferedText() async {
             var committed: String?
             let controller = hookedController(transcribe: { chunks in
@@ -412,6 +461,12 @@
         func open() {
             opened = true
         }
+    }
+
+    @MainActor
+    private func saysHello(_ chunks: AsyncStream<AudioChunk>) async -> String {
+        for await _ in chunks {}
+        return "hello"
     }
 
     @MainActor
