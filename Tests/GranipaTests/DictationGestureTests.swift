@@ -161,6 +161,20 @@
             #expect(controller.preview != "stale")
         }
 
+        @Test func chordWhileHeldCancelsThePressAndNeverLatches() async {
+            let controller = hookedController()
+            defer { controller.cancel() }
+
+            controller.handlePress(at: 5.0)
+            #expect(await waitUntil { controller.phase == .listening })
+            controller.handleChord()
+            controller.handleRelease(at: 5.05)
+
+            #expect(controller.phase == .idle)
+            #expect(!controller.isToggle)
+            #expect(!controller.hasOpenCapture)
+        }
+
         @Test func unmatchedReleaseDoesNotStartASession() {
             let controller = hookedController()
             defer { controller.cancel() }
@@ -302,6 +316,23 @@
             #expect(received)
             #expect(presses == 1)
             #expect(releases == 1)
+        }
+
+        @Test(arguments: [
+            ([.modifierDown, .modifierUp], [.press, .release]),
+            ([.modifierDown, .otherKeyDown, .modifierUp], [.press, .chord]),
+            ([.modifierDown, .otherKeyDown, .otherKeyDown], [.press, .chord]),
+            ([.otherKeyDown, .modifierDown, .modifierUp], [.press, .release]),
+            (
+                [.modifierDown, .otherKeyDown, .modifierUp, .modifierDown, .modifierUp],
+                [.press, .chord, .press, .release]
+            ),
+        ] as [([ModifierGesture.Event], [ModifierGesture.Output])])
+        func modifierGestureSeparatesChordsFromPresses(
+            events: [ModifierGesture.Event], expected: [ModifierGesture.Output]
+        ) {
+            var gesture = ModifierGesture()
+            #expect(events.compactMap { gesture.handle($0) } == expected)
         }
 
         @Test @MainActor func carbonHotkeyIgnoresRepeatAndUnmatchedRelease() {

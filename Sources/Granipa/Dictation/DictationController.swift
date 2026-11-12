@@ -85,6 +85,15 @@ final class DictationController {
         }
     }
 
+    /// The held dictation modifier turned out to be part of a shortcut (Right ⌘+C):
+    /// drop the session that press started instead of latching it open.
+    func handleChord() {
+        guard pressEventTimestamp != nil, !isToggle,
+            phase == .preparing || phase == .listening
+        else { return }
+        cancel()
+    }
+
     func toggleFromMenu() {
         if phase.isActive {
             Task { await stop() }

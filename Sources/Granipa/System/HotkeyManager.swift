@@ -58,6 +58,35 @@ enum HotkeyBinding {
     }
 }
 
+/// Press/chord/release for a modifier-only key. A non-modifier key going down
+/// while it is held means the user typed a shortcut (Right ⌘+C, ⌥+e), so that
+/// press is a chord: reported once, and its release is swallowed.
+struct ModifierGesture: Equatable {
+    enum Event { case modifierDown, modifierUp, otherKeyDown }
+    enum Output: Equatable { case press, release, chord }
+
+    private(set) var held = false
+    private var chorded = false
+
+    mutating func handle(_ event: Event) -> Output? {
+        switch event {
+        case .modifierDown:
+            guard !held else { return nil }
+            held = true
+            chorded = false
+            return .press
+        case .otherKeyDown:
+            guard held, !chorded else { return nil }
+            chorded = true
+            return .chord
+        case .modifierUp:
+            guard held else { return nil }
+            held = false
+            return chorded ? nil : .release
+        }
+    }
+}
+
 // Carbon hotkeys need no Accessibility permission. Modifier-only holds (the
 // default Right Option dictation key) cannot use Carbon; they use NSEvent
 // flagsChanged, which needs Accessibility to see keys in other apps.
@@ -68,6 +97,7 @@ final class HotkeyManager: @unchecked Sendable {
     private struct Handler {
         var onPress: @MainActor (TimeInterval) -> Void
         var onRelease: (@MainActor (TimeInterval) -> Void)?
+        var onChord: (@MainActor () -> Void)?
     }
 
     private struct ModifierSpec {
@@ -77,7 +107,7 @@ final class HotkeyManager: @unchecked Sendable {
     private var handlers: [UInt32: Handler] = [:]
     private var hotkeyRefs: [UInt32: EventHotKeyRef] = [:]
     private var modifierSpecs: [UInt32: ModifierSpec] = [:]
-    private var modifierDown: [UInt32: Bool] = [:]
+    private var modifierGestures: [UInt32: ModifierGesture] = [:]
     private var keyDown: [UInt32: Bool] = [:]
     private var eventHandler: EventHandlerRef?
     private var localMonitor: Any?
@@ -99,13 +129,14 @@ final class HotkeyManager: @unchecked Sendable {
         keyCode: UInt32,
         modifiers: UInt32,
         onPress: @escaping @MainActor (TimeInterval) -> Void,
-        onRelease: (@MainActor (TimeInterval) -> Void)?
+        onRelease: (@MainActor (TimeInterval) -> Void)?,
+        onChord: (@MainActor () -> Void)? = nil
     ) {
         unregister(id: id)
-        handlers[id] = Handler(onPress: onPress, onRelease: onRelease)
+        handlers[id] = Handler(onPress: onPress, onRelease: onRelease, onChord: onChord)
         if HotkeyBinding.isModifierOnly(keyCode: keyCode, modifiers: modifiers) {
             modifierSpecs[id] = ModifierSpec(keyCode: keyCode)
-            modifierDown[id] = false
+            modifierGestures[id] = ModifierGesture()
             refreshModifierMonitors()
             return
         }
@@ -133,7 +164,7 @@ final class HotkeyManager: @unchecked Sendable {
             UnregisterEventHotKey(ref)
         }
         let hadModifier = modifierSpecs.removeValue(forKey: id) != nil
-        modifierDown.removeValue(forKey: id)
+        modifierGestures.removeValue(forKey: id)
         keyDown.removeValue(forKey: id)
         handlers.removeValue(forKey: id)
         if hadModifier && !testBound {
@@ -151,11 +182,14 @@ final class HotkeyManager: @unchecked Sendable {
             self.globalMonitor = nil
         }
         guard !modifierSpecs.isEmpty else { return }
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+        // keyDown only marks a held modifier as part of a chord; it is never consumed.
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .keyDown]) {
+            [weak self] event in
             self?.handleModifierEvent(event)
             return event
         }
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.flagsChanged, .keyDown]) {
+            [weak self] event in
             self?.handleModifierEvent(event)
         }
         if globalMonitor == nil {
@@ -165,27 +199,37 @@ final class HotkeyManager: @unchecked Sendable {
 
     private func handleModifierEvent(_ event: NSEvent) {
         let code = UInt32(event.keyCode)
-        let down = HotkeyBinding.eventReportsModifierDown(
-            keyCode: code, flags: event.modifierFlags)
+        let gestureEvent: ModifierGesture.Event =
+            if event.type == .keyDown {
+                .otherKeyDown
+            } else if HotkeyBinding.eventReportsModifierDown(
+                keyCode: code, flags: event.modifierFlags)
+            {
+                .modifierDown
+            } else {
+                .modifierUp
+            }
         // Hardware time, captured before the MainActor hop so overlay/UI
         // stalls cannot turn a tap into a hold.
         let timestamp = event.timestamp
         Task { @MainActor in
-            self.dispatchModifier(code: code, down: down, timestamp: timestamp)
+            self.dispatchModifier(code: code, event: gestureEvent, timestamp: timestamp)
         }
     }
 
     @MainActor
-    private func dispatchModifier(code: UInt32, down: Bool, timestamp: TimeInterval) {
-        for (id, spec) in modifierSpecs where spec.keyCode == code {
-            let was = modifierDown[id] ?? false
-            guard down != was else { continue }
-            modifierDown[id] = down
-            guard let handler = handlers[id] else { continue }
-            if down {
-                handler.onPress(timestamp)
-            } else {
-                handler.onRelease?(timestamp)
+    private func dispatchModifier(
+        code: UInt32, event: ModifierGesture.Event, timestamp: TimeInterval
+    ) {
+        for (id, spec) in modifierSpecs where event == .otherKeyDown || spec.keyCode == code {
+            var gesture = modifierGestures[id] ?? ModifierGesture()
+            let output = gesture.handle(event)
+            modifierGestures[id] = gesture
+            guard let output, let handler = handlers[id] else { continue }
+            switch output {
+            case .press: handler.onPress(timestamp)
+            case .release: handler.onRelease?(timestamp)
+            case .chord: handler.onChord?()
             }
         }
     }
@@ -252,14 +296,15 @@ final class HotkeyManager: @unchecked Sendable {
             keyCode: UInt32,
             modifiers: UInt32,
             onPress: @escaping @MainActor (TimeInterval) -> Void,
-            onRelease: (@MainActor (TimeInterval) -> Void)?
+            onRelease: (@MainActor (TimeInterval) -> Void)?,
+            onChord: (@MainActor () -> Void)? = nil
         ) {
             unregister(id: id)
-            handlers[id] = Handler(onPress: onPress, onRelease: onRelease)
+            handlers[id] = Handler(onPress: onPress, onRelease: onRelease, onChord: onChord)
             testBoundIDs.insert(id)
             if HotkeyBinding.isModifierOnly(keyCode: keyCode, modifiers: modifiers) {
                 modifierSpecs[id] = ModifierSpec(keyCode: keyCode)
-                modifierDown[id] = false
+                modifierGestures[id] = ModifierGesture()
                 return
             }
             keyDown[id] = false
