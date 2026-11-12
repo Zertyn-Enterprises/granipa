@@ -22,6 +22,7 @@ final class DictationController {
     var onCommitted: (@MainActor (String, TimeInterval, String?) -> Void)?
 
     private var pressStartedAt: Date?
+    private var stoppedAt: Date?
     private var pressEventTimestamp: TimeInterval?
     private var sourceApp: String?
     private var sessionGeneration = 0
@@ -130,6 +131,7 @@ final class DictationController {
         }
         hideTask?.cancel()
         pressStartedAt = .now
+        stoppedAt = nil
         if latched { pressEventTimestamp = nil }
         isToggle = latched
         isRewriting = false
@@ -369,6 +371,7 @@ final class DictationController {
             return
         }
         phase = .processing
+        stoppedAt = .now
         let generation = sessionGeneration
         if presentsChrome {
             DictationOverlayController.shared.setClickThrough(true)
@@ -396,6 +399,8 @@ final class DictationController {
             return
         }
         preview = trimmed
+        // Speaking time only: the rewrite's network time is not part of the dictation.
+        let duration = (stoppedAt ?? .now).timeIntervalSince(pressStartedAt ?? .now)
         let rewritten = await rewriteIfNeeded(trimmed)
         // Esc during the rewrite cancelled the session: nothing to paste.
         guard generation == sessionGeneration else { return }
@@ -405,7 +410,6 @@ final class DictationController {
         }
         preview = rewritten
         phase = .done
-        let duration = Date.now.timeIntervalSince(pressStartedAt ?? .now)
         onCommitted?(rewritten, duration, sourceApp)
         isRewriting = false
         DictationOverlayController.shared.setClickThrough(true)
