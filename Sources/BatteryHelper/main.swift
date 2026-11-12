@@ -124,6 +124,15 @@ final class ListenerDelegate: NSObject, NSXPCListenerDelegate {
     }
 }
 
+// HelperSMCParam is a copy of the app's SMCParamStruct; if its layout drifts
+// from the kernel ABI, stop before any SMC write rather than send garbage.
+precondition(
+    MemoryLayout<HelperSMCParam>.stride == 80
+        && MemoryLayout<HelperSMCParam>.offset(of: \.dataSize) == 28
+        && MemoryLayout<HelperSMCParam>.offset(of: \.result) == 40
+        && MemoryLayout<HelperSMCParam>.offset(of: \.data8) == 42
+        && MemoryLayout<HelperSMCParam>.offset(of: \.b0) == 48,
+    "HelperSMCParam does not match the 80-byte AppleSMC parameter layout")
 log.info("listening stride=\(MemoryLayout<HelperSMCParam>.stride, privacy: .public)")
 let delegate = ListenerDelegate()
 let listener = NSXPCListener(machServiceName: batteryHelperMachName)
