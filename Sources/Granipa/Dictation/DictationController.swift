@@ -23,6 +23,7 @@ final class DictationController {
 
     private var pressStartedAt: Date?
     private var stoppedAt: Date?
+    private var pasteTarget: pid_t?
     private var pressEventTimestamp: TimeInterval?
     private var sourceApp: String?
     private var sessionGeneration = 0
@@ -372,6 +373,7 @@ final class DictationController {
         }
         phase = .processing
         stoppedAt = .now
+        pasteTarget = NSWorkspace.shared.frontmostApplication?.processIdentifier
         let generation = sessionGeneration
         if presentsChrome {
             DictationOverlayController.shared.setClickThrough(true)
@@ -401,12 +403,15 @@ final class DictationController {
         preview = trimmed
         // Speaking time only: the rewrite's network time is not part of the dictation.
         let duration = (stoppedAt ?? .now).timeIntervalSince(pressStartedAt ?? .now)
+        let target =
+            stoppedAt == nil
+            ? NSWorkspace.shared.frontmostApplication?.processIdentifier : pasteTarget
         let rewritten = await rewriteIfNeeded(trimmed)
         // Esc during the rewrite cancelled the session: nothing to paste.
         guard generation == sessionGeneration else { return }
         unregisterEscape()
         if shouldPaste {
-            paste(rewritten)
+            paste(rewritten, into: target)
         }
         preview = rewritten
         phase = .done
@@ -433,18 +438,23 @@ final class DictationController {
         }
     }
 
-    private func paste(_ text: String) {
+    /// Auto-pastes only into the app that was frontmost when dictation stopped;
+    /// the rewrite can take seconds, and the user may have switched apps meanwhile.
+    private func paste(_ text: String, into target: pid_t?) {
+        let autoPaste = UserDefaults.standard.object(forKey: "dictationAutoPaste") as? Bool ?? true
+        let sameApp = NSWorkspace.shared.frontmostApplication?.processIdentifier == target
+        if autoPaste, sameApp, PasteService.pastePreservingClipboard(text) {
+            return
+        }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
-        let autoPaste = UserDefaults.standard.object(forKey: "dictationAutoPaste") as? Bool ?? true
-        if autoPaste {
-            if PasteService.pasteToFrontmostApp() {
-                return
-            }
+        if !autoPaste {
+            ToastController.shared.show("Copied")
+        } else if !sameApp {
+            ToastController.shared.show("Copied — app changed, press ⌘V to paste", style: .warning)
+        } else {
             ToastController.shared.show(
                 "Copied — grant Accessibility to auto-paste", style: .warning)
-        } else {
-            ToastController.shared.show("Copied")
         }
     }
 
