@@ -40,8 +40,10 @@ struct HTTPRequest: Sendable {
             path = String(target[target.startIndex..<questionMark])
             let queryString = String(target[target.index(after: questionMark)...])
             for pair in queryString.split(separator: "&") {
-                let kv = pair.split(separator: "=", maxSplits: 1)
-                guard let key = String(kv[0]).removingPercentEncoding else { continue }
+                let kv = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+                guard !kv[0].isEmpty, let key = String(kv[0]).removingPercentEncoding else {
+                    continue
+                }
                 let value = kv.count == 2 ? (String(kv[1]).removingPercentEncoding ?? "") : ""
                 query[key] = value
             }
