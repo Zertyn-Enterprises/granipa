@@ -51,6 +51,12 @@ struct MenuBarView: View {
                     systemImage: app.recorder.isStarting ? "xmark.circle" : "stop.circle")
             }
             if app.recorder.isRecording {
+                if let warning = app.recorder.micWarning {
+                    Label(warning, systemImage: "mic.slash")
+                }
+                if let warning = app.recorder.systemAudioWarning {
+                    Label(warning, systemImage: "exclamationmark.triangle.fill")
+                }
                 Button {
                     openWindow(id: "recording-hud")
                 } label: {

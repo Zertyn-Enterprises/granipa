@@ -1,14 +1,6 @@
 import Foundation
 import Observation
 
-enum SystemTapRetryPolicy {
-    static let maxAttempts = 1
-
-    static func shouldRetry(bufferCount: Int, attempts: Int) -> Bool {
-        bufferCount == 0 && attempts < maxAttempts
-    }
-}
-
 @MainActor
 @Observable
 final class RecordingEngine {
@@ -28,6 +20,12 @@ final class RecordingEngine {
     @ObservationIgnored private var channelWatchTask: Task<Void, Never>?
 
     var isBusy: Bool { isRecording || isStarting }
+
+    /// Both capture warnings in one string, for surfaces with room for one.
+    var captureWarningText: String? {
+        let text = [micWarning, systemAudioWarning].compactMap { $0 }.joined(separator: "\n")
+        return text.isEmpty ? nil : text
+    }
 
     func start(meetingID: String) async throws -> RecordingSession {
         guard !isRecording, !isStarting else {
@@ -62,11 +60,9 @@ final class RecordingEngine {
                 self.meetingID = nil
             }
         }
-        // Voice processing AEC on the input node pegs a core and hangs Record
-        // (pid 25501: 134% CPU, 8 hangs) even with live ASR off. Capture without it.
         await Task.yield()
         try Task.checkCancellation()
-        try session.startMic(echoCancellation: false)
+        try session.startMic()
         try Task.checkCancellation()
         // Process-tap + aggregate device creation blocks for seconds on some
         // machines; never do it on the main actor (Record → Not Responding).
@@ -74,96 +70,55 @@ final class RecordingEngine {
         try Task.checkCancellation()
         guard startingSession === session else { throw CancellationError() }
         session.installListeners()
-        if session.systemAudioError != nil {
-            systemAudioWarning =
-                "System audio capture failed - only your microphone is being recorded. "
-                + "Check System Settings > Privacy & Security > Screen & System Audio Recording."
-        } else {
-            systemAudioWarning = nil
-        }
+        systemAudioWarning = session.systemTapFailed ? SystemAudioIssue.startFailedMessage : nil
         self.session = session
         startingSession = nil
         self.startedAt = .now
         self.isRecording = true
-        watchForDeadChannels(session: session, echoCancellationWasOn: false)
+        watchForDeadChannels(session: session)
         return session
     }
 
-    private func watchForDeadChannels(session: RecordingSession, echoCancellationWasOn: Bool) {
+    private func watchForDeadChannels(session: RecordingSession) {
         channelWatchTask?.cancel()
         channelWatchTask = Task { [weak self, weak session] in
-            try? await Task.sleep(for: .seconds(3))
-            guard let self, let session, self.session === session, self.isRecording else { return }
-            if session.micBufferCount == 0, echoCancellationWasOn {
-                session.restartMic(recreateFile: true)
-                micWarning = "Echo cancellation isn't working on this setup — continuing without it."
-            }
-
-            var tapRestarts = 0
-            var micRestarts = 0
-            var lastMicCount = 0
-            var micStallTicks = 0
+            guard let self, let session else { return }
+            var mic = MicHealthWatch()
+            var system = SystemHealthWatch()
             while !Task.isCancelled, self.session === session, self.isRecording {
                 try? await Task.sleep(for: .seconds(5))
                 guard self.session === session, self.isRecording else { return }
-
-                // The mic tap delivers buffers continuously even during silence, so a
-                // flat count means the route genuinely died. The system tap only flows
-                // while audio plays, so a flat system count is valid silence.
-                let micCount = session.micBufferCount
-                if micCount == 0 {
-                    micWarning =
-                        "No microphone audio is arriving. Check System Settings > Privacy & "
-                        + "Security > Microphone, then stop and start a new recording."
-                } else {
-                    micStallTicks = micCount == lastMicCount ? micStallTicks + 1 : 0
-                    if micStallTicks >= 2 {
-                        if micRestarts < 8 {
-                            // Recreate the file only when it stalled early enough that
-                            // nothing usable was captured; otherwise keep prior audio.
-                            session.restartMic(recreateFile: micCount < 100)
-                            micRestarts += 1
-                            micStallTicks = 0
-                            micWarning =
-                                "Microphone audio stalled — restarted capture without echo "
-                                + "cancellation."
-                        } else {
-                            micWarning =
-                                "Microphone audio stopped and couldn't be recovered. Stop and "
-                                + "start a new recording."
-                        }
-                    } else if session.micNonSilentCount == 0, micCount > 200 {
-                        micWarning =
-                            "Microphone is recording but completely silent — check the input "
-                            + "device and that the mic isn't muted, then start a new recording."
-                    } else if session.micNonSilentCount > 0 {
-                        micWarning = nil
-                    }
-                }
-                lastMicCount = micCount
-
-                let systemCount = session.systemBufferCount
-                if SystemTapRetryPolicy.shouldRetry(
-                    bufferCount: systemCount, attempts: tapRestarts)
-                {
-                    // One bounded retry recovers a grant completed during startup
-                    // without recreating a silent system tap indefinitely.
-                    session.restartSystemTap()
-                    tapRestarts += 1
-                    systemAudioWarning =
-                        "No system audio captured yet — it only flows while sound is playing. "
-                        + "Grant Screen & System Audio Recording permission, then stop and start "
-                        + "a new recording."
-                } else if session.systemNonSilentCount == 0, systemCount > 200 {
-                    systemAudioWarning =
-                        "System audio is arriving but completely silent — macOS may have denied "
-                        + "the permission. Check System Settings > Privacy & Security > Screen & "
-                        + "System Audio Recording, then stop and start a new recording."
-                } else if session.systemNonSilentCount > 0 {
-                    systemAudioWarning = nil
-                }
+                checkMic(session, &mic)
+                checkSystem(session, &system)
             }
         }
+    }
+
+    private func checkMic(_ session: RecordingSession, _ watch: inout MicHealthWatch) {
+        let verdict = watch.tick(
+            ChannelSample(
+                buffers: session.micBufferCount, nonSilent: session.micNonSilentCount,
+                framesWritten: session.micFramesWritten, startFailed: session.micStartFailed))
+        if let recreateFile = verdict.restartRecreatingFile {
+            session.restartMic(recreateFile: recreateFile)
+        }
+        switch verdict.warning {
+        case .keep: break
+        case .clear: micWarning = nil
+        case .show(let issue): micWarning = issue.message
+        }
+    }
+
+    private func checkSystem(_ session: RecordingSession, _ watch: inout SystemHealthWatch) {
+        let verdict = watch.tick(
+            ChannelSample(
+                buffers: session.systemBufferCount, nonSilent: session.systemNonSilentCount,
+                framesWritten: session.systemFramesWritten, startFailed: session.systemTapFailed),
+            elapsed: startedAt.map { Date.now.timeIntervalSince($0) } ?? 0)
+        if verdict.restartTap {
+            session.restartSystemTap()
+        }
+        systemAudioWarning = verdict.issue?.message
     }
 
     func stop() async -> (micURL: URL, systemURL: URL)? {

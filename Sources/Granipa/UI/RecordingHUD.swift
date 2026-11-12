@@ -70,9 +70,25 @@ struct RecordingHUD: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(transcriptionFailed ? .orange : Theme.textPrimary)
             }
+            if let warning = app.recorder.captureWarningText {
+                Button {
+                    compact = false
+                } label: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.statusFailed)
+                }
+                .buttonStyle(.plain)
+                .help(warning)
+                .accessibilityLabel("Recording problem: \(warning)")
+                .accessibilityHint("Expands the recording window")
+            }
             HStack(spacing: 6) {
-                ActivityDot(level: app.recorder.micLevel)
-                ActivityDot(level: app.recorder.systemLevel)
+                ActivityDot(
+                    level: app.recorder.micLevel, hasWarning: app.recorder.micWarning != nil)
+                ActivityDot(
+                    level: app.recorder.systemLevel,
+                    hasWarning: app.recorder.systemAudioWarning != nil)
             }
             Button {
                 Task { await app.stopRecording() }
@@ -139,7 +155,10 @@ struct RecordingHUD: View {
                 .controlSize(.large)
                 .tint(.red)
             }
-            if let warning = app.recorder.micWarning ?? app.recorder.systemAudioWarning {
+            if let warning = app.recorder.micWarning {
+                AudioWarningLabel(text: warning, icon: "mic.slash")
+            }
+            if let warning = app.recorder.systemAudioWarning {
                 AudioWarningLabel(text: warning)
             }
             if let warning = app.transcription?.systemWarning {
@@ -183,13 +202,16 @@ struct RecordingHUD: View {
     }
 }
 
+// A channel with a warning shows the failure colour at full strength, so a
+// dead channel never looks like a quiet one.
 private struct ActivityDot: View {
     let level: Float
+    let hasWarning: Bool
 
     var body: some View {
         Circle()
-            .fill(Theme.statusDone)
+            .fill(hasWarning ? Theme.statusFailed : Theme.statusDone)
             .frame(width: 5, height: 5)
-            .opacity(0.25 + Double(min(level * 6, 0.75)))
+            .opacity(hasWarning ? 1 : 0.25 + Double(min(level * 6, 0.75)))
     }
 }

@@ -128,6 +128,29 @@ import Testing
         #expect(Double(audio.frameLength) / format.sampleRate > 0.8)
         #expect(rms(audio, seconds: 0.2..<0.8) > 0.2)
     }
+
+    /// Regression: after the system tap was rebuilt at another sample rate,
+    /// its buffers went into the file unconverted; AVAudioFile accepted them
+    /// and the timeline shrank (1 s at 24 kHz became 0.5 s in a 48 kHz file).
+    @Test func systemBufferAtNewSampleRateKeepsFileTimeEqualToMeetingTime() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mic-continuity-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let session = makeSession(directory: directory)
+
+        session.ingestSystemBufferForTesting(
+            tone(sampleRate: 48_000, channels: 2, seconds: 0.5, amplitude: 0.5), startSeconds: 0)
+        session.ingestSystemBufferForTesting(
+            tone(sampleRate: 24_000, channels: 2, seconds: 1, amplitude: 0.4), startSeconds: 0.5)
+        await session.stop()
+
+        let (audio, format) = try readMicAudio(from: session.systemURL)
+        #expect(format.sampleRate == 48_000)
+        let duration = Double(audio.frameLength) / format.sampleRate
+        #expect(duration > 1.4 && duration < 1.7)
+        #expect(rms(audio, seconds: 1.0..<1.4) > 0.2)
+    }
 #endif
 
     /// The one piece of the fix a hardware-free test cannot drive is the

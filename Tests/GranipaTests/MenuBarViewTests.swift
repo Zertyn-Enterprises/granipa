@@ -11,6 +11,11 @@ import Testing
                 == .recording)
         #expect(
             MenuBarStatus.resolve(
+                recorderBusy: true, captureWarning: true, dictationActive: false,
+                processingNotes: false)
+                == .recordingWithWarning)
+        #expect(
+            MenuBarStatus.resolve(
                 recorderBusy: false, dictationActive: true, processingNotes: true)
                 == .dictating)
         #expect(
