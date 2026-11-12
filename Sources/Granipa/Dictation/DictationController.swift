@@ -257,12 +257,9 @@ final class DictationController {
         chunkContinuation = continuation
         do {
             let recorder = MicRecorder()
-            let echo = meetingIsRecording
-                ? (UserDefaults.standard.object(forKey: "echoCancellation") as? Bool ?? true)
-                : false
             let gate = waveformGate
             let heartbeat = micHeartbeat
-            try recorder.start(echoCancellation: echo) { [weak self] buffer, _ in
+            try recorder.start(echoCancellation: false) { [weak self] buffer, _ in
                 heartbeat.withLock { $0 = .now }
                 let level = buffer.rmsLevel
                 if gate.shouldPublish(.mic) {
