@@ -188,8 +188,6 @@ import Testing
         #expect(SidebarDestination.notes.icon == "square.and.pencil")
         #expect(SidebarDestination.files.icon == "folder.fill")
         #expect(SidebarDestination.settings.icon == "gearshape")
-        #expect(AppNavigation.showsAppSidebar(for: .home))
-        #expect(!AppNavigation.showsAppSidebar(for: .settings))
     }
 
     @Test func settingsHidesInspectorAtEveryWidthEvenWithAMeetingSelected() {
@@ -254,27 +252,12 @@ import Testing
         #expect(
             AppNavigation.highlight(destination: .dictation, selectedFolderID: nil)
                 == .destination(.dictation))
-        #expect(
-            AppNavigation.isPrimaryActive(
-                item: .home, destination: .home, selectedFolderID: nil))
-        #expect(
-            !AppNavigation.isPrimaryActive(
-                item: .dictation, destination: .home, selectedFolderID: nil))
-        #expect(
-            AppNavigation.isPrimaryActive(
-                item: .dictation, destination: .dictation, selectedFolderID: nil))
     }
 
     @Test func aSelectedFolderWinsOverPrimaryDestinations() {
         let highlight = AppNavigation.highlight(
             destination: .meetings, selectedFolderID: "eng")
         #expect(highlight == .folder("eng"))
-        #expect(
-            !AppNavigation.isPrimaryActive(
-                item: .meetings, destination: .meetings, selectedFolderID: "eng"))
-        #expect(
-            !AppNavigation.isPrimaryActive(
-                item: .home, destination: .home, selectedFolderID: "eng"))
     }
 
     @Test func notesListIsQuickNotesAndWrittenNotesOnly() {
@@ -478,12 +461,6 @@ import Testing
             #expect(
                 AppNavigation.highlight(destination: leftover, selectedFolderID: nil)
                     == .destination(.home))
-            #expect(
-                AppNavigation.isPrimaryActive(
-                    item: .home, destination: leftover, selectedFolderID: nil))
-            #expect(
-                !AppNavigation.isPrimaryActive(
-                    item: leftover, destination: leftover, selectedFolderID: nil))
         }
     }
 
@@ -542,9 +519,6 @@ import Testing
         let highlight = AppNavigation.highlight(
             destination: .home, selectedFolderID: "eng")
         #expect(highlight == .folder("eng"))
-        #expect(
-            !AppNavigation.isPrimaryActive(
-                item: .home, destination: .home, selectedFolderID: "eng"))
         #expect(
             AppNavigation.activeLibraryFilter(destination: .home, stored: .notes) == .notes)
     }

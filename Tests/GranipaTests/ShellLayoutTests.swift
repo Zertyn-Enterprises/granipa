@@ -24,48 +24,48 @@ import Testing
                 == true)
         #expect(
             ShellLayout.presentation(
-                windowWidth: ShellLayout.defaultWindowWidth, userExpanded: nil, hasContent: true)
+                windowWidth: ShellLayout.defaultWindowWidth, userExpanded: nil, kind: .meeting)
                 == .column)
     }
 
     @Test func compactWidthsKeepInspectorCollapsed() {
         #expect(
-            ShellLayout.presentation(windowWidth: 1120, userExpanded: nil, hasContent: true)
+            ShellLayout.presentation(windowWidth: 1120, userExpanded: nil, kind: .meeting)
                 == .hidden)
         #expect(
-            ShellLayout.presentation(windowWidth: 1279, userExpanded: nil, hasContent: true)
+            ShellLayout.presentation(windowWidth: 1279, userExpanded: nil, kind: .meeting)
                 == .hidden)
         #expect(ShellLayout.defaultInspectorExpanded(windowWidth: 1120) == false)
     }
 
     @Test func wideDefaultShowsColumnWhenContentExists() {
         #expect(
-            ShellLayout.presentation(windowWidth: 1280, userExpanded: nil, hasContent: true)
+            ShellLayout.presentation(windowWidth: 1280, userExpanded: nil, kind: .meeting)
                 == .column)
         #expect(
-            ShellLayout.presentation(windowWidth: 1440, userExpanded: nil, hasContent: true)
+            ShellLayout.presentation(windowWidth: 1440, userExpanded: nil, kind: .meeting)
                 == .column)
         #expect(ShellLayout.defaultInspectorExpanded(windowWidth: 1280) == true)
     }
 
     @Test func toolbarOverrideDoesNotDuplicateBreakpointState() {
         #expect(
-            ShellLayout.presentation(windowWidth: 1120, userExpanded: true, hasContent: true)
+            ShellLayout.presentation(windowWidth: 1120, userExpanded: true, kind: .meeting)
                 == .overlay)
         #expect(
-            ShellLayout.presentation(windowWidth: 1280, userExpanded: false, hasContent: true)
+            ShellLayout.presentation(windowWidth: 1280, userExpanded: false, kind: .meeting)
                 == .hidden)
         #expect(
-            ShellLayout.presentation(windowWidth: 1280, userExpanded: true, hasContent: true)
+            ShellLayout.presentation(windowWidth: 1280, userExpanded: true, kind: .meeting)
                 == .column)
     }
 
     @Test func missingContentHidesInspectorEvenWhenExpanded() {
         #expect(
-            ShellLayout.presentation(windowWidth: 1440, userExpanded: true, hasContent: false)
+            ShellLayout.presentation(windowWidth: 1440, userExpanded: true, kind: .none)
                 == .hidden)
         #expect(
-            ShellLayout.presentation(windowWidth: 1120, userExpanded: true, hasContent: false)
+            ShellLayout.presentation(windowWidth: 1120, userExpanded: true, kind: .none)
                 == .hidden)
     }
 
