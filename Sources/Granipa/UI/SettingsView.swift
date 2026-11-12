@@ -458,7 +458,7 @@ private struct GeneralSettings: View {
             }
             Toggle("Live transcription during meetings", isOn: $liveMeetingASR)
                 .onChange(of: liveMeetingASR) { syncLiveCaptionsOverlay() }
-            Text("Streams speech while you record. Off by default — meetings still transcribe after you stop.")
+            Text("Streams speech while you record. Uses significant CPU and applies from the next recording. Off by default — meetings still transcribe after you stop.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Toggle("Live captions during meetings", isOn: $meetingCaptions)
@@ -501,6 +501,12 @@ private struct GeneralSettings: View {
                 Text("Do nothing").tag("off")
                 Text("Ask to stop recording").tag("ask")
                 Text("Stop recording automatically").tag("auto")
+            }
+            .disabled(!meetingDetection)
+            if !meetingDetection {
+                Text("Needs meeting detection: without it Grañipa cannot tell when the meeting app hangs up.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             Picker("Keep meeting audio files", selection: $audioRetentionDays) {
                 Text("Forever").tag(0)
@@ -602,7 +608,7 @@ private struct DictationSettings: View {
                     Text("Option + Space").tag("optionSpace")
                 }
                 .onChange(of: shortcut) { applyShortcut(); app.registerDictationHotkey() }
-                Text("Hold to talk, release to paste. A quick tap toggles; press again to stop. Esc cancels only while you hold, not in toggle. Right Option and Right Command need Accessibility (same grant as auto-paste) so they work in other apps. Option+Space uses a Carbon hotkey and does not.")
+                Text("Hold to talk, release to paste. A quick tap toggles; press again to stop. Esc cancels the dictation in progress, held or toggled. Right Option and Right Command need Accessibility (same grant as auto-paste) so they work in other apps. Option+Space uses a Carbon hotkey and does not.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Text("Every dictation is saved locally. Open history from the sidebar, the menu bar, or the shortcut in Settings → Shortcuts — stats (WPM, words, apps, time saved) live at the top.")
@@ -698,6 +704,15 @@ private struct DictationSettings: View {
                     Button("Save endpoint key") {
                         drafts.customKeySaved = KeychainStore.set(
                             drafts.customKey, account: KeychainStore.rewriteCustomKeyAccount)
+                    }
+                    if drafts.customKeySaved == false {
+                        Text("Could not save the key in Keychain.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    } else if drafts.customKeySaved == true {
+                        Text("Saved in Keychain.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                     Text("OpenAI-compatible /v1/chat/completions. Example: Ollama or llama.cpp on your Mac Mini (http://192.168.x.x:11434/v1), or a VPS.")
                         .font(.caption)
@@ -879,7 +894,7 @@ private struct ProductivitySettings: View {
                 Text("Sends ⌘V to the active app. Needs Accessibility permission.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text("Keeps the last 500 items locally. Password-manager entries are never captured.")
+                Text("Keeps the last 500 items locally. Skips only items the source app marks as concealed or transient — check that your password manager sets that flag.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button("Clear history", role: .destructive) {
