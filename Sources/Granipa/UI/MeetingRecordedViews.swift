@@ -70,12 +70,17 @@ enum OverviewPresentation {
         return .fullProgress(busy)
     }
 
-    static func enhanceDisabled(
+    /// Why both enhance buttons are disabled (their help text); nil when
+    /// enhancing can run.
+    static func enhanceDisabledReason(
         isEnhancing: Bool,
         isProcessing: Bool,
         isRecordingThisMeeting: Bool
-    ) -> Bool {
-        isEnhancing || isProcessing || isRecordingThisMeeting
+    ) -> String? {
+        if isRecordingThisMeeting { return "Available once the recording stops." }
+        if isEnhancing { return "Notes are being written." }
+        if isProcessing { return "Available once processing finishes — it writes the notes itself." }
+        return nil
     }
 }
 
@@ -176,10 +181,16 @@ struct MeetingOverviewView: View {
         }
     }
 
+    /// The pipeline's current step names the work better than the generic title.
+    private func title(_ busy: OverviewPresentation.Busy) -> String {
+        busy == .processing
+            ? app.processingStage(for: meeting.id)?.title ?? busy.title : busy.title
+    }
+
     private func fullProgress(_ busy: OverviewPresentation.Busy) -> some View {
         VStack(spacing: 10) {
             ProgressView()
-            Text(busy.title)
+            Text(title(busy))
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(Theme.textSecondary)
             Text(busy.detail)
@@ -212,13 +223,13 @@ struct MeetingOverviewView: View {
         HStack(alignment: .center, spacing: 8) {
             ProgressView()
                 .controlSize(.small)
-            Text(busy.title)
+            Text(title(busy))
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(Theme.textSecondary)
             Spacer(minLength: 0)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(busy.title)
+        .accessibilityLabel(title(busy))
     }
 
     @ViewBuilder
@@ -347,21 +358,20 @@ struct MeetingOverviewView: View {
     }
 
     private func enhanceButton(title: String) -> some View {
-        Button {
-            Task { await app.enhance(meetingID: meeting.id) }
+        let blocked = OverviewPresentation.enhanceDisabledReason(
+            isEnhancing: isEnhancing,
+            isProcessing: isProcessing,
+            isRecordingThisMeeting: app.recorder.meetingID == meeting.id)
+        return Button {
+            Task { await app.enhanceNow(meetingID: meeting.id) }
         } label: {
             Label(title, systemImage: "wand.and.stars")
                 .font(.system(size: 12, weight: .medium))
         }
         .granipaSecondaryControl()
         .controlSize(.small)
-        .disabled(
-            OverviewPresentation.enhanceDisabled(
-                isEnhancing: isEnhancing,
-                isProcessing: isProcessing,
-                isRecordingThisMeeting: app.recorder.meetingID == meeting.id
-            )
-        )
+        .disabled(blocked != nil)
+        .help(blocked ?? "Write the summary and notes from the transcript and your notes")
         .accessibilityLabel(title == "Re-enhance" ? "Regenerate summary" : "Enhance now")
     }
 }
@@ -408,6 +418,7 @@ struct MeetingTranscriptView: View {
     let loadPhase: TranscriptLoadPhase
     let live: TranscriptionCoordinator?
     let isProcessing: Bool
+    let processingStage: MeetingProcessor.Stage?
     @Bindable var playback: MeetingPlaybackController
     @Binding var autoscroll: Bool
     @Binding var selectedID: String?
@@ -415,24 +426,17 @@ struct MeetingTranscriptView: View {
     @Binding var speakerFilter: String?
     let onRename: (String) -> Void
     let onRetry: () -> Void
+    /// Set when the saved audio can be transcribed again.
+    let onTranscribeAgain: (() -> Void)?
 
     @FocusState private var searchFocused: Bool
     @State private var talkReport: SpeakerTalkTime.Report?
+    @State private var rowsCache = TranscriptRowsCache()
+    @State private var currentIDs: Set<String> = []
+    @State private var pendingStart: TranscriptPendingStart?
 
     private var shown: [TranscriptSegment] {
         live.map(\.liveSegments) ?? segments
-    }
-
-    private var filtered: [TranscriptSegment] {
-        TranscriptQuery.filter(segments: shown, query: search, speaker: speakerFilter)
-    }
-
-    private var speakers: [String] {
-        TranscriptQuery.speakers(in: shown)
-    }
-
-    private var currentIDs: Set<String> {
-        Set(TranscriptQuery.containing(shown, at: playback.currentTime).map(\.id))
     }
 
     private var canPlay: Bool {
@@ -459,7 +463,7 @@ struct MeetingTranscriptView: View {
             } else if shown.isEmpty, live == nil, isProcessing {
                 VStack(spacing: 10) {
                     ProgressView()
-                    Text("Processing this recording…")
+                    Text(processingStage?.title ?? "Processing this recording…")
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(Theme.textSecondary)
                     Text("The transcript and AI notes appear when processing finishes.")
@@ -468,10 +472,18 @@ struct MeetingTranscriptView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if shown.isEmpty && live == nil {
-                EmptyStateView(
-                    icon: "text.quote",
-                    title: "No transcript",
-                    message: "The transcript will appear here once a recording exists.")
+                VStack(spacing: 14) {
+                    EmptyStateView(
+                        icon: "text.quote",
+                        title: "No transcript",
+                        message: onTranscribeAgain == nil
+                            ? "The transcript will appear here once a recording exists."
+                            : "The audio of this recording is saved, so it can be transcribed again.")
+                    if let onTranscribeAgain {
+                        Button("Transcribe again", action: onTranscribeAgain)
+                            .granipaSecondaryControl()
+                    }
+                }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 populated
@@ -488,10 +500,8 @@ struct MeetingTranscriptView: View {
     }
 
     private var populated: some View {
-        // One shared computation per render; per-tick reads below stay O(1).
-        let rows = filtered
-        let currentIDs = self.currentIDs
-        let speakerNames = speakers
+        let (rows, speakerNames) = rowsCache.rows(
+            for: shown, query: search, speaker: speakerFilter)
 
         return VStack(spacing: 0) {
             toolbar(speakers: speakerNames)
@@ -504,18 +514,8 @@ struct MeetingTranscriptView: View {
                                 segment: segment,
                                 isCurrent: currentIDs.contains(segment.id),
                                 isSelected: selectedID == segment.id,
-                                onPlay: canPlay
-                                    ? {
-                                        selectedID = segment.id
-                                        playback.seek(to: segment.startSeconds)
-                                        playback.play()
-                                    } : nil,
-                                onSelect: {
-                                    selectedID = segment.id
-                                    if canPlay {
-                                        playback.seek(to: segment.startSeconds)
-                                    }
-                                }
+                                onPlay: canPlay ? { start(segment, play: true) } : nil,
+                                onSelect: { start(segment, play: false) }
                             )
                             .id(segment.id)
                             .contextMenu {
@@ -531,13 +531,11 @@ struct MeetingTranscriptView: View {
                     .padding(.vertical, 18)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .onChange(of: playback.currentTime) {
-                    guard autoscroll else { return }
-                    if let id = TranscriptQuery.containing(rows, at: playback.currentTime)
-                        .first?.id
-                    {
-                        proxy.scrollTo(id, anchor: .center)
-                    }
+                .onChange(of: currentIDs) {
+                    guard autoscroll,
+                        let id = rows.first(where: { currentIDs.contains($0.id) })?.id
+                    else { return }
+                    proxy.scrollTo(id, anchor: .center)
                 }
                 .onChange(of: rows.count) {
                     guard autoscroll, let last = rows.last else { return }
@@ -552,7 +550,35 @@ struct MeetingTranscriptView: View {
                 .keyboardShortcut("f", modifiers: .command)
                 .hidden()
                 .accessibilityHidden(true)
+            TranscriptPlaybackCursor(playback: playback, rows: rows, currentIDs: $currentIDs)
         }
+        // loadedURL always changes once the other channel's file is open, even
+        // when the preparing state never reaches a render.
+        .onChange(of: playback.loadedURL) {
+            guard let pending = pendingStart else { return }
+            pendingStart = nil
+            guard playback.state == .ready else { return }
+            playback.seek(to: pending.seconds)
+            if pending.play { playback.play() }
+        }
+        .onChange(of: playback.state) { _, state in
+            if case .failed = state { pendingStart = nil }
+        }
+    }
+
+    /// Plays or cues a line from its own channel's file.
+    private func start(_ segment: TranscriptSegment, play: Bool) {
+        selectedID = segment.id
+        guard canPlay else { return }
+        if segment.channel != playback.channel,
+            playback.availableChannels.contains(segment.channel)
+        {
+            pendingStart = TranscriptPendingStart(seconds: segment.startSeconds, play: play)
+            playback.selectChannel(segment.channel)
+            return
+        }
+        playback.seek(to: segment.startSeconds)
+        if play { playback.play() }
     }
 
     private func toolbar(speakers: [String]) -> some View {
@@ -739,87 +765,5 @@ struct MeetingTranscriptView: View {
                 .granipaSecondaryControl()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
-
-struct SegmentRow: View {
-    let segment: TranscriptSegment
-    var isCurrent = false
-    var isSelected = false
-    var onPlay: (() -> Void)? = nil
-    var onSelect: (() -> Void)? = nil
-
-    private var speakerColor: Color {
-        if segment.channel == .mic { return Theme.channelMe }
-        if segment.speaker == "Them" { return Theme.accent }
-        return Theme.avatarColor(for: segment.speaker)
-    }
-
-    private var usesRecordedChrome: Bool {
-        onPlay != nil || onSelect != nil || isCurrent || isSelected
-    }
-
-    private var isActive: Bool { isCurrent || isSelected }
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            if let onPlay {
-                Button(action: onPlay) {
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(isActive ? Theme.textPrimary : Theme.textTertiary)
-                        .frame(width: 22, height: 22)
-                        .background(isActive ? Theme.accent : Theme.fillSubtle, in: Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(
-                    "Play from \(LiveStageFormat.elapsed(Int(segment.startSeconds)))")
-            }
-
-            Text(LiveStageFormat.elapsed(Int(segment.startSeconds.rounded(.down))))
-                .font(.system(size: 12, weight: .medium).monospacedDigit())
-                .foregroundStyle(isActive ? Theme.accent : Theme.textTertiary)
-                .frame(minWidth: 38, alignment: .leading)
-                .padding(.top, 3)
-
-            if usesRecordedChrome {
-                AvatarView(letterSource: segment.speaker, size: 22)
-                    .padding(.top, 1)
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(segment.speaker)
-                        .font(Theme.fontCaption.weight(.semibold))
-                        .foregroundStyle(speakerColor)
-                    Text(TranscriptSource.label(segment.channel))
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(Theme.textTertiary)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(Theme.fillSubtle, in: Capsule())
-                }
-                Text(segment.text)
-                    .font(.system(size: 14))
-                    .lineSpacing(4)
-                    .foregroundStyle(Theme.textPrimary)
-                    .multilineTextAlignment(.leading)
-                    .textSelection(.enabled)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            isActive ? Theme.accent.opacity(0.08) : Theme.card,
-            in: RoundedRectangle(cornerRadius: Theme.radiusM, style: .continuous))
-        .overlay {
-            if usesRecordedChrome {
-                RoundedRectangle(cornerRadius: Theme.radiusM, style: .continuous)
-                    .stroke(isActive ? Theme.accent : Theme.border, lineWidth: 1)
-            }
-        }
-        .contentShape(Rectangle())
-        .onTapGesture { onSelect?() }
     }
 }

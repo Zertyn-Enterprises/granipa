@@ -178,6 +178,7 @@ struct HomeView: View {
     @State private var searchResults: [Meeting] = []
     @State private var searchInFlight = false
     @State private var fileStatuses: [String: RecordingFileStatus] = [:]
+    @State private var deletingMeetingID: String?
 
     private var isSearching: Bool { MeetingLibrary.isSearching(app.searchQuery) }
 
@@ -320,6 +321,8 @@ struct HomeView: View {
             guard !Task.isCancelled else { return }
             fileStatuses = resolved
         }
+        .environment(\.requestMeetingDeletion) { deletingMeetingID = $0 }
+        .meetingDeletionConfirmation($deletingMeetingID)
     }
 
     private func selectFilter(_ filter: HomeLibraryFilter) {
@@ -519,6 +522,7 @@ private struct HomeMeetingRow: View {
 
 struct MeetingRowContextMenu: View {
     @Environment(AppState.self) private var app
+    @Environment(\.requestMeetingDeletion) private var requestDeletion
     let meeting: Meeting
 
     private var folder: Folder? { app.folder(for: meeting) }
@@ -545,8 +549,42 @@ struct MeetingRowContextMenu: View {
                 MeetingExporter.copyTranscript(meeting: meeting, database: db)
             }
         }
-        Button("Delete", role: .destructive) {
-            app.deleteMeeting(id: meeting.id)
+        if let requestDeletion {
+            Button("Delete", role: .destructive) {
+                requestDeletion(meeting.id)
+            }
+        }
+    }
+}
+
+extension EnvironmentValues {
+    /// Set by the library so a row's menu asks before deleting.
+    @Entry var requestMeetingDeletion: ((String) -> Void)?
+}
+
+extension View {
+    /// The one "Delete this meeting?" confirmation; presented while `meetingID` is set.
+    func meetingDeletionConfirmation(_ meetingID: Binding<String?>) -> some View {
+        modifier(MeetingDeletionConfirmation(meetingID: meetingID))
+    }
+}
+
+private struct MeetingDeletionConfirmation: ViewModifier {
+    @Environment(AppState.self) private var app
+    @Binding var meetingID: String?
+
+    func body(content: Content) -> some View {
+        content.alert(
+            "Delete this meeting?",
+            isPresented: Binding(
+                get: { meetingID != nil },
+                set: { if !$0 { meetingID = nil } }),
+            presenting: meetingID
+        ) { id in
+            Button("Delete", role: .destructive) { app.deleteMeeting(id: id) }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("The recording, transcript, and notes will be removed.")
         }
     }
 }

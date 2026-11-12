@@ -109,6 +109,14 @@ enum LanguageDetection {
         }
     }
 
+    /// Locales worth probing a recording with: the fallback (first) always,
+    /// the others only when their model is already on this Mac — a probe must
+    /// not download a model for a language that may never be used.
+    static func probeCandidates(_ candidates: [String], installed: Set<String>) -> [String] {
+        guard let fallback = candidates.first else { return [] }
+        return [fallback] + candidates.dropFirst().filter { installed.contains($0) }
+    }
+
     static func dominantLanguage(of text: String) -> NLLanguage? {
         guard text.count >= 10 else { return nil }
         let recognizer = NLLanguageRecognizer()

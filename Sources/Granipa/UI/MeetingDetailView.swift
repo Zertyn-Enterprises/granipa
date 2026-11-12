@@ -59,7 +59,10 @@ enum MeetingTabAccessory {
 
 struct MeetingDetailView: View {
     @Environment(AppState.self) private var app
+    /// Editor copy; `baseline` is the stored meeting it was last synced to,
+    /// so a save writes only what the user changed since.
     @State private var meeting: Meeting
+    @State private var baseline: Meeting
     @State private var tab: Tab
     @State private var transcript = MeetingTranscriptModel()
     @State private var enhancedDocument = EnhancedNotesDocument()
@@ -71,7 +74,8 @@ struct MeetingDetailView: View {
     @State private var selectedSegmentID: String?
     @State private var transcriptSearch = ""
     @State private var speakerFilter: String?
-    @State private var confirmDelete = false
+    @State private var deletingMeetingID: String?
+    @State private var confirmTranscribeAgain = false
     @FocusState private var notesFocused: Bool
     @State private var quickNoteScrolls = 0
 
@@ -101,6 +105,7 @@ struct MeetingDetailView: View {
 
     init(meeting: Meeting, preferNotes: Bool = false) {
         _meeting = State(initialValue: meeting)
+        _baseline = State(initialValue: meeting)
         _tab = State(initialValue: Self.initialTab(preferNotes: preferNotes))
     }
 
@@ -128,13 +133,16 @@ struct MeetingDetailView: View {
                         onOpenEnhanced: { tab = .enhanced },
                         onOpenActionItems: { tab = .actionItems })
                 case .enhanced:
-                    EnhancedNotesView(meetingID: meeting.id, document: enhancedDocument)
+                    EnhancedNotesView(
+                        meetingID: meeting.id, document: enhancedDocument,
+                        isProcessing: isPostStopProcessing)
                 case .transcript:
                     MeetingTranscriptView(
                         segments: transcript.segments,
                         loadPhase: transcript.phase,
                         live: liveTranscription,
                         isProcessing: isPostStopProcessing,
+                        processingStage: app.processingStage(for: meeting.id),
                         playback: playback,
                         autoscroll: $autoscroll,
                         selectedID: $selectedSegmentID,
@@ -144,7 +152,9 @@ struct MeetingDetailView: View {
                             renameSpeakerTo = speaker
                             renamingSpeaker = speaker
                         },
-                        onRetry: { loadSegments() })
+                        onRetry: { loadSegments() },
+                        onTranscribeAgain: app.canTranscribeAgain(freshMeeting)
+                            ? { Task { await app.transcribeAgain(meetingID: meeting.id) } } : nil)
                 case .actionItems:
                     MeetingActionItemsView(meeting: freshMeeting)
                 case .notes:
@@ -154,6 +164,12 @@ struct MeetingDetailView: View {
         }
         .task(id: taskKey) { loadSegments() }
         .task(id: audioPathsKey) { reloadPlayback() }
+        .onChange(of: freshMeeting) { _, stored in
+            // Pipeline and Home writes (AI title, folder move, language) flow
+            // into fields the user is not editing.
+            meeting = Meeting.mergingEditorEdits(meeting, baseline: baseline, into: stored)
+            baseline = stored
+        }
         .onChange(of: transcript.phase) { _, phase in
             guard case .loaded = phase else { return }
             speakerFilter = TranscriptQuery.retainedSpeakerFilter(
@@ -189,12 +205,15 @@ struct MeetingDetailView: View {
         } message: {
             Text("Applies to every line by this speaker in the meeting.")
         }
-        .alert("Delete this meeting?", isPresented: $confirmDelete) {
-            Button("Delete", role: .destructive) { app.deleteMeeting(id: meeting.id) }
+        .alert("Transcribe this recording again?", isPresented: $confirmTranscribeAgain) {
+            Button("Transcribe again") {
+                Task { await app.transcribeAgain(meetingID: meeting.id) }
+            }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("The recording, transcript, and notes will be removed.")
+            Text("The transcript, speaker names, and AI notes are made again from the saved audio.")
         }
+        .meetingDeletionConfirmation($deletingMeetingID)
     }
 
     // MARK: - Header
@@ -364,6 +383,10 @@ struct MeetingDetailView: View {
                     MeetingExporter.copyTranscript(meeting: freshMeeting, database: db)
                 }
             }
+            if freshMeeting.audioMicPath != nil || freshMeeting.audioSystemPath != nil {
+                Button("Transcribe again…") { confirmTranscribeAgain = true }
+                    .disabled(!app.canTranscribeAgain(freshMeeting))
+            }
             if let draft = freshMeeting.emailDraft, !draft.isEmpty {
                 Button("Copy email") {
                     NSPasteboard.general.clearContents()
@@ -373,7 +396,7 @@ struct MeetingDetailView: View {
             }
             Divider()
             Button("Delete meeting", role: .destructive) {
-                confirmDelete = true
+                deletingMeetingID = meeting.id
             }
         } label: {
             Image(systemName: "ellipsis")
@@ -592,6 +615,7 @@ struct MeetingDetailView: View {
     private func scheduleSave() {
         saveTask?.cancel()
         let snapshot = meeting
+        let snapshotBaseline = baseline
         saveTask = Task {
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled else { return }
@@ -602,20 +626,27 @@ struct MeetingDetailView: View {
             guard let current = app.meetings.first(where: { $0.id == snapshot.id }) else {
                 return
             }
-            app.update(Meeting.mergingEditorEdits(snapshot, into: current))
+            let merged = Meeting.mergingEditorEdits(
+                snapshot, baseline: snapshotBaseline, into: current)
+            if merged != current {
+                app.update(merged)
+            }
         }
     }
 }
 
 extension Meeting {
-    /// Fields the detail editor owns; every other field comes from `current`
-    /// so a stale editor copy never clobbers pipeline writes.
-    static func mergingEditorEdits(_ edited: Meeting, into current: Meeting) -> Meeting {
+    /// The editor-owned fields the user changed since `baseline`, applied to
+    /// `current`; everything else comes from `current`, so a stale editor copy
+    /// never clobbers pipeline or library writes.
+    static func mergingEditorEdits(
+        _ edited: Meeting, baseline: Meeting, into current: Meeting
+    ) -> Meeting {
         var merged = current
-        merged.title = edited.title
-        merged.notesMarkdown = edited.notesMarkdown
-        merged.folderID = edited.folderID
-        merged.templateID = edited.templateID
+        if edited.title != baseline.title { merged.title = edited.title }
+        if edited.notesMarkdown != baseline.notesMarkdown { merged.notesMarkdown = edited.notesMarkdown }
+        if edited.folderID != baseline.folderID { merged.folderID = edited.folderID }
+        if edited.templateID != baseline.templateID { merged.templateID = edited.templateID }
         return merged
     }
 }

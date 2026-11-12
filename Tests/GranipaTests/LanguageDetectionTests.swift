@@ -125,6 +125,19 @@ import Testing
                 == ["es-ES", "en-US"])
     }
 
+    @Test(arguments: [
+        (["en-US", "es-ES"], [], ["en-US"]),
+        (["en-US", "es-ES"], ["es-ES"], ["en-US", "es-ES"]),
+        (["es-ES", "en-US", "fr-FR"], ["fr-FR"], ["es-ES", "fr-FR"]),
+        (["en-US"], [], ["en-US"]),
+        ([], ["en-US"], []),
+    ] as [([String], Set<String>, [String])])
+    func probeCandidatesKeepTheFallbackAndInstalledModelsOnly(
+        _ candidates: [String], _ installed: Set<String>, _ expected: [String]
+    ) {
+        #expect(LanguageDetection.probeCandidates(candidates, installed: installed) == expected)
+    }
+
     @Test func parseProbeLocalesDedupesAndCaps() {
         #expect(LanguageDetection.parseProbeLocales(nil) == ["en-US", "es-ES"])
         #expect(LanguageDetection.parseProbeLocales("") == ["en-US", "es-ES"])

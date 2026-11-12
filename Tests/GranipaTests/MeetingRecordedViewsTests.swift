@@ -182,17 +182,17 @@ import Testing
 
     @Test func enhanceStaysDisabledWhileBusy() {
         #expect(
-            !OverviewPresentation.enhanceDisabled(
-                isEnhancing: false, isProcessing: false, isRecordingThisMeeting: false))
+            OverviewPresentation.enhanceDisabledReason(
+                isEnhancing: false, isProcessing: false, isRecordingThisMeeting: false) == nil)
         #expect(
-            OverviewPresentation.enhanceDisabled(
-                isEnhancing: true, isProcessing: false, isRecordingThisMeeting: false))
+            OverviewPresentation.enhanceDisabledReason(
+                isEnhancing: true, isProcessing: false, isRecordingThisMeeting: false) != nil)
         #expect(
-            OverviewPresentation.enhanceDisabled(
-                isEnhancing: false, isProcessing: true, isRecordingThisMeeting: false))
+            OverviewPresentation.enhanceDisabledReason(
+                isEnhancing: false, isProcessing: true, isRecordingThisMeeting: false) != nil)
         #expect(
-            OverviewPresentation.enhanceDisabled(
-                isEnhancing: false, isProcessing: false, isRecordingThisMeeting: true))
+            OverviewPresentation.enhanceDisabledReason(
+                isEnhancing: false, isProcessing: false, isRecordingThisMeeting: true) != nil)
     }
 }
 

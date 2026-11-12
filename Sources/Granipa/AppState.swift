@@ -7,7 +7,6 @@ import os
 @MainActor
 @Observable
 final class AppState {
-    private static let log = Logger(subsystem: "com.zertyn.granipa", category: "transcription")
     private(set) var database: AppDatabase?
     let recorder = RecordingEngine()
     let calendar = CalendarService()
@@ -18,9 +17,8 @@ final class AppState {
     private var autoStopTask: Task<Void, Never>?
     @ObservationIgnored private var recordingStartTask: Task<Void, Never>?
     private(set) var transcription: TranscriptionCoordinator?
-    private(set) var processingMeetingID: String?
+    private(set) var processor: MeetingProcessor?
     let dictation = DictationController.shared
-    private(set) var enhancingMeetingIDs: Set<String> = []
     var meetings: [Meeting] = []
     var templates: [MeetingTemplate] = []
     var webhooks: [Webhook] = []
@@ -34,6 +32,17 @@ final class AppState {
     /// Why the local REST API is not listening, or nil when it is (or is disabled).
     private(set) var apiServerError: String?
 
+    var processingMeetingID: String? { processor?.processingMeetingID }
+    var enhancingMeetingIDs: Set<String> { processor?.enhancingMeetingIDs ?? [] }
+
+    func processingStage(for meetingID: String) -> MeetingProcessor.Stage? {
+        processingMeetingID == meetingID ? processor?.stage : nil
+    }
+
+    func enhancementError(for meetingID: String) -> String? {
+        processor?.enhanceErrors[meetingID]
+    }
+
     var selectedMeeting: Meeting? {
         guard let id = selectedMeetingID else { return nil }
         return meetings.first { $0.id == id }
@@ -43,7 +52,9 @@ final class AppState {
         MeetingPipeline.phase(
             status: meeting.status,
             isRecording: recorder.isRecording && recorder.meetingID == meeting.id,
-            transcriptionPhase: recorder.meetingID == meeting.id ? transcription?.phase : nil,
+            // Keyed on the coordinator: it outlives the recorder's meeting
+            // while it drains after Stop (`.finishing`).
+            transcriptionPhase: transcription?.meetingID == meeting.id ? transcription?.phase : nil,
             isEnhancing: enhancingMeetingIDs.contains(meeting.id))
     }
 
@@ -51,12 +62,9 @@ final class AppState {
         do {
             let db = try AppDatabase.open()
             database = db
+            processor = makeProcessor(database: db)
             meetings = try db.fetchMeetings()
-            // Recover meetings orphaned mid-recording by a quit or crash.
-            for index in meetings.indices where meetings[index].status != .ready {
-                meetings[index].status = .ready
-                try? db.save(meetings[index])
-            }
+            recoverInterruptedMeetings(database: db)
             templates = try db.fetchTemplates()
             webhooks = try db.fetchWebhooks()
             folders = try db.fetchFolders()
@@ -72,6 +80,39 @@ final class AppState {
         _ = UpdaterManager.shared
     }
 
+    /// Meetings a quit or crash left recording or processing: see
+    /// `MeetingReprocessing.launchAction`. Re-runs go through the pipeline one
+    /// at a time once launch is done.
+    private func recoverInterruptedMeetings(database db: AppDatabase) {
+        let unfinished = MeetingReprocessing.unfinishedAttempts()
+        MeetingReprocessing.forgetAttempts()
+        var interrupted: [String] = []
+        for index in meetings.indices {
+            let meeting = meetings[index]
+            switch MeetingReprocessing.launchAction(
+                status: meeting.status,
+                hasAudio: recordedAudio(of: meeting) != nil,
+                attemptUnfinished: unfinished.contains(meeting.id))
+            {
+            case .keep:
+                continue
+            case .reprocess:
+                interrupted.append(meeting.id)
+            case .markReady:
+                meetings[index].status = .ready
+                try? db.save(meetings[index])
+            }
+        }
+        guard !interrupted.isEmpty else { return }
+        Task { [weak self] in
+            for id in interrupted {
+                MeetingReprocessing.recordAttempt(meetingID: id, unfinished: true)
+                await self?.reprocessFromAudio(meetingID: id)
+                MeetingReprocessing.recordAttempt(meetingID: id, unfinished: false)
+            }
+        }
+    }
+
     #if DEBUG
     /// `--v2-fixture` launch: the runtime gate has already verified
     /// CFFIXED_USER_HOME points into a throwaway temp home, so AppDatabase and
@@ -82,6 +123,7 @@ final class AppState {
         do {
             let db = try AppDatabase.open()
             database = db
+            processor = makeProcessor(database: db)
             try V2FixtureSeeder.seed(
                 fixture, into: db,
                 audioDirectory: { try AppPaths.audioDirectory(meetingID: $0) })
@@ -94,6 +136,15 @@ final class AppState {
         }
     }
     #endif
+
+    private func makeProcessor(database db: AppDatabase) -> MeetingProcessor {
+        MeetingProcessor(
+            database: db,
+            host: .init(
+                update: { [weak self] in self?.update($0) },
+                folder: { [weak self] in self?.folder(for: $0) },
+                reportError: { [weak self] in self?.loadError = $0 }))
+    }
 
     private func setupProductivity() {
         if let db = database {
@@ -305,6 +356,7 @@ final class AppState {
 
     init(database: AppDatabase) {
         self.database = database
+        processor = makeProcessor(database: database)
         meetings = (try? database.fetchMeetings()) ?? []
         templates = (try? database.fetchTemplates()) ?? []
     }
@@ -423,40 +475,37 @@ final class AppState {
         guard let capture = await stopCapture() else { return }
         let id = capture.id
         let urls = capture.urls
-        processingMeetingID = id
-        defer {
-            if processingMeetingID == id {
-                processingMeetingID = nil
-            }
-        }
-        guard let db = database, let meeting = capture.meeting else {
-            if let live = transcription {
+        let live = transcription
+        guard let processor, let meeting = capture.meeting else {
+            if let live {
                 await live.finishAndWait()
+                releaseTranscription(live)
             }
-            transcription = nil
             return
         }
 
-        if let live = transcription {
-            await live.finishAndWait()
-            let usedMuseForSystem = live.systemUsedMuse
-            transcription = nil
-            await postProcess(meetingID: id, skipLocalDiarize: usedMuseForSystem)
-        } else {
-            transcription = nil
-            let language = meeting.language
-            let outcome = await Task.detached {
-                await FileMeetingTranscriber.transcribe(
-                    micURL: urls.micURL,
-                    systemURL: urls.systemURL,
-                    meetingID: id,
-                    language: language,
-                    database: db)
-            }.value
-            await postProcess(
+        if let live {
+            await processor.process(
                 meetingID: id,
-                skipLocalDiarize: false,
-                fileTranscription: outcome)
+                source: .live { [weak self] in
+                    await live.finishAndWait()
+                    self?.releaseTranscription(live)
+                    var failure: String?
+                    if case .failed(let message) = live.phase { failure = message }
+                    return .init(usedMuseForSystem: live.systemUsedMuse, failure: failure)
+                })
+        } else {
+            await processor.process(
+                meetingID: id,
+                source: .files(
+                    micURL: urls.micURL, systemURL: urls.systemURL, language: meeting.language))
+        }
+    }
+
+    /// A recording started while `live` was draining owns a newer coordinator.
+    private func releaseTranscription(_ live: TranscriptionCoordinator) {
+        if transcription === live {
+            transcription = nil
         }
     }
 
@@ -488,7 +537,7 @@ final class AppState {
     }
 
     /// Quit path: only waits for the audio files to close. The meeting stays
-    /// `.processing`, which launch recovery turns into a ready meeting.
+    /// `.processing`, which launch recovery processes again from its audio.
     func stopCaptureForQuit() async {
         _ = await stopCapture()
         // A Stop already in flight owns the session; let it finish closing the files.
@@ -497,131 +546,59 @@ final class AppState {
         }
     }
 
-    func postProcess(
-        meetingID: String,
-        skipLocalDiarize: Bool = false,
-        fileTranscription: FileMeetingTranscriber.Outcome? = nil
-    ) async {
-        guard let db = database else { return }
-        let defaults = UserDefaults.standard
-        let diarizationEnabled = defaults.object(forKey: "diarizationEnabled") as? Bool ?? true
-        let inferNames = defaults.object(forKey: "inferSpeakerNames") as? Bool ?? true
-        let providerID = defaults.string(forKey: "llmProvider") ?? "claude"
+    @discardableResult
+    func enhance(meetingID: String) async -> MeetingProcessor.EnhanceOutcome? {
+        await processor?.enhance(meetingID: meetingID)
+    }
 
-        if case .failed(let failure) = fileTranscription {
-            // Generic toast for the user; the underlying error is logged at
-            // the catch site in FileMeetingTranscriber.
-            Self.log.error(
-                "post-meeting transcription failed for \(meetingID, privacy: .public): \(failure.logDescription, privacy: .public)"
-            )
-            ToastController.shared.show(
-                "Transcription failed — your audio was saved", style: .warning)
-        }
-
-        if skipLocalDiarize {
-            if inferNames {
-                try? await DiarizationService.inferNames(
-                    meetingID: meetingID, database: db, providerID: providerID)
-            }
-        } else if diarizationEnabled, let meeting = try? db.fetchMeeting(id: meetingID) {
-            // DiarizationService returns before prepareModels when there are
-            // no final system segments, so a failed transcription with zero
-            // segments is already a cheap no-op here.
-            do {
-                try await DiarizationService.diarize(
-                    meetingID: meetingID,
-                    audioSystemPath: meeting.audioSystemPath,
-                    database: db,
-                    nameInferenceProviderID: inferNames ? providerID : nil)
-            } catch {
-                // Best-effort: segments keep their "Them" label, but leave evidence.
-                Logger(subsystem: "com.zertyn.granipa", category: "diarization")
-                    .error("diarization failed: \(error.localizedDescription, privacy: .public)")
-            }
-        }
-
-        await enhance(meetingID: meetingID)
-
-        if var finished = try? db.fetchMeeting(id: meetingID) {
-            finished.status = .ready
-            update(finished)
-        }
-
-        if let meeting = try? db.fetchMeeting(id: meetingID) {
-            let segments = (try? db.fetchSegments(meetingID: meetingID, finalOnly: true)) ?? []
-            WebhookService.enqueue(
-                event: .meetingCompleted,
-                payload: MeetingCompletedPayload(
-                    timestamp: .now,
-                    meeting: MeetingDetailDTO(meeting, folder: folder(for: meeting)),
-                    transcript: segments.map(SegmentDTO.init)),
-                database: db)
-            Task { await WebhookService.deliverDue(database: db) }
+    /// Enhance buttons: say why nothing happened instead of staying silent.
+    func enhanceNow(meetingID: String) async {
+        switch await enhance(meetingID: meetingID) {
+        case .nothingToEnhance:
+            ToastController.shared.show("No transcript or notes to enhance", style: .warning)
+        case .alreadyRunning:
+            ToastController.shared.show("Notes are already being written")
+        case .ran, .failed, nil:
+            break
         }
     }
 
-    func enhance(meetingID: String) async {
-        guard let db = database, !enhancingMeetingIDs.contains(meetingID) else { return }
-        guard let meeting = try? db.fetchMeeting(id: meetingID) else { return }
-        let segments = (try? db.fetchSegments(meetingID: meetingID, finalOnly: true)) ?? []
-        let hasNotes = !meeting.notesMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        guard !segments.isEmpty || hasNotes else { return }
+    /// The meeting's recorded files when at least one is still on disk.
+    func recordedAudio(of meeting: Meeting) -> (micURL: URL, systemURL: URL)? {
+        guard let micPath = meeting.audioMicPath, let systemPath = meeting.audioSystemPath,
+            FileManager.default.fileExists(atPath: micPath)
+                || FileManager.default.fileExists(atPath: systemPath)
+        else { return nil }
+        return (URL(fileURLWithPath: micPath), URL(fileURLWithPath: systemPath))
+    }
 
-        enhancingMeetingIDs.insert(meetingID)
-        defer { enhancingMeetingIDs.remove(meetingID) }
+    func canTranscribeAgain(_ meeting: Meeting) -> Bool {
+        MeetingReprocessing.canTranscribeAgain(
+            status: meeting.status,
+            isRecording: recorder.meetingID == meeting.id,
+            isEnhancing: enhancingMeetingIDs.contains(meeting.id),
+            hasAudio: recordedAudio(of: meeting) != nil)
+    }
 
-        let template =
-            meeting.templateID.flatMap { try? db.fetchTemplate(id: $0) }
-            ?? MeetingTemplate.builtins.first
-        let prompt = EnhancementService.buildPrompt(
-            template: template,
-            notes: meeting.notesMarkdown,
-            transcript: EnhancementService.transcriptText(segments: segments))
-        let providerID = UserDefaults.standard.string(forKey: "llmProvider") ?? "claude"
+    /// Replaces the transcript with a fresh one from the saved audio, then
+    /// diarizes and enhances it like a just-stopped recording.
+    func transcribeAgain(meetingID: String) async {
+        guard let meeting = meetings.first(where: { $0.id == meetingID }),
+            canTranscribeAgain(meeting)
+        else { return }
+        await reprocessFromAudio(meetingID: meetingID)
+    }
 
-        let raw: String
-        do {
-            raw = try await LLMService.generate(providerID: providerID, prompt: prompt)
-        } catch {
-            let message = error.localizedDescription
-            let lower = message.lowercased()
-            let hint =
-                lower.contains("login") || lower.contains("auth")
-                    || lower.contains("credential") || lower.contains("api key")
-                ? " The CLI isn't signed in — open Terminal, run it once, and complete the browser login (Settings → AI has a Test button)."
-                : ""
-            loadError = "Enhancement failed: \(message)\(hint)"
-            return
-        }
-
-        guard let result = try? EnhancementService.parse(raw) else {
-            // The model replied but we couldn't structure it (e.g. unescaped verbatim
-            // quotes or a truncated reply). Keep its work as the report instead of
-            // discarding everything, and surface a non-blocking notice.
-            guard var updated = try? db.fetchMeeting(id: meetingID) else { return }
-            updated.enhancedNotesMarkdown = EnhancementService.salvagedReport(from: raw)
-            update(updated)
-            ToastController.shared.show(
-                "Notes saved, but couldn't format fully", style: .warning)
-            return
-        }
-
-        guard var updated = try? db.fetchMeeting(id: meetingID) else { return }
-        updated.summary = result.summary
-        updated.enhancedNotesMarkdown = result.enhancedNotes
-        updated.actionItemsJSON = ActionItem.encodeList(result.actionItems ?? [])
-        updated.emailDraft = result.emailDraft
-        if updated.title == "Untitled meeting", let title = result.title, !title.isEmpty {
-            updated.title = title
-        }
-        update(updated)
-        WebhookService.enqueue(
-            event: .notesEnhanced,
-            payload: NotesEnhancedPayload(
-                timestamp: .now,
-                meeting: MeetingDetailDTO(updated, folder: folder(for: updated))),
-            database: db)
-        Task { await WebhookService.deliverDue(database: db) }
+    private func reprocessFromAudio(meetingID: String) async {
+        guard let processor, var meeting = try? database?.fetchMeeting(id: meetingID),
+            let urls = recordedAudio(of: meeting)
+        else { return }
+        meeting.status = .processing
+        update(meeting)
+        await processor.process(
+            meetingID: meetingID,
+            source: .files(
+                micURL: urls.micURL, systemURL: urls.systemURL, language: meeting.language))
     }
 
     func folder(for meeting: Meeting) -> Folder? {
@@ -738,7 +715,7 @@ final class AppState {
 
     func deleteMeeting(id: String) {
         guard let db = database else { return }
-        guard recorder.meetingID != id, processingMeetingID != id else {
+        guard recorder.meetingID != id, processor?.cancelQueued(meetingID: id) != false else {
             loadError = "This meeting is still recording or processing. Delete it once it's done."
             return
         }

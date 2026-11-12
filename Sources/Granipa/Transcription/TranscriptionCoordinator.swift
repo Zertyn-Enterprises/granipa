@@ -467,8 +467,16 @@ final class TranscriptionCoordinator {
         UserDefaults.standard.set(locale, forKey: "lastSpeechLocale")
 
         let finals = (pendingFinals[locale] ?? []).sorted { $0.startSeconds < $1.startSeconds }
+        var failedSaves = 0
         for segment in finals {
-            try? database.save(segment)
+            do {
+                try database.save(segment)
+            } catch {
+                failedSaves += 1
+            }
+        }
+        if failedSaves > 0 {
+            phase = .failed("\(failedSaves) transcript line(s) could not be saved.")
         }
         // System finals (Muse) may already be saved and visible while the mic
         // probes were still deciding; keep them in the live timeline.
