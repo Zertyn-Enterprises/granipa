@@ -74,7 +74,7 @@ struct MeetingDetailView: View {
     @State private var selectedSegmentID: String?
     @State private var transcriptSearch = ""
     @State private var speakerFilter: String?
-    @State private var confirmDelete = false
+    @State private var deletingMeetingID: String?
     @State private var confirmTranscribeAgain = false
     @FocusState private var notesFocused: Bool
     @State private var quickNoteScrolls = 0
@@ -212,12 +212,7 @@ struct MeetingDetailView: View {
         } message: {
             Text("The transcript, speaker names, and AI notes are made again from the saved audio.")
         }
-        .alert("Delete this meeting?", isPresented: $confirmDelete) {
-            Button("Delete", role: .destructive) { app.deleteMeeting(id: meeting.id) }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("The recording, transcript, and notes will be removed.")
-        }
+        .meetingDeletionConfirmation($deletingMeetingID)
     }
 
     // MARK: - Header
@@ -400,7 +395,7 @@ struct MeetingDetailView: View {
             }
             Divider()
             Button("Delete meeting", role: .destructive) {
-                confirmDelete = true
+                deletingMeetingID = meeting.id
             }
         } label: {
             Image(systemName: "ellipsis")

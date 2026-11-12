@@ -387,7 +387,7 @@ private struct MeetingInspectorView: View {
     // Derived once per fetch, not on every body evaluation — hover and other
     // local state changes must not re-walk the whole transcript.
     @State private var talk = SpeakerTalkTime.report(segments: [])
-    @State private var confirmDelete = false
+    @State private var deletingMeetingID: String?
 
     private var folder: Folder? { app.folder(for: meeting) }
     private var calendarEvent: CalendarMeeting? {
@@ -509,7 +509,7 @@ private struct MeetingInspectorView: View {
                 }
                 InspectorHairline()
                 actionRow("Delete meeting", systemImage: "trash", destructive: true) {
-                    confirmDelete = true
+                    deletingMeetingID = meeting.id
                 }
             }
         }
@@ -528,12 +528,7 @@ private struct MeetingInspectorView: View {
             segments = fetched
             talk = SpeakerTalkTime.report(segments: fetched)
         }
-        .alert("Delete this meeting?", isPresented: $confirmDelete) {
-            Button("Delete", role: .destructive) { app.deleteMeeting(id: meeting.id) }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("The recording, transcript, and notes will be removed.")
-        }
+        .meetingDeletionConfirmation($deletingMeetingID)
     }
 
     private func actionRow(
