@@ -234,6 +234,12 @@ final class HotkeyManager: @unchecked Sendable {
         }
     }
 
+    /// A key another tap consumed still turns a held modifier-only key into a chord.
+    @MainActor
+    func noteChord() {
+        dispatchModifier(code: 0, event: .otherKeyDown, timestamp: 0)
+    }
+
     @MainActor
     private func dispatchHotKey(id: UInt32, released: Bool, timestamp: TimeInterval) {
         let was = keyDown[id] ?? false

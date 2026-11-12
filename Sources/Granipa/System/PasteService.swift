@@ -4,6 +4,9 @@ import Foundation
 
 @MainActor
 enum PasteService {
+    /// Marks the app's own ⌘V so the macro-key tap lets it through.
+    nonisolated static let syntheticEventTag: Int64 = 0x4752_4E50
+
     static var isTrusted: Bool {
         AXIsProcessTrusted()
     }
@@ -30,6 +33,8 @@ enum PasteService {
         else { return false }
         keyDown.flags = .maskCommand
         keyUp.flags = .maskCommand
+        keyDown.setIntegerValueField(.eventSourceUserData, value: syntheticEventTag)
+        keyUp.setIntegerValueField(.eventSourceUserData, value: syntheticEventTag)
         keyDown.post(tap: .cghidEventTap)
         keyUp.post(tap: .cghidEventTap)
         return true
