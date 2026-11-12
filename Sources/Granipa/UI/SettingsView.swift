@@ -479,6 +479,13 @@ private struct GeneralSettings: View {
             Text(computerAudioHelp)
             .font(.caption)
             .foregroundStyle(.secondary)
+            if meetingSystemEngine == "muse", !KeychainStore.hasMuseKey() {
+                Label(
+                    "No Muse API key saved, so meetings transcribe computer audio on this Mac. Add the key in Settings → Dictation → Muse.",
+                    systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
             Toggle("Detect meetings automatically", isOn: $meetingDetection)
                 .onChange(of: meetingDetection) {
                     meetingDetection ? app.detector.start() : app.detector.stop()
@@ -587,6 +594,7 @@ private struct GeneralSettings: View {
 private struct DictationSettings: View {
     @Environment(AppState.self) private var app
     @AppStorage("dictationEngine") private var engine = "local"
+    @AppStorage("meetingSystemEngine") private var meetingSystemEngine = "local"
     @AppStorage("dictationAutoPaste") private var autoPaste = true
     @AppStorage("dictationKeywords") private var keywords = ""
     @AppStorage("dictationShortcut") private var shortcut = "rightOption"
@@ -642,7 +650,7 @@ private struct DictationSettings: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
-            if engine == "muse" {
+            if engine == "muse" || meetingSystemEngine == "muse" {
                 Section("Muse") {
                     SecureField("Meta API key", text: $drafts.museKey)
                     Button("Save key") {
@@ -662,7 +670,7 @@ private struct DictationSettings: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     TextField("Vocabulary hints (comma-separated)", text: $keywords)
-                    Text("Names, products, jargon Muse should prefer.")
+                    Text("Names, products, jargon Muse should prefer. Used by dictation and meetings.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
