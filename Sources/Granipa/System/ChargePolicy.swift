@@ -47,6 +47,16 @@ struct AppliedBatteryState: Equatable, Sendable {
     }
 }
 
+enum BatteryPollingPolicy {
+    /// The periodic tick (SMC reads, helper and LED writes) runs only while a
+    /// feature is on or something the app wrote still has to be undone.
+    static func needsPolling(featureOn: Bool, applied: AppliedBatteryState) -> Bool {
+        let systemLED = MagSafeLEDMode.system.smcByte(isCharging: false)
+        return featureOn || applied.action != nil
+            || (applied.ledByte.map { $0 != systemLED } ?? false)
+    }
+}
+
 enum ChargePolicy {
     static let minLimit = 50
     static let maxLimit = 100
