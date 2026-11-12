@@ -2,10 +2,39 @@ import Foundation
 import Observation
 
 enum SystemTapRetryPolicy {
-    static let maxAttempts = 1
+    /// Retries of a tap that started but never delivered: recovers a grant
+    /// completed during startup without recreating a silent tap indefinitely.
+    static let maxSilentAttempts = 1
+    /// Retries of a tap whose start or restart threw (e.g. after a device switch).
+    static let maxFailedAttempts = 3
+    /// The tap only delivers while sound plays, so a quiet start is normal;
+    /// only after two minutes without any system audio is the user told to
+    /// check the permission and restart.
+    static let missingWarningSeconds: TimeInterval = 120
 
-    static func shouldRetry(bufferCount: Int, attempts: Int) -> Bool {
-        bufferCount == 0 && attempts < maxAttempts
+    static func shouldRetry(tapFailed: Bool, bufferCount: Int, attempts: Int) -> Bool {
+        if tapFailed { return attempts < maxFailedAttempts }
+        return bufferCount == 0 && attempts < maxSilentAttempts
+    }
+}
+
+/// "Recording but silent" judged over the last 30 s instead of the whole
+/// meeting, so a mic that goes dead after it once worked still warns.
+struct MicSilenceWindow {
+    /// Watchdog ticks spanned by the window (6 × 5 s).
+    static let ticks = 6
+    /// Fewer buffers than this in the window is a stalled route, which the
+    /// stall check owns.
+    static let minBuffers = 50
+    private var samples: [(buffers: Int, nonSilent: Int)] = []
+
+    /// Records the running totals at one tick; true when the full window held
+    /// buffers but none of them carried sound.
+    mutating func record(buffers: Int, nonSilent: Int) -> Bool {
+        samples.append((buffers, nonSilent))
+        if samples.count > Self.ticks + 1 { samples.removeFirst() }
+        guard samples.count == Self.ticks + 1, let oldest = samples.first else { return false }
+        return nonSilent == oldest.nonSilent && buffers - oldest.buffers >= Self.minBuffers
     }
 }
 
@@ -85,72 +114,134 @@ final class RecordingEngine {
         return session
     }
 
+    private struct MicWatch {
+        var restarts = 0
+        var lastCount = 0
+        var lastFrames: Int64 = 0
+        var stallTicks = 0
+        var unsavedTicks = 0
+        var silence = MicSilenceWindow()
+    }
+
+    private struct SystemWatch {
+        var silentRetries = 0
+        var failedRetries = 0
+        var lastCount = 0
+        var lastFrames: Int64 = 0
+        var unsavedTicks = 0
+    }
+
+    private static let maxMicRestarts = 8
+
     private func watchForDeadChannels(session: RecordingSession) {
         channelWatchTask?.cancel()
         channelWatchTask = Task { [weak self, weak session] in
             guard let self, let session else { return }
-            var tapRestarts = 0
-            var micRestarts = 0
-            var lastMicCount = 0
-            var micStallTicks = 0
+            var mic = MicWatch()
+            var system = SystemWatch()
             while !Task.isCancelled, self.session === session, self.isRecording {
                 try? await Task.sleep(for: .seconds(5))
                 guard self.session === session, self.isRecording else { return }
-
-                // The mic tap delivers buffers continuously even during silence, so a
-                // flat count means the route genuinely died. The system tap only flows
-                // while audio plays, so a flat system count is valid silence.
-                let micCount = session.micBufferCount
-                if micCount == 0 {
-                    micWarning =
-                        "No microphone audio is arriving. Check System Settings > Privacy & "
-                        + "Security > Microphone, then stop and start a new recording."
-                } else {
-                    micStallTicks = micCount == lastMicCount ? micStallTicks + 1 : 0
-                    if micStallTicks >= 2 {
-                        if micRestarts < 8 {
-                            // Recreate the file only when it stalled early enough that
-                            // nothing usable was captured; otherwise keep prior audio.
-                            session.restartMic(recreateFile: micCount < 100)
-                            micRestarts += 1
-                            micStallTicks = 0
-                            micWarning = "Microphone audio stalled — restarted capture."
-                        } else {
-                            micWarning =
-                                "Microphone audio stopped and couldn't be recovered. Stop and "
-                                + "start a new recording."
-                        }
-                    } else if session.micNonSilentCount == 0, micCount > 200 {
-                        micWarning =
-                            "Microphone is recording but completely silent — check the input "
-                            + "device and that the mic isn't muted, then start a new recording."
-                    } else if session.micNonSilentCount > 0 {
-                        micWarning = nil
-                    }
-                }
-                lastMicCount = micCount
-
-                let systemCount = session.systemBufferCount
-                if SystemTapRetryPolicy.shouldRetry(
-                    bufferCount: systemCount, attempts: tapRestarts)
-                {
-                    // One bounded retry recovers a grant completed during startup
-                    // without recreating a silent system tap indefinitely.
-                    session.restartSystemTap()
-                    tapRestarts += 1
-                    systemAudioWarning =
-                        "No system audio captured yet — it only flows while sound is playing. "
-                        + "Grant Screen & System Audio Recording permission, then stop and start "
-                        + "a new recording."
-                } else if session.systemNonSilentCount == 0, systemCount > 200 {
-                    systemAudioWarning =
-                        "System audio is arriving but completely silent — macOS may have denied "
-                        + "the permission. Check System Settings > Privacy & Security > Screen & "
-                        + "System Audio Recording, then stop and start a new recording."
-                } else if session.systemNonSilentCount > 0 {
-                    systemAudioWarning = nil
-                }
+                checkMic(session, &mic)
+                checkSystem(session, &system)
             }
+        }
+    }
+
+    // The mic tap delivers buffers continuously even during silence, so a flat
+    // count means the route genuinely died. Buffers arriving while the written
+    // frame count stays flat means the file is not recording them.
+    private func checkMic(_ session: RecordingSession, _ watch: inout MicWatch) {
+        let count = session.micBufferCount
+        let frames = session.micFramesWritten
+        let arrived = count > watch.lastCount
+        let saved = frames > watch.lastFrames
+        watch.stallTicks = arrived ? 0 : watch.stallTicks + 1
+        watch.unsavedTicks = arrived && !saved ? watch.unsavedTicks + 1 : 0
+        let silent = watch.silence.record(buffers: count, nonSilent: session.micNonSilentCount)
+        watch.lastCount = count
+        watch.lastFrames = frames
+
+        let startFailed = session.micStartFailed
+        if startFailed || (count > 0 && watch.stallTicks >= 2) {
+            guard watch.restarts < Self.maxMicRestarts else {
+                micWarning =
+                    "Microphone audio stopped and couldn't be recovered. Stop and start a new "
+                    + "recording."
+                return
+            }
+            // Recreate the file only when it stalled early enough that nothing
+            // usable was captured; otherwise keep prior audio.
+            session.restartMic(recreateFile: count < 100)
+            watch.restarts += 1
+            watch.stallTicks = 0
+            micWarning =
+                startFailed
+                ? "Microphone couldn't be restarted — trying again."
+                : "Microphone audio stalled — restarting capture."
+        } else if count == 0 {
+            micWarning =
+                "No microphone audio is arriving. Check System Settings > Privacy & "
+                + "Security > Microphone, then stop and start a new recording."
+        } else if watch.unsavedTicks >= 2 {
+            micWarning =
+                "Microphone audio is arriving but isn't being saved — your voice is missing "
+                + "from this recording. Stop and start a new recording."
+        } else if silent {
+            micWarning =
+                "Microphone is recording but completely silent — check the input "
+                + "device and that the mic isn't muted, then start a new recording."
+        } else if arrived {
+            micWarning = nil
+            if saved { watch.restarts = 0 }
+        }
+    }
+
+    // The system tap only flows while audio plays, so a flat or zero count is
+    // valid silence until it lasts far longer than a quiet meeting start.
+    private func checkSystem(_ session: RecordingSession, _ watch: inout SystemWatch) {
+        let count = session.systemBufferCount
+        let frames = session.systemFramesWritten
+        watch.unsavedTicks =
+            count > watch.lastCount && frames == watch.lastFrames ? watch.unsavedTicks + 1 : 0
+        watch.lastCount = count
+        watch.lastFrames = frames
+
+        let tapFailed = session.systemTapFailed
+        if !tapFailed { watch.failedRetries = 0 }
+        let retry = SystemTapRetryPolicy.shouldRetry(
+            tapFailed: tapFailed, bufferCount: count,
+            attempts: tapFailed ? watch.failedRetries : watch.silentRetries)
+        if retry {
+            session.restartSystemTap()
+            if tapFailed { watch.failedRetries += 1 } else { watch.silentRetries += 1 }
+        }
+
+        let elapsed = startedAt.map { Date.now.timeIntervalSince($0) } ?? 0
+        if tapFailed {
+            systemAudioWarning =
+                retry
+                ? "System audio capture stopped — retrying. Only your microphone is being "
+                    + "recorded until it recovers."
+                : Self.systemTapFailedWarning + " Then stop and start a new recording."
+        } else if watch.unsavedTicks >= 2 {
+            systemAudioWarning =
+                "System audio is arriving but isn't being saved — the other side is missing "
+                + "from this recording. Stop and start a new recording."
+        } else if count == 0 {
+            systemAudioWarning =
+                elapsed >= SystemTapRetryPolicy.missingWarningSeconds
+                ? "No system audio captured in the first 2 minutes. If others have spoken, "
+                    + "grant Screen & System Audio Recording permission, then stop and start a "
+                    + "new recording."
+                : nil
+        } else if session.systemNonSilentCount == 0, count > 200 {
+            systemAudioWarning =
+                "System audio is arriving but completely silent — macOS may have denied "
+                + "the permission. Check System Settings > Privacy & Security > Screen & "
+                + "System Audio Recording, then stop and start a new recording."
+        } else {
+            systemAudioWarning = nil
         }
     }
 
