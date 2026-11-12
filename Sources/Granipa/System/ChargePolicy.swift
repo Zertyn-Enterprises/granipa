@@ -40,20 +40,34 @@ struct AppliedBatteryState: Equatable, Sendable {
         ledViaHelper = nil
     }
 
-    /// The helper restores charging and the LED whenever it exits, so after
-    /// a lost connection nothing cached still holds and the next tick re-sends.
+    /// After a lost connection the helper either restored charging and the LED
+    /// (it does when a client it served disconnects) or died without doing so;
+    /// either way the cache is unknown, so the next tick re-sends.
     mutating func helperConnectionLost() {
         self = Self()
     }
 }
 
+enum BatteryLoopMode: Equatable, Sendable {
+    case off
+    /// IOPS snapshot and temperature only: no helper calls, no SMC or LED writes.
+    case readout
+    case control
+}
+
 enum BatteryPollingPolicy {
-    /// The periodic tick (SMC reads, helper and LED writes) runs only while a
-    /// feature is on or something the app wrote still has to be undone.
-    static func needsPolling(featureOn: Bool, applied: AppliedBatteryState) -> Bool {
+    /// Control runs while a feature is on or something the app wrote still has
+    /// to be undone; otherwise a battery view on screen only needs the readout.
+    static func loopMode(
+        featureOn: Bool, applied: AppliedBatteryState, readoutObserved: Bool
+    ) -> BatteryLoopMode {
         let systemLED = MagSafeLEDMode.system.smcByte(isCharging: false)
-        return featureOn || applied.action != nil
+        if featureOn || applied.action != nil
             || (applied.ledByte.map { $0 != systemLED } ?? false)
+        {
+            return .control
+        }
+        return readoutObserved ? .readout : .off
     }
 }
 

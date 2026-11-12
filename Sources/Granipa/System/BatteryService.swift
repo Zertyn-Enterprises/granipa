@@ -10,11 +10,11 @@ final class BatteryService {
     static let shared = BatteryService()
     private static let log = Logger(subsystem: "com.zertyn.granipa", category: "battery")
 
-    private var currentSnapshot = BatterySnapshot.missing
+    private(set) var snapshot = BatterySnapshot.missing
     private(set) var canControl = false
     private(set) var hasMagSafeLED = false
     private(set) var controlMessage: String?
-    private var currentTemperatureC: Double?
+    private(set) var temperatureC: Double?
     private(set) var calibrationStep: CalibrationStep?
     private(set) var lastCalibrationAt: Date?
     var topUp = false
@@ -57,18 +57,6 @@ final class BatteryService {
 
     var isCalibrating: Bool { calibrationStep != nil }
 
-    /// Read by the menu and Settings. While nothing polls, a stale read
-    /// schedules one refresh instead of keeping a timer alive.
-    var snapshot: BatterySnapshot {
-        scheduleIdleReadoutIfStale()
-        return currentSnapshot
-    }
-
-    var temperatureC: Double? {
-        scheduleIdleReadoutIfStale()
-        return currentTemperatureC
-    }
-
     private var chargingAllowed = true
     private var applied = AppliedBatteryState()
     private var holdStartedAt: Date?
@@ -91,9 +79,7 @@ final class BatteryService {
     }
     @ObservationIgnored private var loop: Task<Void, Never>?
     @ObservationIgnored private var isStarted = false
-    @ObservationIgnored private var readoutAt = Date.distantPast
-    @ObservationIgnored private var readoutScheduled = false
-    private static let tickSeconds: TimeInterval = 5
+    @ObservationIgnored private var readoutObservers = 0
     private let smc = SMCClient()
     private var usingCHTE = false
     private let tempKeys = ["TB0T", "TB1T", "TW0P", "B0Te"]
@@ -132,11 +118,12 @@ final class BatteryService {
     func tick() {
         defer { syncLoop() }
         refreshReadout()
-        // Idle: no feature on and nothing to undo, so no SMC/helper/LED writes
-        // (an LED write here would launch the root helper at every app start).
-        guard needsPolling else { return }
+        // Without a feature on and nothing to undo, a tick is readout only: no
+        // helper calls or SMC/LED writes (an LED write here would launch the
+        // root helper at every app start).
+        guard loopMode == .control else { return }
         applyMagSafeLED()
-        guard currentSnapshot.isPresent, canControl else { return }
+        guard snapshot.isPresent, canControl else { return }
 
         if let step = calibrationStep {
             runCalibration(step)
@@ -145,7 +132,7 @@ final class BatteryService {
 
         let hot =
             heatProtection
-            && (currentTemperatureC ?? 0) >= Double(heatThresholdC)
+            && (temperatureC ?? 0) >= Double(heatThresholdC)
         let wantsControl = limiterEnabled || hot
         if !wantsControl {
             if applied.action != nil {
@@ -156,28 +143,43 @@ final class BatteryService {
         }
 
         let action = ChargePolicy.action(
-            percent: currentSnapshot.percent,
+            percent: snapshot.percent,
             limit: limit,
             topUp: topUp,
             discharging: discharging,
             chargingAllowed: chargingAllowed,
             heatPaused: hot)
         applyIfChanged(action)
-        if topUp, currentSnapshot.percent >= 100 { topUp = false }
-        if discharging, currentSnapshot.percent <= max(ChargePolicy.minLimit, limit - 15) {
+        if topUp, snapshot.percent >= 100 { topUp = false }
+        if discharging, snapshot.percent <= max(ChargePolicy.minLimit, limit - 15) {
             discharging = false
         }
     }
 
-    private var needsPolling: Bool {
-        BatteryPollingPolicy.needsPolling(
+    /// Battery views call these while on screen so the readout keeps
+    /// refreshing even when no feature needs the control loop.
+    func beginObservingReadout() {
+        readoutObservers += 1
+        guard isStarted, readoutObservers == 1 else { return }
+        refreshReadout()
+        syncLoop()
+    }
+
+    func endObservingReadout() {
+        readoutObservers = max(0, readoutObservers - 1)
+        syncLoop()
+    }
+
+    private var loopMode: BatteryLoopMode {
+        BatteryPollingPolicy.loopMode(
             featureOn: limiterEnabled || heatProtection || calibrationStep != nil || topUp
                 || discharging || (hasMagSafeLED && magSafeLED != .system),
-            applied: applied)
+            applied: applied,
+            readoutObserved: readoutObservers > 0)
     }
 
     private func syncLoop() {
-        guard isStarted, needsPolling else {
+        guard isStarted, loopMode != .off else {
             loop?.cancel()
             loop = nil
             return
@@ -186,7 +188,7 @@ final class BatteryService {
         loop = Task { [weak self] in
             while !Task.isCancelled {
                 do {
-                    try await Task.sleep(for: .seconds(Self.tickSeconds))
+                    try await Task.sleep(for: .seconds(5))
                 } catch {
                     return
                 }
@@ -197,27 +199,13 @@ final class BatteryService {
     }
 
     private func refreshReadout() {
-        readoutAt = .now
         let nextSnapshot = BatteryIO.snapshot()
-        if nextSnapshot != currentSnapshot {
-            currentSnapshot = nextSnapshot
+        if nextSnapshot != snapshot {
+            snapshot = nextSnapshot
         }
         let nextTemperature = nextSnapshot.isPresent ? readTemperature() : nil
-        if nextTemperature != currentTemperatureC {
-            currentTemperatureC = nextTemperature
-        }
-    }
-
-    private func scheduleIdleReadoutIfStale() {
-        guard isStarted, loop == nil, !readoutScheduled,
-            Date.now.timeIntervalSince(readoutAt) >= Self.tickSeconds
-        else { return }
-        // Deferred: this runs inside a view's body, which must not mutate state.
-        readoutScheduled = true
-        Task { [weak self] in
-            guard let self else { return }
-            self.readoutScheduled = false
-            if self.isStarted, self.loop == nil { self.refreshReadout() }
+        if nextTemperature != temperatureC {
+            temperatureC = nextTemperature
         }
     }
 
@@ -319,7 +307,7 @@ final class BatteryService {
     }
 
     func startCalibration() {
-        guard canControl, currentSnapshot.isPresent else { return }
+        guard canControl, snapshot.isPresent else { return }
         topUp = false
         discharging = false
         holdStartedAt = nil
@@ -354,9 +342,9 @@ final class BatteryService {
     private func runCalibration(_ step: CalibrationStep) {
         if step == .hold1h, holdStartedAt == nil { holdStartedAt = .now }
         let elapsed = holdStartedAt.map { Date.now.timeIntervalSince($0) } ?? 0
-        applyIfChanged(CalibrationPolicy.action(step: step, percent: currentSnapshot.percent))
+        applyIfChanged(CalibrationPolicy.action(step: step, percent: snapshot.percent))
         switch CalibrationPolicy.advance(
-            step: step, percent: currentSnapshot.percent, holdElapsed: elapsed)
+            step: step, percent: snapshot.percent, holdElapsed: elapsed)
         {
         case .stay:
             break
@@ -395,7 +383,7 @@ final class BatteryService {
         let byte =
             forceSystem
             ? MagSafeLEDMode.system.smcByte(isCharging: false)
-            : magSafeLED.smcByte(isCharging: currentSnapshot.isCharging)
+            : magSafeLED.smcByte(isCharging: snapshot.isCharging)
         let usesHelper = BatteryHelperClient.shared.isEnabled
         guard applied.needsLED(byte, viaHelper: usesHelper) else { return }
         if usesHelper {
