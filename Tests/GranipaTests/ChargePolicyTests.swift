@@ -83,6 +83,55 @@ import Testing
         #expect(MagSafeLEDMode.system.smcByte(isCharging: true) == 0)
     }
 
+    @Test func helperRestartMakesTheNextTickResend() {
+        var applied = AppliedBatteryState()
+        applied.action = .inhibit
+        applied.actionViaHelper = true
+        applied.ledByte = 1
+        applied.ledViaHelper = true
+        #expect(!applied.needsAction(.inhibit, viaHelper: true))
+        #expect(!applied.needsLED(1, viaHelper: true))
+        applied.helperConnectionLost()
+        #expect(applied.needsAction(.inhibit, viaHelper: true))
+        #expect(applied.needsLED(1, viaHelper: true))
+        // A helper that died without restoring leaves charging inhibited:
+        // the obligation to undo it must survive the lost connection.
+        #expect(applied.action == .inhibit)
+        #expect(
+            BatteryPollingPolicy.loopMode(
+                featureOn: false, applied: applied, readoutObserved: false) == .control)
+    }
+
+    @Test(arguments: [
+        (false, nil as ChargeAction?, nil as UInt8?, false, BatteryLoopMode.off),  // launch, nothing on
+        (false, nil, nil, true, .readout),  // battery view open, no feature
+        (true, nil, nil, true, .control),
+        (false, .inhibit, nil, false, .control),  // limit off but charging not yet restored
+        (false, nil, 1, false, .control),  // LED left in a custom mode
+        (false, nil, 0, false, .off),  // LED back on system control
+    ])
+    func batteryLoopRunsOnlyWhileNeeded(
+        featureOn: Bool, action: ChargeAction?, ledByte: UInt8?, viewOpen: Bool,
+        mode: BatteryLoopMode
+    ) {
+        var applied = AppliedBatteryState()
+        applied.action = action
+        applied.ledByte = ledByte
+        #expect(
+            BatteryPollingPolicy.loopMode(
+                featureOn: featureOn, applied: applied, readoutObserved: viewOpen) == mode)
+    }
+
+    @Test(arguments: [
+        ("sp78", [0x23, 0x80, 0, 0] as [UInt8], 35.5 as Double?),
+        ("flt ", [0x00, 0x00, 0x0E, 0x42], 35.5),
+        ("ui8 ", [0x23, 0x80, 0, 0], nil),
+    ])
+    func temperatureDecodesByReportedType(type: String, bytes: [UInt8], celsius: Double?) {
+        #expect(
+            SMCClient.decodeTemperature(dataType: SMCClient.fourChar(type), bytes: bytes) == celsius)
+    }
+
     @Test func smcParamStructIsEightyBytes() {
         #expect(SMCClient.paramStride == 80)
     }

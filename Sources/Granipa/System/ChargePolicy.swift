@@ -15,6 +15,64 @@ enum ChargeAction: Equatable, Sendable {
     }
 }
 
+/// What the app last wrote, so an unchanged state is not re-sent every tick.
+struct AppliedBatteryState: Equatable, Sendable {
+    var action: ChargeAction?
+    var actionViaHelper: Bool?
+    var ledByte: UInt8?
+    var ledViaHelper: Bool?
+
+    func needsAction(_ next: ChargeAction, viaHelper: Bool) -> Bool {
+        next != action || viaHelper != actionViaHelper
+    }
+
+    func needsLED(_ byte: UInt8, viaHelper: Bool) -> Bool {
+        byte != ledByte || viaHelper != ledViaHelper
+    }
+
+    mutating func clearAction() {
+        action = nil
+        actionViaHelper = nil
+    }
+
+    mutating func clearLED() {
+        ledByte = nil
+        ledViaHelper = nil
+    }
+
+    /// After a lost connection the helper either restored charging and the LED
+    /// (it does when a client it served disconnects) or died without doing so.
+    /// What was applied is kept, because it may still hold and must then be
+    /// undone; only the route is forgotten, so the next tick re-sends.
+    mutating func helperConnectionLost() {
+        actionViaHelper = nil
+        ledViaHelper = nil
+    }
+}
+
+enum BatteryLoopMode: Equatable, Sendable {
+    case off
+    /// IOPS snapshot and temperature only: no helper calls, no SMC or LED writes.
+    case readout
+    case control
+}
+
+enum BatteryPollingPolicy {
+    /// Control runs while a feature is on or something the app wrote still has
+    /// to be undone; otherwise a battery view on screen only needs the readout.
+    static func loopMode(
+        featureOn: Bool, applied: AppliedBatteryState, readoutObserved: Bool
+    ) -> BatteryLoopMode {
+        let systemLED = MagSafeLEDMode.system.smcByte(isCharging: false)
+        if featureOn || applied.action != nil
+            || (applied.ledByte.map { $0 != systemLED } ?? false)
+        {
+            return .control
+        }
+        return readoutObserved ? .readout : .off
+    }
+}
+
 enum ChargePolicy {
     static let minLimit = 50
     static let maxLimit = 100

@@ -38,7 +38,10 @@ final class BatteryService {
         }
     }
     var heatProtection: Bool {
-        didSet { UserDefaults.standard.set(heatProtection, forKey: "batteryHeatProtection") }
+        didSet {
+            UserDefaults.standard.set(heatProtection, forKey: "batteryHeatProtection")
+            tick()
+        }
     }
     var heatThresholdC: Int {
         didSet {
@@ -46,16 +49,16 @@ final class BatteryService {
         }
     }
     var magSafeLED: MagSafeLEDMode {
-        didSet { UserDefaults.standard.set(magSafeLED.rawValue, forKey: "batteryMagSafeLED") }
+        didSet {
+            UserDefaults.standard.set(magSafeLED.rawValue, forKey: "batteryMagSafeLED")
+            tick()
+        }
     }
 
     var isCalibrating: Bool { calibrationStep != nil }
 
     private var chargingAllowed = true
-    private var lastAction: ChargeAction?
-    private var lastActionUsedHelper: Bool?
-    private var lastMagSafeLEDByte: UInt8?
-    private var lastMagSafeLEDUsedHelper: Bool?
+    private var applied = AppliedBatteryState()
     private var holdStartedAt: Date?
     private var didOfferHelperInstall = false
 
@@ -74,30 +77,25 @@ final class BatteryService {
             ?? .system
         lastCalibrationAt = UserDefaults.standard.object(forKey: "batteryLastCalibration") as? Date
     }
-    private var loop: Task<Void, Never>?
+    @ObservationIgnored private var loop: Task<Void, Never>?
+    @ObservationIgnored private var isStarted = false
+    @ObservationIgnored private var readoutObservers = 0
     private let smc = SMCClient()
     private var usingCHTE = false
     private let tempKeys = ["TB0T", "TB1T", "TW0P", "B0Te"]
     private var temperatureKey: String?
 
     func start() {
-        probeControl()
-        tick()
-        loop?.cancel()
-        loop = Task { [weak self] in
-            while !Task.isCancelled {
-                do {
-                    try await Task.sleep(for: .seconds(5))
-                } catch {
-                    return
-                }
-                guard !Task.isCancelled else { return }
-                await MainActor.run { self?.tick() }
-            }
+        BatteryHelperClient.shared.onConnectionLost = { [weak self] in
+            self?.applied.helperConnectionLost()
         }
+        probeControl()
+        isStarted = true
+        tick()
     }
 
     func stop() {
+        isStarted = false
         loop?.cancel()
         loop = nil
         discharging = false
@@ -111,24 +109,21 @@ final class BatteryService {
             {
                 Self.log.error("Timed out while restoring charging during termination")
             }
-            lastAction = nil
-            lastActionUsedHelper = nil
+            applied.clearAction()
         } else {
             restoreCharging()
         }
     }
 
     func tick() {
-        let nextSnapshot = BatteryIO.snapshot()
-        if nextSnapshot != snapshot {
-            snapshot = nextSnapshot
-        }
-        let nextTemperature = nextSnapshot.isPresent ? readTemperature() : nil
-        if nextTemperature != temperatureC {
-            temperatureC = nextTemperature
-        }
+        defer { syncLoop() }
+        refreshReadout()
+        // Without a feature on and nothing to undo, a tick is readout only: no
+        // helper calls or SMC/LED writes (an LED write here would launch the
+        // root helper at every app start).
+        guard loopMode == .control else { return }
         applyMagSafeLED()
-        guard nextSnapshot.isPresent, canControl else { return }
+        guard snapshot.isPresent, canControl else { return }
 
         if let step = calibrationStep {
             runCalibration(step)
@@ -140,10 +135,9 @@ final class BatteryService {
             && (temperatureC ?? 0) >= Double(heatThresholdC)
         let wantsControl = limiterEnabled || hot
         if !wantsControl {
-            if lastAction != nil {
+            if applied.action != nil {
                 apply(.charge)
-                lastAction = nil
-                lastActionUsedHelper = nil
+                applied.clearAction()
             }
             return
         }
@@ -159,6 +153,59 @@ final class BatteryService {
         if topUp, snapshot.percent >= 100 { topUp = false }
         if discharging, snapshot.percent <= max(ChargePolicy.minLimit, limit - 15) {
             discharging = false
+        }
+    }
+
+    /// Battery views call these while on screen so the readout keeps
+    /// refreshing even when no feature needs the control loop.
+    func beginObservingReadout() {
+        readoutObservers += 1
+        guard isStarted, readoutObservers == 1 else { return }
+        refreshReadout()
+        syncLoop()
+    }
+
+    func endObservingReadout() {
+        readoutObservers = max(0, readoutObservers - 1)
+        syncLoop()
+    }
+
+    private var loopMode: BatteryLoopMode {
+        BatteryPollingPolicy.loopMode(
+            featureOn: limiterEnabled || heatProtection || calibrationStep != nil || topUp
+                || discharging || (hasMagSafeLED && magSafeLED != .system),
+            applied: applied,
+            readoutObserved: readoutObservers > 0)
+    }
+
+    private func syncLoop() {
+        guard isStarted, loopMode != .off else {
+            loop?.cancel()
+            loop = nil
+            return
+        }
+        guard loop == nil else { return }
+        loop = Task { [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .seconds(5))
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled else { return }
+                await MainActor.run { self?.tick() }
+            }
+        }
+    }
+
+    private func refreshReadout() {
+        let nextSnapshot = BatteryIO.snapshot()
+        if nextSnapshot != snapshot {
+            snapshot = nextSnapshot
+        }
+        let nextTemperature = nextSnapshot.isPresent ? readTemperature() : nil
+        if nextTemperature != temperatureC {
+            temperatureC = nextTemperature
         }
     }
 
@@ -255,8 +302,8 @@ final class BatteryService {
                 applyMagSafeLED(forceSystem: true)
             }
         }
-        lastAction = nil
-        lastActionUsedHelper = nil
+        applied.clearAction()
+        syncLoop()
     }
 
     func startCalibration() {
@@ -316,14 +363,14 @@ final class BatteryService {
         guard smc.open() else { return nil }
         let preferredKey = temperatureKey
         if let preferredKey,
-            let value = try? smc.readSP78(preferredKey),
+            let value = try? smc.readTemperature(preferredKey),
             value > 0, value < 90
         {
             return value
         }
         temperatureKey = nil
         for key in tempKeys where key != preferredKey {
-            if let value = try? smc.readSP78(key), value > 0, value < 90 {
+            if let value = try? smc.readTemperature(key), value > 0, value < 90 {
                 temperatureKey = key
                 return value
             }
@@ -338,26 +385,31 @@ final class BatteryService {
             ? MagSafeLEDMode.system.smcByte(isCharging: false)
             : magSafeLED.smcByte(isCharging: snapshot.isCharging)
         let usesHelper = BatteryHelperClient.shared.isEnabled
-        guard byte != lastMagSafeLEDByte || usesHelper != lastMagSafeLEDUsedHelper else { return }
+        guard applied.needsLED(byte, viaHelper: usesHelper) else { return }
         if usesHelper {
-            lastMagSafeLEDByte = byte
-            lastMagSafeLEDUsedHelper = true
+            applied.ledByte = byte
+            applied.ledViaHelper = true
             BatteryHelperClient.shared.applyLED(byte) { [weak self] ok, _ in
                 guard !ok else { return }
                 Task { @MainActor in
-                    guard self?.lastMagSafeLEDByte == byte,
-                        self?.lastMagSafeLEDUsedHelper == true
+                    guard let self, self.applied.ledByte == byte,
+                        self.applied.ledViaHelper == true
                     else { return }
-                    self?.lastMagSafeLEDByte = nil
-                    self?.lastMagSafeLEDUsedHelper = nil
+                    self.applied.clearLED()
                 }
             }
             return
         }
         do {
             try smc.writeU8("ACLC", byte)
-            lastMagSafeLEDByte = byte
-            lastMagSafeLEDUsedHelper = false
+            applied.ledByte = byte
+            applied.ledViaHelper = false
+        } catch SMCClientError.notPrivileged {
+            // Retrying every tick cannot succeed without the helper; a helper
+            // that becomes enabled changes `viaHelper` and triggers a resend.
+            Self.log.error("MagSafe LED write not privileged")
+            applied.ledByte = byte
+            applied.ledViaHelper = false
         } catch {
             Self.log.error("MagSafe LED write failed")
         }
@@ -365,10 +417,10 @@ final class BatteryService {
 
     private func applyIfChanged(_ action: ChargeAction) {
         let usesHelper = BatteryHelperClient.shared.isEnabled
-        guard action != lastAction || usesHelper != lastActionUsedHelper else { return }
+        guard applied.needsAction(action, viaHelper: usesHelper) else { return }
         if apply(action, usesHelper: usesHelper) {
-            lastAction = action
-            lastActionUsedHelper = usesHelper
+            applied.action = action
+            applied.actionViaHelper = usesHelper
         }
     }
 
@@ -388,9 +440,8 @@ final class BatteryService {
                     if !self.helperBusy {
                         self.helperSetupMessage = ok ? nil : (err ?? "Helper write failed")
                     }
-                    if !ok, self.lastAction == action, self.lastActionUsedHelper == true {
-                        self.lastAction = nil
-                        self.lastActionUsedHelper = nil
+                    if !ok, self.applied.action == action, self.applied.actionViaHelper == true {
+                        self.applied.clearAction()
                     }
                 }
             }

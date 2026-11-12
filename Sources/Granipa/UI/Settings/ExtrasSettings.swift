@@ -226,5 +226,7 @@ struct BatterySettings: View {
             }
         }
         .formStyle(.grouped)
+        .onAppear { BatteryService.shared.beginObservingReadout() }
+        .onDisappear { BatteryService.shared.endObservingReadout() }
     }
 }

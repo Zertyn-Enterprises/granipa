@@ -18,10 +18,20 @@ final class BatteryHelperService: NSObject, GranipaBatteryHelping, @unchecked Se
     private let smc = HelperSMC()
     private let lock = NSLock()
     private var lastUsingCHTE = false
+    private var served = false
+
+    /// True once this connection delivered a message, which the code-signing
+    /// requirement only lets the signed app do.
+    var didServe: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return served
+    }
 
     func applyAction(_ raw: Int, usingCHTE: Bool, reply: @escaping (Bool, String?) -> Void) {
         lock.lock()
         defer { lock.unlock() }
+        served = true
         do {
             switch raw {
             case 0:  // ChargeAction.charge.helperRaw
@@ -49,6 +59,7 @@ final class BatteryHelperService: NSObject, GranipaBatteryHelping, @unchecked Se
     func applyLED(_ value: UInt8, reply: @escaping (Bool, String?) -> Void) {
         lock.lock()
         defer { lock.unlock() }
+        served = true
         do {
             try smc.writeU8("ACLC", value)
             log.info("applyLED \(value, privacy: .public) ok")
@@ -101,7 +112,10 @@ final class ListenerDelegate: NSObject, NSXPCListenerDelegate {
         connection.setCodeSigningRequirement(clientRequirement)
         connection.exportedInterface = NSXPCInterface(with: GranipaBatteryHelping.self)
         connection.exportedObject = service
+        // A caller that fails the code-signing requirement can still connect
+        // and drop; only the app's own connection may end the charge limit.
         connection.invalidationHandler = {
+            guard service.didServe else { return }
             service.restoreDefaults()
             exit(EXIT_SUCCESS)
         }
@@ -110,6 +124,15 @@ final class ListenerDelegate: NSObject, NSXPCListenerDelegate {
     }
 }
 
+// HelperSMCParam is a copy of the app's SMCParamStruct; if its layout drifts
+// from the kernel ABI, stop before any SMC write rather than send garbage.
+precondition(
+    MemoryLayout<HelperSMCParam>.stride == 80
+        && MemoryLayout<HelperSMCParam>.offset(of: \.dataSize) == 28
+        && MemoryLayout<HelperSMCParam>.offset(of: \.result) == 40
+        && MemoryLayout<HelperSMCParam>.offset(of: \.data8) == 42
+        && MemoryLayout<HelperSMCParam>.offset(of: \.b0) == 48,
+    "HelperSMCParam does not match the 80-byte AppleSMC parameter layout")
 log.info("listening stride=\(MemoryLayout<HelperSMCParam>.stride, privacy: .public)")
 let delegate = ListenerDelegate()
 let listener = NSXPCListener(machServiceName: batteryHelperMachName)
