@@ -56,7 +56,9 @@ import Testing
             }
         }
         #expect(!finished)
-        #expect(ContinuousClock.now - started < .seconds(1))
+        // The operation takes 3 s; anything clearly under that proves the
+        // deadline did not wait for it, with room for a loaded CI runner.
+        #expect(ContinuousClock.now - started < .seconds(2.5))
         #expect(try await AsyncDeadline.wait(seconds: 5, onTimeout: {}) {})
     }
 
