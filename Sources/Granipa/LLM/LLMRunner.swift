@@ -105,15 +105,7 @@ enum LLMRunner {
         try process.run()
 
         if let stdin {
-            let data = Data(stdin.utf8)
-            let writer = stdinPipe.fileHandleForWriting
-            // A CLI that exits without draining stdin would otherwise raise
-            // SIGPIPE and kill the whole app; with this the write just fails.
-            _ = fcntl(writer.fileDescriptor, F_SETNOSIGPIPE, 1)
-            DispatchQueue.global(qos: .utility).async {
-                try? writer.write(contentsOf: data)
-                try? writer.close()
-            }
+            feed(stdin, to: stdinPipe.fileHandleForWriting)
         }
 
         let watchdog = DispatchWorkItem {
@@ -148,5 +140,16 @@ enum LLMRunner {
                 String(stderr.suffix(500)).trimmingCharacters(in: .whitespacesAndNewlines))
         }
         return Output(stdout: stdout)
+    }
+
+    private static func feed(_ text: String, to writer: FileHandle) {
+        let data = Data(text.utf8)
+        // A CLI that exits without draining stdin would otherwise raise
+        // SIGPIPE and kill the whole app; with this the write just fails.
+        _ = fcntl(writer.fileDescriptor, F_SETNOSIGPIPE, 1)
+        DispatchQueue.global(qos: .utility).async {
+            try? writer.write(contentsOf: data)
+            try? writer.close()
+        }
     }
 }
