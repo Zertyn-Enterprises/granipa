@@ -297,18 +297,6 @@ enum MeetingLibrary {
         return counts
     }
 
-    static func searchNotes(query: String, database: AppDatabase) -> [Meeting] {
-        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !needle.isEmpty else { return [] }
-        return notes(in: (try? database.searchMeetings(query: needle)) ?? [])
-    }
-
-    static func searchRecordings(query: String, database: AppDatabase) -> [Meeting] {
-        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !needle.isEmpty else { return [] }
-        return recordings(in: (try? database.searchMeetings(query: needle)) ?? [])
-    }
-
     static func dayGroups(from meetings: [Meeting]) -> [(day: Date, meetings: [Meeting])] {
         let grouped = Dictionary(grouping: meetings) {
             Calendar.current.startOfDay(for: $0.createdAt)
