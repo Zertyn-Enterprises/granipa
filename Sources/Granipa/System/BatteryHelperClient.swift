@@ -204,8 +204,9 @@ final class BatteryHelperClient {
         }
     }
 
-    /// Called whenever the helper may have restarted: it restores charging
-    /// on exit, so whatever the app last applied no longer holds.
+    /// Called whenever the connection is reset or lost. The helper restores
+    /// charging only when a client it served disconnects, not if it crashed or
+    /// was killed, so what the app last applied is unknown and must be re-sent.
     var onConnectionLost: (@MainActor () -> Void)?
     private var connectionGeneration = 0
 
