@@ -9,6 +9,8 @@ import os
 enum FileMeetingTranscriber {
     private static let log = Logger(subsystem: "com.zertyn.granipa", category: "transcription")
     private static let probeDurationSeconds = 15.0
+    /// How far into a file the probe looks for speech before giving up on it.
+    private static let probeSearchSeconds = 300.0
     private static let probeFramesPerChunk: AVAudioFrameCount = 4_096
 
     /// The two external failure sources that used to be swallowed into a
@@ -17,10 +19,19 @@ enum FileMeetingTranscriber {
     struct Boundary: Sendable {
         var installModel: @Sendable (Locale) async throws -> Void
         var analyzeChannel: @Sendable (ChannelAnalysis) async throws -> Void
+        var isInstalled: @Sendable (Locale) async -> Bool = { _ in true }
 
         static let live = Boundary(
             installModel: { locale in try await SpeechModels.ensureInstalled(locale: locale) },
-            analyzeChannel: { try await analyzeToDatabase($0) })
+            analyzeChannel: { try await analyzeToDatabase($0) },
+            isInstalled: { await SpeechModels.isInstalled(locale: $0) })
+    }
+
+    /// The locale a meeting is transcribed with; `probed` when a probe of real
+    /// speech chose it rather than the fallback.
+    struct LocaleChoice: Equatable {
+        let localeID: String
+        let probed: Bool
     }
 
     struct ChannelAnalysis: Sendable {
@@ -75,12 +86,10 @@ enum FileMeetingTranscriber {
             last: UserDefaults.standard.string(forKey: "lastSpeechLocale"))
         // Unreachable with LanguageDetection's non-empty defaults; keep the
         // old silent no-op rather than inventing an install error.
-        guard let fallbackLocaleID = localeIDs.first else { return .completed(localeID: language) }
-        let localeID = await selectLocaleID(
-            candidates: localeIDs,
-            fallback: fallbackLocaleID,
-            micURL: micURL,
-            installModel: boundary.installModel)
+        guard !localeIDs.isEmpty else { return .completed(localeID: language) }
+        let choice = await chooseLocale(
+            candidates: localeIDs, micURL: micURL, systemURL: systemURL, boundary: boundary)
+        let localeID = choice.localeID
         let locale = Locale(identifier: localeID)
         do {
             try await boundary.installModel(locale)
@@ -106,10 +115,15 @@ enum FileMeetingTranscriber {
                 failedChannels.append(channel)
             }
         }
-        // The locale was picked from real audio, so the hint stays durable
-        // even when channel analysis failed. A model-install failure returns
-        // above, before any audio ran, and leaves the previous hint intact.
-        UserDefaults.standard.set(localeID, forKey: "lastSpeechLocale")
+        // Only a probe of real speech may steer the next meeting's guess, even
+        // when channel analysis failed. A model-install failure returns above
+        // and leaves the previous hint intact.
+        if choice.probed {
+            UserDefaults.standard.set(localeID, forKey: "lastSpeechLocale")
+        }
+        if choice.probed || localeIDs.count == 1 {
+            persistLanguage(localeID, meetingID: meetingID, database: database)
+        }
         guard failedChannels.isEmpty else {
             return .failed(.channels(failedChannels, localeID: localeID))
         }
@@ -128,26 +142,46 @@ enum FileMeetingTranscriber {
         return size > 2048
     }
 
-    private static func selectLocaleID(
-        candidates: [String], fallback: String, micURL: URL,
-        installModel: @Sendable (Locale) async throws -> Void
-    ) async -> String {
-        guard candidates.count > 1,
-            let chunks = try? probeChunks(from: micURL),
-            !chunks.isEmpty
+    private static func chooseLocale(
+        candidates: [String], micURL: URL, systemURL: URL, boundary: Boundary
+    ) async -> LocaleChoice {
+        let fallback = LocaleChoice(localeID: candidates[0], probed: false)
+        var installed: Set<String> = []
+        for localeID in candidates.dropFirst() {
+            if await boundary.isInstalled(Locale(identifier: localeID)) {
+                installed.insert(localeID)
+            }
+        }
+        let probed = LanguageDetection.probeCandidates(candidates, installed: installed)
+        guard probed.count > 1,
+            let chunks = speechChunks(from: micURL) ?? speechChunks(from: systemURL)
         else { return fallback }
 
         var results: [LanguageProbeResult] = []
-        for localeID in candidates {
-            let locale = Locale(identifier: localeID)
+        for localeID in probed {
             do {
-                try await installModel(locale)
+                try await boundary.installModel(Locale(identifier: localeID))
                 results.append(try await probe(localeID: localeID, chunks: chunks))
             } catch {
                 continue
             }
         }
-        return LanguageDetection.decide(results, force: true) ?? fallback
+        guard let decided = LanguageDetection.decide(results, force: true) else { return fallback }
+        return LocaleChoice(localeID: decided, probed: true)
+    }
+
+    private static func persistLanguage(_ localeID: String, meetingID: String, database: AppDatabase) {
+        do {
+            guard var meeting = try database.fetchMeeting(id: meetingID),
+                meeting.language != localeID
+            else { return }
+            meeting.language = localeID
+            try database.save(meeting)
+        } catch {
+            log.error(
+                "saving the detected language failed for meeting \(meetingID, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+        }
     }
 
     private static func probe(localeID: String, chunks: [AudioChunk]) async throws
@@ -180,25 +214,30 @@ enum FileMeetingTranscriber {
         }
     }
 
-    private static func probeChunks(from url: URL) throws -> [AudioChunk] {
-        let file = try AVAudioFile(forReading: url)
+    /// Up to `probeDurationSeconds` of speech found in the first
+    /// `probeSearchSeconds` of the file, or nil when it has none: leading
+    /// silence, or a silent channel, would make every probe come back empty.
+    private static func speechChunks(from url: URL) -> [AudioChunk]? {
+        guard let file = try? AVAudioFile(forReading: url) else { return nil }
         let format = file.processingFormat
-        let requestedFrames = AVAudioFramePosition(format.sampleRate * probeDurationSeconds)
-        var remaining = min(file.length, requestedFrames)
+        var gate = SpeechGate()
+        var searchLeft = AVAudioFramePosition(format.sampleRate * probeSearchSeconds)
+        var speechLeft = AVAudioFramePosition(format.sampleRate * probeDurationSeconds)
         var chunks: [AudioChunk] = []
-
-        while remaining > 0 {
-            let frameCount = AVAudioFrameCount(
-                min(remaining, AVAudioFramePosition(probeFramesPerChunk)))
-            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
-                break
-            }
-            try file.read(into: buffer, frameCount: frameCount)
-            guard buffer.frameLength > 0 else { break }
-            chunks.append(AudioChunk(buffer: buffer, startSeconds: nil))
-            remaining -= AVAudioFramePosition(buffer.frameLength)
+        while searchLeft > 0, speechLeft > 0 {
+            guard
+                let buffer = AVAudioPCMBuffer(
+                    pcmFormat: format, frameCapacity: probeFramesPerChunk),
+                (try? file.read(into: buffer, frameCount: probeFramesPerChunk)) != nil,
+                buffer.frameLength > 0
+            else { break }
+            searchLeft -= AVAudioFramePosition(buffer.frameLength)
+            let chunk = AudioChunk(buffer: buffer, startSeconds: nil)
+            guard gate.admits(chunk) else { continue }
+            chunks.append(chunk)
+            speechLeft -= AVAudioFramePosition(buffer.frameLength)
         }
-        return chunks
+        return chunks.isEmpty ? nil : chunks
     }
 
     /// Saves each final result as a segment; returns how many saves failed.

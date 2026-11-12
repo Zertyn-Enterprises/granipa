@@ -161,6 +161,11 @@ final class MeetingProcessor {
                     await self.setStage(channel == .mic ? .transcribingAudio : .transcribingCall)
                 })
         }.value
+        // The transcriber wrote the detected language to the store; sync the
+        // in-memory copy before an editor save can merge onto a stale one.
+        if let fresh = try? db.fetchMeeting(id: id) {
+            host.update(fresh)
+        }
         if case .failed(let failure) = outcome {
             // Generic toast for the user; the underlying error is logged at
             // the catch site in FileMeetingTranscriber.

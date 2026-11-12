@@ -145,7 +145,7 @@ import Testing
         #expect((try db.fetchSegments(meetingID: meeting.id)).isEmpty)
     }
 
-    @Test func partialChannelFailureStillStoresLocaleHint() async throws {
+    @Test func partialChannelFailureLeavesLocaleHintToProbes() async throws {
         let db = try AppDatabase(writer: DatabaseQueue())
         let meeting = Meeting.new(title: "T", language: "en-US")
         try db.save(meeting)
@@ -157,7 +157,7 @@ import Testing
         }
         let defaults = UserDefaults.standard
         let previous = defaults.object(forKey: "lastSpeechLocale")
-        defaults.removeObject(forKey: "lastSpeechLocale")
+        defaults.set("fr-FR", forKey: "lastSpeechLocale")
         defer { restoreLastSpeechLocale(previous) }
         let boundary = FileMeetingTranscriber.Boundary(
             installModel: { _ in },
@@ -175,10 +175,42 @@ import Testing
             database: db,
             boundary: boundary)
 
-        // The mic channel failed, but the locale was still picked from real
-        // audio, so the hint for the next meeting must be stored.
+        // The language was given, not probed from speech, so it must not
+        // become the next meeting's guess.
         #expect(outcome == .failed(.channels([.mic], localeID: "en-US")))
-        #expect(defaults.string(forKey: "lastSpeechLocale") == "en-US")
+        #expect(defaults.string(forKey: "lastSpeechLocale") == "fr-FR")
+    }
+
+    @Test func autoMeetingWithoutSpeechKeepsAutoAndTheHint() async throws {
+        let db = try AppDatabase(writer: DatabaseQueue())
+        let meeting = Meeting.new(title: "T", language: "auto")
+        try db.save(meeting)
+        // Not decodable as audio: no speech to probe on either channel.
+        let micURL = try makeAudioFixture()
+        let systemURL = try makeAudioFixture()
+        defer {
+            try? FileManager.default.removeItem(at: micURL)
+            try? FileManager.default.removeItem(at: systemURL)
+        }
+        let defaults = UserDefaults.standard
+        let previous = defaults.object(forKey: "lastSpeechLocale")
+        defaults.set("fr-FR", forKey: "lastSpeechLocale")
+        defer { restoreLastSpeechLocale(previous) }
+        let boundary = FileMeetingTranscriber.Boundary(
+            installModel: { _ in }, analyzeChannel: { _ in }, isInstalled: { _ in true })
+
+        let outcome = await FileMeetingTranscriber.transcribe(
+            micURL: micURL,
+            systemURL: systemURL,
+            meetingID: meeting.id,
+            language: "auto",
+            database: db,
+            boundary: boundary)
+
+        let fallback = LanguageDetection.fileProbeLocales(requested: "auto", last: "fr-FR")[0]
+        #expect(outcome == .completed(localeID: fallback))
+        #expect(defaults.string(forKey: "lastSpeechLocale") == "fr-FR")
+        #expect(try db.fetchMeeting(id: meeting.id)?.language == "auto")
     }
 
     @Test func modelInstallFailureLeavesLocaleHintUntouched() async throws {
