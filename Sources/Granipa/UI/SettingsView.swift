@@ -1126,17 +1126,28 @@ private struct WindowSettings: View {
 private struct BatterySettings: View {
     var body: some View {
         @Bindable var battery = BatteryService.shared
+        // Registration alone does not prove writes work; a failed install,
+        // repair or helper write leaves helperSetupMessage set.
+        let helperHealthy =
+            battery.canControl && battery.helperEnabled && battery.helperSetupMessage == nil
         Form {
             if !battery.snapshot.isPresent {
                 Text("No internal battery — charge limiting is for MacBooks.")
                     .foregroundStyle(.secondary)
             } else {
+                Label(
+                    "Experimental. Charge control writes to the battery controller through a root helper; these controls stay off until the helper works.",
+                    systemImage: "flask")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
                 LabeledContent("Current charge", value: "\(battery.snapshot.percent)%")
                 if let temp = battery.temperatureC {
                     LabeledContent("Battery temperature", value: String(format: "%.1f°C", temp))
                 }
+                // Turning a control off stays possible so a broken helper never
+                // traps the Mac in a limited state.
                 Toggle("Limit charging", isOn: $battery.limiterEnabled)
-                    .disabled(battery.isCalibrating)
+                    .disabled(battery.isCalibrating || (!helperHealthy && !battery.limiterEnabled))
                 if battery.limiterEnabled {
                     Slider(
                         value: Binding(
@@ -1147,7 +1158,8 @@ private struct BatterySettings: View {
                         onEditingChanged: { editing in
                             if !editing { battery.tick() }
                         })
-                    Text("Stop charging at \(battery.limit)%. Discharge while plugged in to come down from a higher level. Top Up charges to 100% once, then the limit returns.")
+                    .disabled(!helperHealthy)
+                    Text("Stop charging at \(battery.limit)%. To come down from a higher level or charge to 100% once, use Discharge or Top Up in the menu bar.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1189,11 +1201,13 @@ private struct BatterySettings: View {
 
                 Section("Heat Protection") {
                     Toggle("Heat Protection", isOn: $battery.heatProtection)
-                        .disabled(battery.isCalibrating)
+                        .disabled(
+                            battery.isCalibrating || (!helperHealthy && !battery.heatProtection))
                     if battery.heatProtection {
                         Stepper(
                             "Halt charging at \(battery.heatThresholdC)°C",
                             value: $battery.heatThresholdC, in: 30...45)
+                        .disabled(!helperHealthy)
                         Text("Recommended 35°C. Disabled automatically during calibration.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -1223,7 +1237,7 @@ private struct BatterySettings: View {
                         Button("Start Calibration") {
                             battery.startCalibration()
                         }
-                        .disabled(!battery.canControl)
+                        .disabled(!helperHealthy)
                     }
                     LabeledContent("Last calibration") {
                         if let date = battery.lastCalibrationAt {
@@ -1241,6 +1255,7 @@ private struct BatterySettings: View {
                                 Text(mode.title).tag(mode)
                             }
                         }
+                        .disabled(!helperHealthy)
                     }
                 }
 
