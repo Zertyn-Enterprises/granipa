@@ -16,8 +16,11 @@ Native macOS (26+) SwiftUI meeting recorder/transcriber. SPM executable targets
   `MicRecorder` (AVAudioEngine + optional voice-processing AEC), `RecordingSession`
   (writes m4a per channel, pads system-channel gaps with silence so file time ==
   meeting time, fans out `AudioChunk` AsyncStreams).
-- `Transcription/` — two SpeechAnalyzer/SpeechTranscriber sessions (mic="Me",
-  system="Them"); volatile results go to UI, final results to DB.
+- `Transcription/` — by default `FileMeetingTranscriber` transcribes the
+  recorded files after Stop, one SpeechAnalyzer at a time (mic="Me",
+  system="Them"). Live ASR during Record is opt-in (`liveMeetingASR`,
+  `MeetingASRPolicy`): two SpeechTranscriber sessions, volatile results to
+  UI, final results to DB.
 - `Dictation/` — hold-to-talk overlay (default Right Option). Mic ASR is Apple
   on-device by default. Optional text rewrite via SpaceXAI (`api.x.ai`) or a
   custom OpenAI-compatible URL (Mac Mini / VPS). Muse on dictation is opt-in
