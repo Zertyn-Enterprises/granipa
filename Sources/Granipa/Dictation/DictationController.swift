@@ -3,6 +3,7 @@ import AVFoundation
 import Carbon.HIToolbox
 import Foundation
 import Observation
+import os
 
 @MainActor
 @Observable
@@ -29,10 +30,15 @@ final class DictationController {
     private var chunkContinuation: AsyncStream<AudioChunk>.Continuation?
     private var transcribeTask: Task<Void, Never>?
     private var hideTask: Task<Void, Never>?
+    private var stallTask: Task<Void, Never>?
     private var mic: MicRecorder?
     private let appleEngine = AppleDictationEngine()
     private let museEngine = MuseDictationEngine()
     @ObservationIgnored private let waveformGate = LevelGate(minInterval: 0.08)
+    /// Last mic buffer arrival. A device change (AirPods in/out) stops the
+    /// engine without an error, so silence from the tap is the only signal.
+    @ObservationIgnored private let micHeartbeat = OSAllocatedUnfairLock(
+        initialState: ContinuousClock.now)
     #if DEBUG
         @ObservationIgnored var testHooks: DictationTestHooks?
     #endif
@@ -171,6 +177,7 @@ final class DictationController {
                     if self.presentsChrome {
                         DictationOverlayController.shared.setClickThrough(false)
                     }
+                    self.watchForMicStall(generation: generation)
                 }
                 guard self.phase == .listening || self.phase == .processing else {
                     if self.captureGeneration == generation { self.finishMic() }
@@ -230,6 +237,7 @@ final class DictationController {
 
     func beginCapture() throws -> AsyncStream<AudioChunk> {
         if meetingIsRecording { throw DictationError.micBusy }
+        micHeartbeat.withLock { $0 = .now }
         #if DEBUG
             if testHooks != nil {
                 if let error = testHooks?.captureError { throw error }
@@ -250,7 +258,9 @@ final class DictationController {
                 ? (UserDefaults.standard.object(forKey: "echoCancellation") as? Bool ?? true)
                 : false
             let gate = waveformGate
+            let heartbeat = micHeartbeat
             try recorder.start(echoCancellation: echo) { [weak self] buffer, _ in
+                heartbeat.withLock { $0 = .now }
                 let level = buffer.rmsLevel
                 if gate.shouldPublish(.mic) {
                     Task { @MainActor [weak self] in
@@ -267,6 +277,32 @@ final class DictationController {
             continuation.finish()
             if meetingIsRecording { throw DictationError.micBusy }
             throw error
+        }
+    }
+
+    private var micStallLimit: Duration? {
+        #if DEBUG
+            if testHooks != nil { return testHooks?.micStallLimit }
+        #endif
+        return .seconds(3)
+    }
+
+    private func watchForMicStall(generation: Int) {
+        guard let limit = micStallLimit else { return }
+        stallTask?.cancel()
+        stallTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: limit / 3)
+                guard let self, generation == self.sessionGeneration, self.phase == .listening
+                else { return }
+                if ContinuousClock.now - self.micHeartbeat.withLock({ $0 }) > limit {
+                    let task = self.transcribeTask
+                    self.invalidateSession()
+                    task?.cancel()
+                    self.fail(MicrophoneChanged())
+                    return
+                }
+            }
         }
     }
 
@@ -419,7 +455,8 @@ final class DictationController {
             }
             return
         }
-        let retryable = (error as? DictationError)?.isRetryable ?? false
+        let retryable =
+            error is MicrophoneChanged || ((error as? DictationError)?.isRetryable ?? false)
         lastFailureRetryable = retryable
         phase = .failed(error.localizedDescription)
         restoreCaptionsIfRecording()
@@ -526,6 +563,11 @@ final class DictationController {
     }
 }
 
+/// Not a `DictationError` case: meeting code switches over that enum exhaustively.
+private struct MicrophoneChanged: LocalizedError {
+    var errorDescription: String? { "Microphone changed — try again." }
+}
+
 extension DictationError {
     fileprivate var isCancelled: Bool {
         if case .cancelled = self { return true }
@@ -541,5 +583,6 @@ extension DictationError {
         var transcribe: (@MainActor (AsyncStream<AudioChunk>) async throws -> String)?
         var presentsOverlay = false
         var pastes = false
+        var micStallLimit: Duration?
     }
 #endif

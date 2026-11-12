@@ -136,6 +136,31 @@
             #expect(!controller.hasOpenCapture)
         }
 
+        @Test func silentMicWhileListeningFailsRetryablyWithoutCommitting() async {
+            var committed: String?
+            let controller = DictationController(
+                testHooks: DictationTestHooks(
+                    transcribe: { chunks in
+                        for await _ in chunks {}
+                        return "partial"
+                    },
+                    micStallLimit: .milliseconds(90)))
+            controller.onCommitted = { text, _, _ in committed = text }
+            defer { controller.cancel() }
+
+            controller.toggleFromMenu()
+            #expect(
+                await waitUntil {
+                    if case .failed = controller.phase { return true }
+                    return false
+                })
+            try? await Task.sleep(for: .milliseconds(40))
+            #expect(controller.phase == .failed("Microphone changed — try again."))
+            #expect(controller.lastFailureRetryable)
+            #expect(!controller.hasOpenCapture)
+            #expect(committed == nil)
+        }
+
         @Test func holdAfterListeningCommitsBufferedText() async {
             var committed: String?
             let controller = hookedController(transcribe: { chunks in
