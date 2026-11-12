@@ -118,6 +118,10 @@ final class DictationController {
         #if DEBUG
         if V2FixtureRuntime.isActive { return }
         #endif
+        if meetingIsRecording {
+            fail(DictationError.micBusy)
+            return
+        }
         hideTask?.cancel()
         pressStartedAt = .now
         if latched { pressEventTimestamp = nil }
@@ -406,16 +410,22 @@ final class DictationController {
 
     private func fail(_ error: Error) {
         finishMic()
-        unregisterEscape()
+        if case .micBusy? = error as? DictationError {
+            // The meeting owns the mic until it ends; an overlay offering
+            // Retry would only fail the same way.
+            resetToIdle()
+            if presentsChrome {
+                ToastController.shared.show(error.localizedDescription, style: .warning)
+            }
+            return
+        }
         let retryable = (error as? DictationError)?.isRetryable ?? false
         lastFailureRetryable = retryable
         phase = .failed(error.localizedDescription)
-        if retryable {
-            DictationOverlayController.shared.setClickThrough(false)
-        } else {
-            DictationOverlayController.shared.setClickThrough(true)
-            scheduleHide()
-        }
+        restoreCaptionsIfRecording()
+        // Esc stays registered until the overlay hides, so a failure always has a way out.
+        DictationOverlayController.shared.setClickThrough(!retryable)
+        scheduleHide()
     }
 
     private func finishMic() {
@@ -467,16 +477,16 @@ final class DictationController {
 
     private func scheduleHide() {
         hideTask?.cancel()
-        hideTask = Task {
-            try? await Task.sleep(for: .milliseconds(phase == .done ? 720 : 1600))
-            guard !Task.isCancelled else { return }
-            if !phase.isActive {
-                phase = .idle
-                preview = ""
-                isToggle = false
-                DictationOverlayController.shared.setVisible(false)
-                restoreCaptionsIfRecording()
+        let delay: Duration =
+            switch phase {
+            case .done: .milliseconds(720)
+            case .failed where lastFailureRetryable: .seconds(5)
+            default: .milliseconds(1600)
             }
+        hideTask = Task {
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled, !phase.isActive else { return }
+            resetToIdle()
         }
     }
 

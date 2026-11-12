@@ -76,17 +76,7 @@ struct DictationOverlayView: View {
     @ViewBuilder
     private var trailingAction: some View {
         if isLive {
-            Button {
-                dictation.cancel()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Theme.textSecondary)
-                    .frame(width: 22, height: 22)
-                    .background(Theme.fillSubtle, in: Circle())
-            }
-            .buttonStyle(.plain)
-            .help("Cancel (Esc)")
+            closeButton
         } else if case .failed = dictation.phase, dictation.lastFailureRetryable {
             Button("Retry") {
                 dictation.retry()
@@ -95,7 +85,22 @@ struct DictationOverlayView: View {
             .buttonStyle(.borderedProminent)
             .tint(Theme.accent)
             .controlSize(.regular)
+            closeButton
         }
+    }
+
+    private var closeButton: some View {
+        Button {
+            dictation.cancel()
+        } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(Theme.textSecondary)
+                .frame(width: 22, height: 22)
+                .background(Theme.fillSubtle, in: Circle())
+        }
+        .buttonStyle(.plain)
+        .help(isLive ? "Cancel (Esc)" : "Close (Esc)")
     }
 
     private var statusTitle: String {

@@ -161,12 +161,12 @@ enum DictationError: LocalizedError {
     case cancelled
 
     /// One retry is worth it when the cause may have cleared on its own
-    /// (silence, a busy mic, a transient connection). A rejected server
-    /// response or a cancellation will fail identically again.
+    /// (silence, a transient connection). A rejected server response, a
+    /// cancellation or a meeting holding the mic will fail identically again.
     var isRetryable: Bool {
         switch self {
-        case .empty, .micBusy, .audioFormat, .museConnect: true
-        case .museFailed, .cancelled: false
+        case .empty, .audioFormat, .museConnect: true
+        case .museFailed, .cancelled, .micBusy: false
         }
     }
 

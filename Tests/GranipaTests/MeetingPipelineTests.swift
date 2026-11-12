@@ -83,7 +83,6 @@ import Testing
 @Suite struct DictationRetryContractTests {
     @Test func transientCausesAreRetryable() {
         #expect(DictationError.empty.isRetryable)
-        #expect(DictationError.micBusy.isRetryable)
         #expect(DictationError.audioFormat.isRetryable)
         #expect(DictationError.museConnect.isRetryable)
     }
@@ -91,5 +90,6 @@ import Testing
     @Test func deterministicCausesAreNot() {
         #expect(!DictationError.museFailed("bad key").isRetryable)
         #expect(!DictationError.cancelled.isRetryable)
+        #expect(!DictationError.micBusy.isRetryable)
     }
 }

@@ -126,6 +126,16 @@
             }
         }
 
+        @Test func micBusyReturnsToIdleWithoutOfferingRetry() async {
+            let controller = hookedController(captureError: DictationError.micBusy)
+            defer { controller.cancel() }
+
+            controller.toggleFromMenu()
+            #expect(await waitUntil { controller.phase == .idle })
+            #expect(!controller.lastFailureRetryable)
+            #expect(!controller.hasOpenCapture)
+        }
+
         @Test func holdAfterListeningCommitsBufferedText() async {
             var committed: String?
             let controller = hookedController(transcribe: { chunks in
