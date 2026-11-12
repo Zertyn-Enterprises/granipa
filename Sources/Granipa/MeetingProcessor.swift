@@ -1,0 +1,214 @@
+import Foundation
+import Observation
+import os
+
+/// Post-recording pipeline: transcript (from the recorded files, or the live
+/// coordinator draining) → diarize → enhance → ready status and webhooks.
+/// Each meeting's job is kept so callers can await it.
+@MainActor
+@Observable
+final class MeetingProcessor {
+    /// What the pipeline needs back from the app: store writes go through
+    /// `update` so the in-memory meeting list stays in sync.
+    struct Host {
+        var update: @MainActor (Meeting) -> Void
+        var folder: @MainActor (Meeting) -> Folder?
+        var reportError: @MainActor (String) -> Void
+    }
+
+    enum Source {
+        case files(micURL: URL, systemURL: URL, language: String)
+        /// Waits for the live coordinator to finish; returns whether the
+        /// system channel was transcribed by Muse (which also diarizes).
+        case live(drain: @MainActor () async -> Bool)
+    }
+
+    private static let log = Logger(subsystem: "com.zertyn.granipa", category: "transcription")
+
+    private(set) var processingMeetingID: String?
+    private(set) var enhancingMeetingIDs: Set<String> = []
+
+    @ObservationIgnored private let database: AppDatabase
+    @ObservationIgnored private let host: Host
+    @ObservationIgnored private var jobs: [String: Task<Void, Never>] = [:]
+
+    init(database: AppDatabase, host: Host) {
+        self.database = database
+        self.host = host
+    }
+
+    func process(meetingID id: String, source: Source) async {
+        let job = Task { await run(meetingID: id, source: source) }
+        jobs[id] = job
+        await job.value
+        jobs[id] = nil
+    }
+
+    private func run(meetingID id: String, source: Source) async {
+        processingMeetingID = id
+        defer {
+            if processingMeetingID == id {
+                processingMeetingID = nil
+            }
+        }
+        switch source {
+        case .live(let drain):
+            let usedMuseForSystem = await drain()
+            await postProcess(meetingID: id, skipLocalDiarize: usedMuseForSystem)
+        case .files(let micURL, let systemURL, let language):
+            let db = database
+            let outcome = await Task.detached {
+                await FileMeetingTranscriber.transcribe(
+                    micURL: micURL,
+                    systemURL: systemURL,
+                    meetingID: id,
+                    language: language,
+                    database: db)
+            }.value
+            await postProcess(meetingID: id, skipLocalDiarize: false, fileTranscription: outcome)
+        }
+    }
+
+    private func postProcess(
+        meetingID: String,
+        skipLocalDiarize: Bool,
+        fileTranscription: FileMeetingTranscriber.Outcome? = nil
+    ) async {
+        if case .failed(let failure) = fileTranscription {
+            // Generic toast for the user; the underlying error is logged at
+            // the catch site in FileMeetingTranscriber.
+            Self.log.error(
+                "post-meeting transcription failed for \(meetingID, privacy: .public): \(failure.logDescription, privacy: .public)"
+            )
+            ToastController.shared.show(
+                "Transcription failed — your audio was saved", style: .warning)
+        }
+        await diarize(meetingID: meetingID, skipLocalDiarize: skipLocalDiarize)
+        await enhance(meetingID: meetingID)
+        finish(meetingID: meetingID)
+    }
+
+    private func diarize(meetingID: String, skipLocalDiarize: Bool) async {
+        let db = database
+        let defaults = UserDefaults.standard
+        let diarizationEnabled = defaults.object(forKey: "diarizationEnabled") as? Bool ?? true
+        let inferNames = defaults.object(forKey: "inferSpeakerNames") as? Bool ?? true
+        let providerID = defaults.string(forKey: "llmProvider") ?? "claude"
+
+        if skipLocalDiarize {
+            if inferNames {
+                try? await DiarizationService.inferNames(
+                    meetingID: meetingID, database: db, providerID: providerID)
+            }
+        } else if diarizationEnabled, let meeting = try? db.fetchMeeting(id: meetingID) {
+            // DiarizationService returns before prepareModels when there are
+            // no final system segments, so a failed transcription with zero
+            // segments is already a cheap no-op here.
+            do {
+                try await DiarizationService.diarize(
+                    meetingID: meetingID,
+                    audioSystemPath: meeting.audioSystemPath,
+                    database: db,
+                    nameInferenceProviderID: inferNames ? providerID : nil)
+            } catch {
+                // Best-effort: segments keep their "Them" label, but leave evidence.
+                Logger(subsystem: "com.zertyn.granipa", category: "diarization")
+                    .error("diarization failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    /// Marks the meeting ready and announces it with its final transcript.
+    private func finish(meetingID: String) {
+        let db = database
+        if var finished = try? db.fetchMeeting(id: meetingID) {
+            finished.status = .ready
+            host.update(finished)
+        }
+
+        if let meeting = try? db.fetchMeeting(id: meetingID) {
+            let segments = (try? db.fetchSegments(meetingID: meetingID, finalOnly: true)) ?? []
+            WebhookService.enqueue(
+                event: .meetingCompleted,
+                payload: MeetingCompletedPayload(
+                    timestamp: .now,
+                    meeting: MeetingDetailDTO(meeting, folder: host.folder(meeting)),
+                    transcript: segments.map(SegmentDTO.init)),
+                database: db)
+            Task { await WebhookService.deliverDue(database: db) }
+        }
+    }
+
+    func enhance(meetingID: String) async {
+        let db = database
+        guard !enhancingMeetingIDs.contains(meetingID) else { return }
+        guard let meeting = try? db.fetchMeeting(id: meetingID) else { return }
+        let segments = (try? db.fetchSegments(meetingID: meetingID, finalOnly: true)) ?? []
+        let hasNotes = !meeting.notesMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard !segments.isEmpty || hasNotes else { return }
+
+        enhancingMeetingIDs.insert(meetingID)
+        defer { enhancingMeetingIDs.remove(meetingID) }
+
+        let template =
+            meeting.templateID.flatMap { try? db.fetchTemplate(id: $0) }
+            ?? MeetingTemplate.builtins.first
+        let prompt = EnhancementService.buildPrompt(
+            template: template,
+            notes: meeting.notesMarkdown,
+            transcript: EnhancementService.transcriptText(segments: segments))
+        let providerID = UserDefaults.standard.string(forKey: "llmProvider") ?? "claude"
+
+        let raw: String
+        do {
+            raw = try await LLMService.generate(providerID: providerID, prompt: prompt)
+        } catch {
+            host.reportError(Self.enhancementFailureMessage(error))
+            return
+        }
+        applyEnhancement(raw: raw, meetingID: meetingID)
+    }
+
+    private static func enhancementFailureMessage(_ error: Error) -> String {
+        let message = error.localizedDescription
+        let lower = message.lowercased()
+        let hint =
+            lower.contains("login") || lower.contains("auth")
+                || lower.contains("credential") || lower.contains("api key")
+            ? " The CLI isn't signed in — open Terminal, run it once, and complete the browser login (Settings → AI has a Test button)."
+            : ""
+        return "Enhancement failed: \(message)\(hint)"
+    }
+
+    private func applyEnhancement(raw: String, meetingID: String) {
+        let db = database
+        guard let result = try? EnhancementService.parse(raw) else {
+            // The model replied but we couldn't structure it (e.g. unescaped verbatim
+            // quotes or a truncated reply). Keep its work as the report instead of
+            // discarding everything, and surface a non-blocking notice.
+            guard var updated = try? db.fetchMeeting(id: meetingID) else { return }
+            updated.enhancedNotesMarkdown = EnhancementService.salvagedReport(from: raw)
+            host.update(updated)
+            ToastController.shared.show(
+                "Notes saved, but couldn't format fully", style: .warning)
+            return
+        }
+
+        guard var updated = try? db.fetchMeeting(id: meetingID) else { return }
+        updated.summary = result.summary
+        updated.enhancedNotesMarkdown = result.enhancedNotes
+        updated.actionItemsJSON = ActionItem.encodeList(result.actionItems ?? [])
+        updated.emailDraft = result.emailDraft
+        if updated.title == "Untitled meeting", let title = result.title, !title.isEmpty {
+            updated.title = title
+        }
+        host.update(updated)
+        WebhookService.enqueue(
+            event: .notesEnhanced,
+            payload: NotesEnhancedPayload(
+                timestamp: .now,
+                meeting: MeetingDetailDTO(updated, folder: host.folder(updated))),
+            database: db)
+        Task { await WebhookService.deliverDue(database: db) }
+    }
+}
