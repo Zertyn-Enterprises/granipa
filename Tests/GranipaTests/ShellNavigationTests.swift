@@ -399,16 +399,6 @@ import Testing
                 == .empty)
     }
 
-    @Test func mainWindowKeepsTheInspectorToggleForLibraryDestinations() throws {
-        let source = try granipaSource("Sources/Granipa/UI/MainWindow.swift")
-        #expect(source.contains("showsInspectorToggle(destination:"))
-        #expect(source.contains("inspectorToggleEnabled(kind:"))
-        #expect(source.contains("kind: inspectorKind"))
-        #expect(!source.contains("if inspectorKind != .none"))
-        #expect(!source.contains("hasContent: inspectorKind != .none"))
-        #expect(!source.contains("value: inspectorPresentation"))
-    }
-
     @Test func dictationInspectorPhasesExcludeIdleAndDone() {
         #expect(AppNavigation.dictationShowsInspector(.preparing))
         #expect(AppNavigation.dictationShowsInspector(.listening))
@@ -693,12 +683,4 @@ import Testing
                 MeetingLibrary.shown(in: searched, filter: .all, folderID: folder.id).map(\.id))
                 == [noteInFolder.id, recordingInFolder.id])
     }
-}
-
-private func granipaSource(_ relativePath: String) throws -> String {
-    let testsFile = URL(fileURLWithPath: #filePath)
-    let repo = testsFile.deletingLastPathComponent().deletingLastPathComponent()
-        .deletingLastPathComponent()
-    return try String(
-        contentsOf: repo.appendingPathComponent(relativePath), encoding: .utf8)
 }

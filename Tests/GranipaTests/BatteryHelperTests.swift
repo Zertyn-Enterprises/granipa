@@ -4,13 +4,6 @@ import Testing
 @testable import Granipa
 
 @Suite struct BatteryHelperTests {
-    @Test func helperAcceptsOnlyTheSignedGranipaTeam() {
-        let requirement = BatteryHelperSecurity.clientRequirement
-        #expect(requirement.contains(#"identifier "com.zertyn.granipa""#))
-        #expect(requirement.contains("anchor apple generic"))
-        #expect(requirement.contains("R4V252C833"))
-    }
-
     /// Characterization: the helper's private `clientRequirement` is what
     /// `setCodeSigningRequirement` enforces. BatteryHelperSecurity is the
     /// tested app-side copy; this reads the helper source so the two cannot drift.

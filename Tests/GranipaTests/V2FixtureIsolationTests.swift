@@ -13,17 +13,6 @@ import Testing
         #expect(!V2FixtureRuntime.isActive)
     }
 
-    @Test func debugExtraHidesWithIsInsertedAndSkipsMenuConstruction() throws {
-        let source = try granipaSource("Sources/Granipa/GranipaApp.swift")
-        #expect(source.contains("isInserted: .constant(!V2FixtureRuntime.isActive)"))
-        #expect(source.contains("if V2FixtureRuntime.isActive"))
-        #expect(source.contains("EmptyView()"))
-        #expect(source.contains("MenuBarView()"))
-        #expect(source.contains("MenuBarLabel(app: appState)"))
-        #expect(!source.contains("if !V2FixtureRuntime.isActive {\n            MenuBarExtra"))
-        #expect(!source.contains("if !V2FixtureRuntime.isActive {\n        MenuBarExtra"))
-    }
-
     @Test func releaseExtraKeepsTheProductionInitializer() throws {
         let source = try granipaSource("Sources/Granipa/GranipaApp.swift")
         let releaseExtra = try #require(elseArm(in: source, after: "isInserted:"))

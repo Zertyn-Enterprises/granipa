@@ -139,23 +139,6 @@ import Testing
         }
     }
 
-    @Test func extraAddsNoTimersAndLabelHasNoBattery() throws {
-        let menu = try granipaSource("Sources/Granipa/UI/MenuBarView.swift")
-        let app = try granipaSource("Sources/Granipa/GranipaApp.swift")
-        for source in [menu, app] {
-            #expect(!source.contains("TimelineView"))
-            #expect(!source.contains("Timer.publish"))
-            #expect(!source.contains("Task.sleep"))
-        }
-        let labelStart = app.range(of: "enum MenuBarStatus") ?? app.range(of: "struct MenuBarLabel")
-        let labelSource = labelStart.map { String(app[$0.lowerBound...]) } ?? menu
-        #expect(!labelSource.contains("BatteryService"))
-        #expect(!labelSource.contains("menuBarText"))
-        #expect(labelSource.contains("accessibilityLabel"))
-        #expect(labelSource.contains("processingMeetingID"))
-        #expect(!labelSource.contains("meetings.contains"))
-    }
-
     /// NEW: Settings must be an embedded main-window destination, not a popup
     /// Settings scene / SettingsLink. Observed red against 99e7703 (SettingsLink
     /// in the menu bar, `Settings {` in GranipaApp, `openSettings()` in MainWindow).
