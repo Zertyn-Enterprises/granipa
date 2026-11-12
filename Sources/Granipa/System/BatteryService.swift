@@ -316,14 +316,14 @@ final class BatteryService {
         guard smc.open() else { return nil }
         let preferredKey = temperatureKey
         if let preferredKey,
-            let value = try? smc.readSP78(preferredKey),
+            let value = try? smc.readTemperature(preferredKey),
             value > 0, value < 90
         {
             return value
         }
         temperatureKey = nil
         for key in tempKeys where key != preferredKey {
-            if let value = try? smc.readSP78(key), value > 0, value < 90 {
+            if let value = try? smc.readTemperature(key), value > 0, value < 90 {
                 temperatureKey = key
                 return value
             }

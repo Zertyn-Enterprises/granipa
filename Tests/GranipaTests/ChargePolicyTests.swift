@@ -83,6 +83,16 @@ import Testing
         #expect(MagSafeLEDMode.system.smcByte(isCharging: true) == 0)
     }
 
+    @Test(arguments: [
+        ("sp78", [0x23, 0x80, 0, 0] as [UInt8], 35.5 as Double?),
+        ("flt ", [0x00, 0x00, 0x0E, 0x42], 35.5),
+        ("ui8 ", [0x23, 0x80, 0, 0], nil),
+    ])
+    func temperatureDecodesByReportedType(type: String, bytes: [UInt8], celsius: Double?) {
+        #expect(
+            SMCClient.decodeTemperature(dataType: SMCClient.fourChar(type), bytes: bytes) == celsius)
+    }
+
     @Test func smcParamStructIsEightyBytes() {
         #expect(SMCClient.paramStride == 80)
     }
