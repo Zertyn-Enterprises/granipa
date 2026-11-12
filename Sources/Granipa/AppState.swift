@@ -357,6 +357,11 @@ final class AppState {
         guard recordingStartTask == nil, !recorder.isBusy else { return }
         let targetID: String
         if let meetingID {
+            // Its audio folder is fixed per meeting, so a second take would
+            // overwrite the first recording.
+            guard let existing = meetings.first(where: { $0.id == meetingID }),
+                existing.audioMicPath == nil, existing.audioSystemPath == nil
+            else { return }
             targetID = meetingID
         } else {
             let event = calendar.currentEvent()

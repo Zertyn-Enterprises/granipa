@@ -4,12 +4,9 @@ import Testing
 @testable import Granipa
 
 @Suite struct MeetingPermissionsStyleTests {
-    @Test func playbackRecordUsesSharedPrimaryControl() throws {
+    @Test func playbackBarKeepsTransportSizing() throws {
         let source = try granipaSource("Sources/Granipa/UI/MeetingPlaybackBar.swift")
-        #expect(source.contains("granipaPrimaryControl()"))
         #expect(!source.contains(".buttonStyle(.bordered)"))
-        #expect(source.contains(".disabled(app.recorder.isBusy)"))
-        #expect(source.contains("app.startRecording(meetingID: meeting.id)"))
         #expect(source.contains("frame(height: 44)"))
         #expect(source.contains("PlaybackTransport.ringSize"))
         #expect(PlaybackTransport.ringSize == 44)

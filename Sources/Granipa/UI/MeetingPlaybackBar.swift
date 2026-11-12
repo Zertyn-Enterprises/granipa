@@ -91,7 +91,6 @@ struct MeetingPlaybackBar: View {
             if playback.availableChannels.count > 1 {
                 channelPicker
             }
-            recordButton
         }
 
         return Group {
@@ -187,21 +186,6 @@ struct MeetingPlaybackBar: View {
         .labelsHidden()
         .accessibilityLabel("Audio channel")
         .help("Play the microphone or system recording — not both")
-    }
-
-    private var recordButton: some View {
-        Button {
-            app.startRecording(meetingID: meeting.id)
-        } label: {
-            Label("Record", systemImage: "record.circle")
-                .font(.system(size: 12, weight: .semibold))
-                .labelStyle(.titleAndIcon)
-        }
-        .granipaPrimaryControl()
-        .controlSize(.small)
-        .disabled(app.recorder.isBusy)
-        .help(app.recorder.isBusy ? "Recording" : "Record")
-        .accessibilityLabel(app.recorder.isBusy ? "Recording" : "Record")
     }
 
     private var channelBinding: Binding<AudioChannel> {
