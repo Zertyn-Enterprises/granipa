@@ -400,7 +400,6 @@ private struct SettingsSubNav: View {
 private struct GeneralSettings: View {
     @Environment(AppState.self) private var app
     @AppStorage("defaultLocale") private var defaultLocale = "auto"
-    @AppStorage("echoCancellation") private var echoCancellation = true
     @AppStorage("liveMeetingASR") private var liveMeetingASR = false
     @AppStorage("meetingCaptionsEnabled") private var meetingCaptions = true
     @AppStorage("meetingSystemEngine") private var meetingSystemEngine = "local"
@@ -503,10 +502,6 @@ private struct GeneralSettings: View {
                 Text("90 days").tag(90)
             }
             Text("Transcripts and notes are always kept; this only removes the m4a recordings (~30 MB per hour).")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Toggle("Echo cancellation (mic)", isOn: $echoCancellation)
-            Text("Stops other participants' voices from bleeding into your mic channel.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
