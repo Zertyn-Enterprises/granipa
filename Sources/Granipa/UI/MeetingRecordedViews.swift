@@ -431,21 +431,12 @@ struct MeetingTranscriptView: View {
 
     @FocusState private var searchFocused: Bool
     @State private var talkReport: SpeakerTalkTime.Report?
+    @State private var rowsCache = TranscriptRowsCache()
+    @State private var currentIDs: Set<String> = []
+    @State private var pendingStart: TranscriptPendingStart?
 
     private var shown: [TranscriptSegment] {
         live.map(\.liveSegments) ?? segments
-    }
-
-    private var filtered: [TranscriptSegment] {
-        TranscriptQuery.filter(segments: shown, query: search, speaker: speakerFilter)
-    }
-
-    private var speakers: [String] {
-        TranscriptQuery.speakers(in: shown)
-    }
-
-    private var currentIDs: Set<String> {
-        Set(TranscriptQuery.containing(shown, at: playback.currentTime).map(\.id))
     }
 
     private var canPlay: Bool {
@@ -509,10 +500,8 @@ struct MeetingTranscriptView: View {
     }
 
     private var populated: some View {
-        // One shared computation per render; per-tick reads below stay O(1).
-        let rows = filtered
-        let currentIDs = self.currentIDs
-        let speakerNames = speakers
+        let (rows, speakerNames) = rowsCache.rows(
+            for: shown, query: search, speaker: speakerFilter)
 
         return VStack(spacing: 0) {
             toolbar(speakers: speakerNames)
@@ -525,18 +514,8 @@ struct MeetingTranscriptView: View {
                                 segment: segment,
                                 isCurrent: currentIDs.contains(segment.id),
                                 isSelected: selectedID == segment.id,
-                                onPlay: canPlay
-                                    ? {
-                                        selectedID = segment.id
-                                        playback.seek(to: segment.startSeconds)
-                                        playback.play()
-                                    } : nil,
-                                onSelect: {
-                                    selectedID = segment.id
-                                    if canPlay {
-                                        playback.seek(to: segment.startSeconds)
-                                    }
-                                }
+                                onPlay: canPlay ? { start(segment, play: true) } : nil,
+                                onSelect: { start(segment, play: false) }
                             )
                             .id(segment.id)
                             .contextMenu {
@@ -552,13 +531,11 @@ struct MeetingTranscriptView: View {
                     .padding(.vertical, 18)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .onChange(of: playback.currentTime) {
-                    guard autoscroll else { return }
-                    if let id = TranscriptQuery.containing(rows, at: playback.currentTime)
-                        .first?.id
-                    {
-                        proxy.scrollTo(id, anchor: .center)
-                    }
+                .onChange(of: currentIDs) {
+                    guard autoscroll,
+                        let id = rows.first(where: { currentIDs.contains($0.id) })?.id
+                    else { return }
+                    proxy.scrollTo(id, anchor: .center)
                 }
                 .onChange(of: rows.count) {
                     guard autoscroll, let last = rows.last else { return }
@@ -573,7 +550,35 @@ struct MeetingTranscriptView: View {
                 .keyboardShortcut("f", modifiers: .command)
                 .hidden()
                 .accessibilityHidden(true)
+            TranscriptPlaybackCursor(playback: playback, rows: rows, currentIDs: $currentIDs)
         }
+        // loadedURL always changes once the other channel's file is open, even
+        // when the preparing state never reaches a render.
+        .onChange(of: playback.loadedURL) {
+            guard let pending = pendingStart else { return }
+            pendingStart = nil
+            guard playback.state == .ready else { return }
+            playback.seek(to: pending.seconds)
+            if pending.play { playback.play() }
+        }
+        .onChange(of: playback.state) { _, state in
+            if case .failed = state { pendingStart = nil }
+        }
+    }
+
+    /// Plays or cues a line from its own channel's file.
+    private func start(_ segment: TranscriptSegment, play: Bool) {
+        selectedID = segment.id
+        guard canPlay else { return }
+        if segment.channel != playback.channel,
+            playback.availableChannels.contains(segment.channel)
+        {
+            pendingStart = TranscriptPendingStart(seconds: segment.startSeconds, play: play)
+            playback.selectChannel(segment.channel)
+            return
+        }
+        playback.seek(to: segment.startSeconds)
+        if play { playback.play() }
     }
 
     private func toolbar(speakers: [String]) -> some View {
