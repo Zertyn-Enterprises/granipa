@@ -598,8 +598,8 @@ private struct DictationSettings: View {
     @AppStorage("dictationLocale") private var dictationLocale = "auto"
     @AppStorage("probeLocales") private var probeLocalesRaw = "en-US,es-ES"
     @AppStorage("dictationRewrite") private var rewrite = "off"
-    @AppStorage("rewriteCustomURL") private var rewriteURL = "http://127.0.0.1:11434/v1"
-    @AppStorage("rewriteCustomModel") private var rewriteModel = "llama3.2"
+    @AppStorage("rewriteCustomURL") private var rewriteURL = RewriteClient.defaultCustomURL
+    @AppStorage("rewriteCustomModel") private var rewriteModel = RewriteClient.defaultCustomModel
     @Binding var drafts: DictationKeyDrafts
 
     private var probeIDs: [String] {

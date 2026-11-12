@@ -21,6 +21,8 @@ enum RewriteError: LocalizedError {
 enum RewriteClient {
     static let spaceXAIBase = "https://api.x.ai/v1"
     static let spaceXAIModel = "grok-4.6"
+    static let defaultCustomURL = "http://127.0.0.1:11434/v1"
+    static let defaultCustomModel = "llama3.2"
 
     static let systemPrompt = """
         You clean up voice dictation. Return ONLY the rewritten text.
@@ -34,6 +36,15 @@ enum RewriteClient {
         guard !base.isEmpty else { return nil }
         if base.hasSuffix("/chat/completions") { return URL(string: base) }
         return URL(string: base + "/chat/completions")
+    }
+
+    /// @AppStorage never writes its default, so an untouched Settings field
+    /// must resolve to the same value the field shows.
+    static func customEndpoint(_ defaults: UserDefaults = .standard) -> (base: String, model: String) {
+        (
+            defaults.string(forKey: "rewriteCustomURL") ?? defaultCustomURL,
+            defaults.string(forKey: "rewriteCustomModel") ?? defaultCustomModel
+        )
     }
 
     static func parseContent(from json: String) -> String? {
@@ -68,11 +79,10 @@ enum RewriteClient {
                 text: text,
                 extra: ["search_parameters": ["mode": "off"]])
         case .custom:
-            let raw = UserDefaults.standard.string(forKey: "rewriteCustomURL") ?? ""
+            let (raw, model) = customEndpoint()
             guard let url = completionsURL(from: raw) else {
                 throw RewriteError.empty
             }
-            let model = UserDefaults.standard.string(forKey: "rewriteCustomModel") ?? ""
             guard !model.isEmpty else { throw RewriteError.empty }
             let key = KeychainStore.get(account: KeychainStore.rewriteCustomKeyAccount)
             return try await post(url: url, model: model, apiKey: key, text: text, extra: [:])
