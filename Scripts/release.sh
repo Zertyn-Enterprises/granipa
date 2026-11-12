@@ -14,13 +14,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PROFILE="${NOTARY_PROFILE:-granipa}"
-SIGN_ID="${CODESIGN_ID:-$(security find-identity -v -p codesigning 2>/dev/null \
-  | awk -F'"' '/Developer ID Application/ {print $2; exit}')}"
 
-if [ -z "$SIGN_ID" ]; then
-  echo "ERROR: no 'Developer ID Application' certificate found." >&2
-  echo "Create one in Xcode > Settings > Accounts > Manage Certificates," >&2
-  echo "or pass CODESIGN_ID explicitly." >&2
+# A release must be reproducible from a commit: refuse uncommitted or
+# untracked changes.
+if [ -n "$(git status --porcelain)" ]; then
+  echo "ERROR: git working tree is dirty; commit or remove these changes before releasing:" >&2
+  git status --short >&2
   exit 1
 fi
 
@@ -28,8 +27,10 @@ VERSION=$(plutil -extract CFBundleShortVersionString raw Resources/Info.plist)
 APP="build/Grañipa.app"
 ZIP="build/Granipa-v$VERSION.zip"
 
-echo "==> Building release (signing as: $SIGN_ID)"
-CODESIGN_ID="$SIGN_ID" ./Scripts/bundle.sh release
+# bundle.sh resolves the signing identity: a Developer ID Application
+# certificate of the expected team only, honoring CODESIGN_ID.
+echo "==> Building release"
+./Scripts/bundle.sh release
 
 echo "==> Verifying signature"
 codesign --verify --strict --verbose=2 "$APP"
