@@ -60,8 +60,13 @@ enum MeetingExporter {
             panel.allowedContentTypes = [markdownType]
         }
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        try? content.write(to: url, atomically: true, encoding: .utf8)
-        ToastController.shared.show("Exported")
+        do {
+            try content.write(to: url, atomically: true, encoding: .utf8)
+            ToastController.shared.show("Exported")
+        } catch {
+            ToastController.shared.show(
+                "Export failed: \(error.localizedDescription)", style: .warning)
+        }
     }
 
     @MainActor
