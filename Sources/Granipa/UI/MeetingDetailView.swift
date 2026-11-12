@@ -59,7 +59,10 @@ enum MeetingTabAccessory {
 
 struct MeetingDetailView: View {
     @Environment(AppState.self) private var app
+    /// Editor copy; `baseline` is the stored meeting it was last synced to,
+    /// so a save writes only what the user changed since.
     @State private var meeting: Meeting
+    @State private var baseline: Meeting
     @State private var tab: Tab
     @State private var transcript = MeetingTranscriptModel()
     @State private var enhancedDocument = EnhancedNotesDocument()
@@ -102,6 +105,7 @@ struct MeetingDetailView: View {
 
     init(meeting: Meeting, preferNotes: Bool = false) {
         _meeting = State(initialValue: meeting)
+        _baseline = State(initialValue: meeting)
         _tab = State(initialValue: Self.initialTab(preferNotes: preferNotes))
     }
 
@@ -159,6 +163,12 @@ struct MeetingDetailView: View {
         }
         .task(id: taskKey) { loadSegments() }
         .task(id: audioPathsKey) { reloadPlayback() }
+        .onChange(of: freshMeeting) { _, stored in
+            // Pipeline and Home writes (AI title, folder move, language) flow
+            // into fields the user is not editing.
+            meeting = Meeting.mergingEditorEdits(meeting, baseline: baseline, into: stored)
+            baseline = stored
+        }
         .onChange(of: transcript.phase) { _, phase in
             guard case .loaded = phase else { return }
             speakerFilter = TranscriptQuery.retainedSpeakerFilter(
@@ -609,6 +619,7 @@ struct MeetingDetailView: View {
     private func scheduleSave() {
         saveTask?.cancel()
         let snapshot = meeting
+        let snapshotBaseline = baseline
         saveTask = Task {
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled else { return }
@@ -619,20 +630,27 @@ struct MeetingDetailView: View {
             guard let current = app.meetings.first(where: { $0.id == snapshot.id }) else {
                 return
             }
-            app.update(Meeting.mergingEditorEdits(snapshot, into: current))
+            let merged = Meeting.mergingEditorEdits(
+                snapshot, baseline: snapshotBaseline, into: current)
+            if merged != current {
+                app.update(merged)
+            }
         }
     }
 }
 
 extension Meeting {
-    /// Fields the detail editor owns; every other field comes from `current`
-    /// so a stale editor copy never clobbers pipeline writes.
-    static func mergingEditorEdits(_ edited: Meeting, into current: Meeting) -> Meeting {
+    /// The editor-owned fields the user changed since `baseline`, applied to
+    /// `current`; everything else comes from `current`, so a stale editor copy
+    /// never clobbers pipeline or library writes.
+    static func mergingEditorEdits(
+        _ edited: Meeting, baseline: Meeting, into current: Meeting
+    ) -> Meeting {
         var merged = current
-        merged.title = edited.title
-        merged.notesMarkdown = edited.notesMarkdown
-        merged.folderID = edited.folderID
-        merged.templateID = edited.templateID
+        if edited.title != baseline.title { merged.title = edited.title }
+        if edited.notesMarkdown != baseline.notesMarkdown { merged.notesMarkdown = edited.notesMarkdown }
+        if edited.folderID != baseline.folderID { merged.folderID = edited.folderID }
+        if edited.templateID != baseline.templateID { merged.templateID = edited.templateID }
         return merged
     }
 }

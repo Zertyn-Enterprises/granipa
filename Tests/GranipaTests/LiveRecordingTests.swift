@@ -136,7 +136,7 @@ import Testing
         edited.notesMarkdown = "decision: ship friday"
         edited.folderID = folder.id
         edited.templateID = "template-2"
-        try db.save(Meeting.mergingEditorEdits(edited, into: stopped))
+        try db.save(Meeting.mergingEditorEdits(edited, baseline: recording, into: stopped))
 
         let fetched = try #require(try db.fetchMeeting(id: recording.id))
         #expect(fetched.title == "Renamed sync")
@@ -158,11 +158,38 @@ import Testing
         current.emailDraft = "draft"
         var edited = current
         edited.title = "Standup — Q3"
-        let merged = Meeting.mergingEditorEdits(edited, into: current)
+        let merged = Meeting.mergingEditorEdits(edited, baseline: current, into: current)
         #expect(merged.title == "Standup — Q3")
         #expect(merged.summary == "pipeline summary")
         #expect(merged.enhancedNotesMarkdown == "## enhanced")
         #expect(merged.actionItemsJSON == "[]")
         #expect(merged.emailDraft == "draft")
+    }
+
+    /// Only fields changed since the editor's baseline overwrite the store.
+    @Test(arguments: [
+        // (store title, editor title, editor notes, store folder, editor folder) → title, notes, folder
+        ("AI title", "Untitled meeting", "typed", "f1", "f1", "AI title", "typed", "f1"),
+        ("Untitled meeting", "Mine", "", "f1", "f1", "Mine", "", "f1"),
+        ("Untitled meeting", "Untitled meeting", "", "f2", "f1", "Untitled meeting", "", "f2"),
+        ("Untitled meeting", "Untitled meeting", "", "f2", "f3", "Untitled meeting", "", "f3"),
+        ("AI title", "Untitled meeting", "", "f2", "f1", "AI title", "", "f2"),
+    ])
+    func mergeWritesOnlyEditedFields(
+        _ c: (String, String, String, String, String, String, String, String)
+    ) {
+        var baseline = Meeting.new(title: "Untitled meeting", language: "auto")
+        baseline.folderID = "f1"
+        var current = baseline
+        current.title = c.0
+        current.folderID = c.3
+        var edited = baseline
+        edited.title = c.1
+        edited.notesMarkdown = c.2
+        edited.folderID = c.4
+        let merged = Meeting.mergingEditorEdits(edited, baseline: baseline, into: current)
+        #expect(merged.title == c.5)
+        #expect(merged.notesMarkdown == c.6)
+        #expect(merged.folderID == c.7)
     }
 }
