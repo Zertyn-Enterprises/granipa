@@ -43,6 +43,17 @@ import Testing
             timeout: 15)
         #expect(output.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "300000")
     }
+
+    @Test func childIgnoringLargeStdinDoesNotRaiseSIGPIPE() async throws {
+        let output = try await LLMRunner.run(
+            executable: URL(fileURLWithPath: "/usr/bin/true"),
+            arguments: [],
+            stdin: String(repeating: "x", count: 300_000),
+            timeout: 15)
+        #expect(output.stdout.isEmpty)
+        // The stdin writer runs detached; give a pending EPIPE time to land here.
+        try await Task.sleep(for: .milliseconds(300))
+    }
 }
 
 @Suite struct EnhancementServiceTests {
