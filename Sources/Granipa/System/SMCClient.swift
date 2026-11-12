@@ -73,15 +73,34 @@ final class SMCClient: @unchecked Sendable {
         (try? readInfo(name)) != nil
     }
 
-    func readSP78(_ name: String) throws -> Double {
-        let size = try readInfo(name)
+    /// Reads a temperature key in whichever encoding the SMC reports for it.
+    func readTemperature(_ name: String) throws -> Double {
+        let info = try readInfo(name)
         var input = SMCParamStruct()
         input.key = Self.fourChar(name)
         input.data8 = 5
-        input.dataSize = size
+        input.dataSize = info.dataSize
         let output = try call(&input)
-        let integer = Double(Int8(bitPattern: output.b0))
-        return integer + Double(output.b1) / 256.0
+        guard
+            let value = Self.decodeTemperature(
+                dataType: info.dataType, bytes: [output.b0, output.b1, output.b2, output.b3])
+        else { throw SMCClientError.failed }
+        return value
+    }
+
+    /// `sp78` is big-endian signed 7.8 fixed point (Intel); `flt ` is a
+    /// little-endian Float32 (reported on Apple Silicon). Other types are
+    /// rejected rather than guessed.
+    static func decodeTemperature(dataType: UInt32, bytes: [UInt8]) -> Double? {
+        switch dataType {
+        case fourChar("sp78") where bytes.count >= 2:
+            return Double(Int8(bitPattern: bytes[0])) + Double(bytes[1]) / 256.0
+        case fourChar("flt ") where bytes.count >= 4:
+            let bits = bytes[0..<4].reversed().reduce(UInt32(0)) { $0 << 8 | UInt32($1) }
+            return Double(Float32(bitPattern: bits))
+        default:
+            return nil
+        }
     }
 
     func writeU8(_ name: String, _ value: UInt8) throws {
@@ -93,12 +112,12 @@ final class SMCClient: @unchecked Sendable {
         try write(name, bytes: bytes, size: 4)
     }
 
-    private func readInfo(_ name: String) throws -> UInt32 {
+    private func readInfo(_ name: String) throws -> (dataSize: UInt32, dataType: UInt32) {
         var input = SMCParamStruct()
         input.key = Self.fourChar(name)
         input.data8 = 9
         let output = try call(&input)
-        return output.dataSize
+        return (output.dataSize, output.dataType)
     }
 
     private func write(_ name: String, bytes: [UInt8], size: UInt32) throws {
