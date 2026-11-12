@@ -71,6 +71,18 @@ import Testing
         #expect(try db.fetchClipboardItems().isEmpty)
     }
 
+    @Test(arguments: [
+        (["public.utf8-plain-text", "org.nspasteboard.ConcealedType"],
+         ClipboardCapturePolicy.Content.text(bytes: 12), false),
+        (["public.png", "org.nspasteboard.TransientType"], .image(bytes: 100), false),
+        (["public.utf8-plain-text"], .text(bytes: 12), true),
+        (["public.utf8-plain-text"], .text(bytes: 1_000_001), false),
+        (["public.png"], .image(bytes: 20_000_001), false),
+    ])
+    func captureDecision(typeIDs: [String], content: ClipboardCapturePolicy.Content, captures: Bool) {
+        #expect(ClipboardCapturePolicy.shouldCapture(content, typeIDs: typeIDs) == captures)
+    }
+
     @Test func removingAnImageAlsoRemovesItsThumbnail() throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

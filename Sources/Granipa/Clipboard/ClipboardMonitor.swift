@@ -1,6 +1,30 @@
 import AppKit
 import Foundation
 
+enum ClipboardCapturePolicy {
+    enum Content: Equatable {
+        case image(bytes: Int)
+        case text(bytes: Int)
+    }
+
+    static let maxTextBytes = 1_000_000
+    static let maxImageBytes = 20_000_000
+
+    /// Standard markers used by password managers and ephemeral copiers.
+    static func isPrivate(_ typeIDs: [String]) -> Bool {
+        typeIDs.contains("org.nspasteboard.ConcealedType")
+            || typeIDs.contains("org.nspasteboard.TransientType")
+    }
+
+    static func shouldCapture(_ content: Content, typeIDs: [String]) -> Bool {
+        guard !isPrivate(typeIDs) else { return false }
+        switch content {
+        case .image(let bytes): return bytes <= maxImageBytes
+        case .text(let bytes): return bytes <= maxTextBytes
+        }
+    }
+}
+
 @MainActor
 final class ClipboardMonitor {
     private let database: AppDatabase
@@ -42,10 +66,7 @@ final class ClipboardMonitor {
         guard isEnabled else { return }
 
         let typeIDs = (pasteboard.types ?? []).map(\.rawValue)
-        // Standard markers used by password managers and ephemeral copiers.
-        guard !typeIDs.contains("org.nspasteboard.ConcealedType"),
-            !typeIDs.contains("org.nspasteboard.TransientType")
-        else { return }
+        guard !ClipboardCapturePolicy.isPrivate(typeIDs) else { return }
 
         let source = NSWorkspace.shared.frontmostApplication?.localizedName
 
@@ -59,11 +80,15 @@ final class ClipboardMonitor {
                 Self.prune(database: database)
             }
         } else if let data = pasteboard.data(forType: .png) ?? pasteboard.data(forType: .tiff) {
+            guard ClipboardCapturePolicy.shouldCapture(.image(bytes: data.count), typeIDs: typeIDs)
+            else { return }
             processingQueue.async { [database] in
                 Self.saveImage(data, source: source, database: database)
                 Self.prune(database: database)
             }
         } else if let string = pasteboard.string(forType: .string),
+            ClipboardCapturePolicy.shouldCapture(
+                .text(bytes: string.utf8.count), typeIDs: typeIDs),
             !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         {
             processingQueue.async { [database] in
