@@ -35,9 +35,6 @@ final class ShortcutHub {
             let started = HyperKeyMonitor.shared.start(
                 hyperKeyCode: hyperCode, bindings: keyToID
             ) { id in
-                // The tap swallowed this key, so the dictation modifier's own
-                // monitor never saw it; it is still a chord, not a dictation press.
-                HotkeyManager.shared.noteChord()
                 Self.dispatch(id)
             }
             // Without Accessibility there is no tap; the Carbon chords below
@@ -61,12 +58,15 @@ final class ShortcutHub {
                 keyCode: WindowShortcuts.keyCode(for: action),
                 modifiers: WindowShortcuts.modifiers(for: action)
             ) {
-                WindowManager.shared.perform(action)
+                Self.dispatch(action.hotkeyID)
             }
         }
     }
 
     private static func dispatch(_ id: UInt32) {
+        // The macro tap and Carbon both consume the key, so the dictation
+        // modifier's keyDown monitor never sees it; it is still a chord.
+        HotkeyManager.shared.noteChord()
         switch id {
         case ExtraShortcut.clipboard.hotkeyID:
             ClipboardPanelController.shared.toggle()
