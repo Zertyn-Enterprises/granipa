@@ -15,7 +15,8 @@ actor APIServer {
         port: UInt16,
         token: String,
         database: AppDatabase,
-        enhanceTrigger: @escaping @Sendable (String) -> Void
+        enhanceTrigger: @escaping @Sendable (String) -> Void,
+        onFailure: @escaping @Sendable (Error) -> Void = { _ in }
     ) throws {
         stopListener()
 
@@ -31,6 +32,12 @@ actor APIServer {
                 token: token,
                 database: database,
                 enhanceTrigger: enhanceTrigger)
+        }
+        // Bind errors such as a port already in use arrive here, not as a throw.
+        listener.stateUpdateHandler = { state in
+            if case .failed(let error) = state {
+                onFailure(error)
+            }
         }
         listener.start(queue: DispatchQueue(label: "com.zertyn.granipa.api"))
         self.listener = listener

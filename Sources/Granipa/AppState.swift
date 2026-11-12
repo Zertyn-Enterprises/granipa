@@ -31,6 +31,8 @@ final class AppState {
     var sidebarDestination: SidebarDestination = .home
     var homeLibraryFilter: HomeLibraryFilter = .all
     var loadError: String?
+    /// Why the local REST API is not listening, or nil when it is (or is disabled).
+    private(set) var apiServerError: String?
 
     var selectedMeeting: Meeting? {
         guard let id = selectedMeetingID else { return nil }
@@ -249,19 +251,29 @@ final class AppState {
     func startServices(database db: AppDatabase) {
         let defaults = UserDefaults.standard
         let apiEnabled = defaults.object(forKey: "apiEnabled") as? Bool ?? false
+        apiServerError = nil
         if apiEnabled {
             let port = APIServer.port(stored: defaults.integer(forKey: "apiPort"))
             let token = Self.apiToken()
             Task {
-                try? await apiServer.start(
-                    port: port,
-                    token: token,
-                    database: db,
-                    enhanceTrigger: { meetingID in
-                        Task { @MainActor [weak self] in
-                            await self?.enhance(meetingID: meetingID)
-                        }
-                    })
+                do {
+                    try await apiServer.start(
+                        port: port,
+                        token: token,
+                        database: db,
+                        enhanceTrigger: { meetingID in
+                            Task { @MainActor [weak self] in
+                                await self?.enhance(meetingID: meetingID)
+                            }
+                        },
+                        onFailure: { error in
+                            Task { @MainActor [weak self] in
+                                self?.reportAPIServerFailure(port: port, error: error)
+                            }
+                        })
+                } catch {
+                    reportAPIServerFailure(port: port, error: error)
+                }
             }
         }
         webhookLoop?.cancel()
@@ -273,6 +285,12 @@ final class AppState {
                 try? await Task.sleep(for: .seconds(30))
             }
         }
+    }
+
+    private func reportAPIServerFailure(port: UInt16, error: Error) {
+        let message = "Local API couldn't start on port \(port): \(error.localizedDescription)"
+        Logger(subsystem: "com.zertyn.granipa", category: "api").error("\(message, privacy: .public)")
+        apiServerError = message
     }
 
     func restartAPIServer() {
