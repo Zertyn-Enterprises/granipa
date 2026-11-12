@@ -19,15 +19,12 @@ struct ProductivitySettings: View {
                 Text("Sends ⌘V to the active app. Needs Accessibility permission.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text("Keeps the last 500 items locally. Skips only items the source app marks as concealed or transient — check that your password manager sets that flag.")
+                Text("Keeps the last 500 items locally. Skips items the source app marks as concealed or transient — check that your password manager sets that flag — and text over 1 MB or images over 20 MB.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button("Clear history", role: .destructive) {
                     if let db = app.database {
-                        let paths = (try? db.clearClipboardItems()) ?? []
-                        for path in paths {
-                            try? FileManager.default.removeItem(atPath: path)
-                        }
+                        ClipboardMonitor.removeImageFiles((try? db.clearClipboardItems()) ?? [])
                     }
                 }
             }

@@ -155,7 +155,7 @@ struct ClipboardHistoryView: View {
                             .padding(14)
                     } else {
                         ScrollView {
-                            Text(item.textContent ?? "")
+                            Text(Self.previewText(item.textContent ?? ""))
                                 .font(.system(size: 15))
                                 .foregroundStyle(Theme.textPrimary)
                                 .textSelection(.enabled)
@@ -245,6 +245,13 @@ struct ClipboardHistoryView: View {
         .padding(.vertical, 9)
     }
 
+    /// SwiftUI lays out a Text in full, so a huge clip would stall the panel;
+    /// Copy still uses the full stored text.
+    static func previewText(_ text: String, limit: Int = 20_000) -> String {
+        let head = text.prefix(limit)
+        return head.endIndex == text.endIndex ? text : head + "…"
+    }
+
     // MARK: - Actions
 
     private var autoPasteEnabled: Bool {
@@ -312,17 +319,14 @@ struct ClipboardHistoryView: View {
     private func delete(_ item: ClipboardItem) {
         guard let db = app.database else { return }
         if let path = try? db.deleteClipboardItem(id: item.id) {
-            try? FileManager.default.removeItem(atPath: path)
+            ClipboardMonitor.removeImageFiles([path])
         }
         reloadKeepingSelection()
     }
 
     private func clearAll() {
         guard let db = app.database else { return }
-        let paths = (try? db.clearClipboardItems()) ?? []
-        for path in paths {
-            try? FileManager.default.removeItem(atPath: path)
-        }
+        ClipboardMonitor.removeImageFiles((try? db.clearClipboardItems()) ?? [])
         reloadKeepingSelection()
     }
 }
@@ -355,7 +359,7 @@ private struct ClipboardRow: View {
             let first = (item.textContent ?? "").split(separator: "\n").first.map(String.init) ?? ""
             return (first as NSString).lastPathComponent
         case .text, .link:
-            return (item.textContent ?? "")
+            return ClipboardHistoryView.previewText(item.textContent ?? "", limit: 300)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .replacingOccurrences(of: "\n", with: " ")
         }

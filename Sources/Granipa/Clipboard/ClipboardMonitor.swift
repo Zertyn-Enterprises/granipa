@@ -1,6 +1,30 @@
 import AppKit
 import Foundation
 
+enum ClipboardCapturePolicy {
+    enum Content: Equatable {
+        case image(bytes: Int)
+        case text(bytes: Int)
+    }
+
+    static let maxTextBytes = 1_000_000
+    static let maxImageBytes = 20_000_000
+
+    /// Standard markers used by password managers and ephemeral copiers.
+    static func isPrivate(_ typeIDs: [String]) -> Bool {
+        typeIDs.contains("org.nspasteboard.ConcealedType")
+            || typeIDs.contains("org.nspasteboard.TransientType")
+    }
+
+    static func shouldCapture(_ content: Content, typeIDs: [String]) -> Bool {
+        guard !isPrivate(typeIDs) else { return false }
+        switch content {
+        case .image(let bytes): return bytes <= maxImageBytes
+        case .text(let bytes): return bytes <= maxTextBytes
+        }
+    }
+}
+
 @MainActor
 final class ClipboardMonitor {
     private let database: AppDatabase
@@ -16,13 +40,16 @@ final class ClipboardMonitor {
     func start() {
         guard isEnabled else { return }
         guard task == nil else { return }
+        // Whatever was copied while capture was off stays out of history.
+        lastChangeCount = NSPasteboard.general.changeCount
         task = Task {
-            while !Task.isCancelled {
-                if isEnabled { poll() }
+            while !Task.isCancelled, isEnabled {
+                poll()
                 // NSPasteboard exposes no change notification; 1 s is the
                 // fastest poll that still feels instant on paste.
-                try? await Task.sleep(for: .milliseconds(isEnabled ? 1_000 : 2_000))
+                try? await Task.sleep(for: .milliseconds(1_000))
             }
+            if !Task.isCancelled { task = nil }
         }
     }
 
@@ -37,15 +64,12 @@ final class ClipboardMonitor {
 
     private func poll() {
         let pasteboard = NSPasteboard.general
-        guard pasteboard.changeCount != lastChangeCount else { return }
-        lastChangeCount = pasteboard.changeCount
-        guard isEnabled else { return }
+        let changeCount = pasteboard.changeCount
+        guard changeCount != lastChangeCount else { return }
+        lastChangeCount = changeCount
 
         let typeIDs = (pasteboard.types ?? []).map(\.rawValue)
-        // Standard markers used by password managers and ephemeral copiers.
-        guard !typeIDs.contains("org.nspasteboard.ConcealedType"),
-            !typeIDs.contains("org.nspasteboard.TransientType")
-        else { return }
+        guard !ClipboardCapturePolicy.isPrivate(typeIDs) else { return }
 
         let source = NSWorkspace.shared.frontmostApplication?.localizedName
 
@@ -59,11 +83,15 @@ final class ClipboardMonitor {
                 Self.prune(database: database)
             }
         } else if let data = pasteboard.data(forType: .png) ?? pasteboard.data(forType: .tiff) {
+            guard ClipboardCapturePolicy.shouldCapture(.image(bytes: data.count), typeIDs: typeIDs)
+            else { return }
             processingQueue.async { [database] in
                 Self.saveImage(data, source: source, database: database)
                 Self.prune(database: database)
             }
         } else if let string = pasteboard.string(forType: .string),
+            ClipboardCapturePolicy.shouldCapture(
+                .text(bytes: string.utf8.count), typeIDs: typeIDs),
             !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         {
             processingQueue.async { [database] in
@@ -142,16 +170,17 @@ final class ClipboardMonitor {
         do {
             try database.insertClipboardItem(item)
         } catch {
-            removeFiles([url.path])
+            removeImageFiles([url.path])
         }
     }
 
     nonisolated private static func prune(database: AppDatabase) {
         guard let orphanedImages = try? database.pruneClipboardItems() else { return }
-        removeFiles(orphanedImages)
+        removeImageFiles(orphanedImages)
     }
 
-    nonisolated private static func removeFiles(_ paths: [String]) {
+    /// Removes each clipboard image and its `thumb_` sibling.
+    nonisolated static func removeImageFiles(_ paths: [String]) {
         for path in paths {
             try? FileManager.default.removeItem(atPath: path)
             try? FileManager.default.removeItem(atPath: ImageCache.thumbnailPath(for: path))
