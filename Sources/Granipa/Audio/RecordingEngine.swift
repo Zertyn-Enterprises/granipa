@@ -62,11 +62,9 @@ final class RecordingEngine {
                 self.meetingID = nil
             }
         }
-        // Voice processing AEC on the input node pegs a core and hangs Record
-        // (pid 25501: 134% CPU, 8 hangs) even with live ASR off. Capture without it.
         await Task.yield()
         try Task.checkCancellation()
-        try session.startMic(echoCancellation: false)
+        try session.startMic()
         try Task.checkCancellation()
         // Process-tap + aggregate device creation blocks for seconds on some
         // machines; never do it on the main actor (Record → Not Responding).
@@ -85,20 +83,14 @@ final class RecordingEngine {
         startingSession = nil
         self.startedAt = .now
         self.isRecording = true
-        watchForDeadChannels(session: session, echoCancellationWasOn: false)
+        watchForDeadChannels(session: session)
         return session
     }
 
-    private func watchForDeadChannels(session: RecordingSession, echoCancellationWasOn: Bool) {
+    private func watchForDeadChannels(session: RecordingSession) {
         channelWatchTask?.cancel()
         channelWatchTask = Task { [weak self, weak session] in
-            try? await Task.sleep(for: .seconds(3))
-            guard let self, let session, self.session === session, self.isRecording else { return }
-            if session.micBufferCount == 0, echoCancellationWasOn {
-                session.restartMic(recreateFile: true)
-                micWarning = "Echo cancellation isn't working on this setup — continuing without it."
-            }
-
+            guard let self, let session else { return }
             var tapRestarts = 0
             var micRestarts = 0
             var lastMicCount = 0
@@ -124,9 +116,7 @@ final class RecordingEngine {
                             session.restartMic(recreateFile: micCount < 100)
                             micRestarts += 1
                             micStallTicks = 0
-                            micWarning =
-                                "Microphone audio stalled — restarted capture without echo "
-                                + "cancellation."
+                            micWarning = "Microphone audio stalled — restarted capture."
                         } else {
                             micWarning =
                                 "Microphone audio stopped and couldn't be recovered. Stop and "

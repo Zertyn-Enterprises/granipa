@@ -72,15 +72,11 @@ final class RecordingSession: @unchecked Sendable {
         (systemChunks, systemContinuation) = AsyncStream.makeStream(of: AudioChunk.self)
     }
 
-    func start(echoCancellation: Bool) throws {
-        try startMic(echoCancellation: echoCancellation)
-        startSystemTap()
-        installListeners()
-    }
-
-    func startMic(echoCancellation: Bool) throws {
+    // Meetings never use voice processing: AEC on the input node pegs a core
+    // and hangs Record (pid 25501: 134% CPU, 8 hangs) even with live ASR off.
+    func startMic() throws {
         sessionStartHostSeconds = AVAudioTime.seconds(forHostTime: mach_absolute_time())
-        try mic.start(echoCancellation: echoCancellation) { [weak self] buffer, time in
+        try mic.start(echoCancellation: false) { [weak self] buffer, time in
             self?.handleMic(buffer, time: time)
         }
     }
@@ -213,10 +209,8 @@ final class RecordingSession: @unchecked Sendable {
         }
     }
 
-    // Recovery for a dead or stalled mic: voice processing produces no callbacks on
-    // some setups, an engine can start before the mic TCC grant, and routes die
-    // mid-meeting. Restart without voice processing (the reliable path). When the
-    // mic stalled before capturing anything usable, recreate the file and pad it to
+    // Recovery for a dead or stalled mic: an engine can start before the mic TCC
+    // grant, and routes die mid-meeting. When the mic stalled before capturing anything usable, recreate the file and pad it to
     // the current meeting time so "file time == meeting time" stays true across the
     // gap; otherwise keep appending to preserve already-recorded audio.
     func restartMic(recreateFile: Bool) {
