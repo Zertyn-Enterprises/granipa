@@ -70,4 +70,16 @@ import Testing
         #expect(path == "/tmp/img1.png")
         #expect(try db.fetchClipboardItems().isEmpty)
     }
+
+    @Test func removingAnImageAlsoRemovesItsThumbnail() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let image = dir.appendingPathComponent("a.png")
+        try Data([1]).write(to: image)
+        try Data([2]).write(to: URL(fileURLWithPath: ImageCache.thumbnailPath(for: image.path)))
+        ClipboardMonitor.removeImageFiles([image.path])
+        #expect(try FileManager.default.contentsOfDirectory(atPath: dir.path).isEmpty)
+    }
 }

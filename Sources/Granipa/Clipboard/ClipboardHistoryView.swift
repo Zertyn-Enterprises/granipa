@@ -312,17 +312,14 @@ struct ClipboardHistoryView: View {
     private func delete(_ item: ClipboardItem) {
         guard let db = app.database else { return }
         if let path = try? db.deleteClipboardItem(id: item.id) {
-            try? FileManager.default.removeItem(atPath: path)
+            ClipboardMonitor.removeImageFiles([path])
         }
         reloadKeepingSelection()
     }
 
     private func clearAll() {
         guard let db = app.database else { return }
-        let paths = (try? db.clearClipboardItems()) ?? []
-        for path in paths {
-            try? FileManager.default.removeItem(atPath: path)
-        }
+        ClipboardMonitor.removeImageFiles((try? db.clearClipboardItems()) ?? [])
         reloadKeepingSelection()
     }
 }
