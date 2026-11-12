@@ -12,8 +12,11 @@ final class DictationSessionClock {
 
     private(set) var sessionStartedAt: Date?
     private var isObserving = false
+    private let controller: DictationController
 
-    init() {}
+    init(controller: DictationController = .shared) {
+        self.controller = controller
+    }
 
     func beginObserving() {
         guard !isObserving else { return }
@@ -22,20 +25,12 @@ final class DictationSessionClock {
     }
 
     private func observe() {
-        let controller = DictationController.shared
-        withObservationTracking { _ = controller.phase } onChange: {
-            // Phase is only ever mutated on the main actor, so the change
-            // notification arrives there too; re-arm without a task hop.
-            MainActor.assumeIsolated {
-                DictationSessionClock.shared.phaseDidChange()
-            }
+        withObservationTracking { _ = controller.phase } onChange: { [weak self] in
+            // onChange fires before the new value is stored; read it on the
+            // next main-actor turn, where `observe()` also re-arms tracking.
+            Task { @MainActor [weak self] in self?.observe() }
         }
         track(controller.phase)
-    }
-
-    private func phaseDidChange() {
-        track(DictationController.shared.phase)
-        observe()
     }
 
     /// A session begins when the phase enters `.preparing` (fresh press or retry);
