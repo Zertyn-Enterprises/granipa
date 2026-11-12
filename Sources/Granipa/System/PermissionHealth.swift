@@ -217,7 +217,7 @@ struct PermissionHealth: Equatable, Sendable {
         switch state {
         case .granted: "Granted"
         case .denied: "Denied"
-        case .notDetermined: "Not requested"
+        case .notDetermined: "Not granted"
         case .unchecked: "Unchecked"
         }
     }

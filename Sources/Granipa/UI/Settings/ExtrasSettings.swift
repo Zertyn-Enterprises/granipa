@@ -88,10 +88,7 @@ struct WindowSettings: View {
 struct BatterySettings: View {
     var body: some View {
         @Bindable var battery = BatteryService.shared
-        // Registration alone does not prove writes work; a failed install,
-        // repair or helper write leaves helperSetupMessage set.
-        let helperHealthy =
-            battery.canControl && battery.helperEnabled && battery.helperSetupMessage == nil
+        let helperHealthy = battery.helperHealthy
         Form {
             if !battery.snapshot.isPresent {
                 Text("No internal battery — charge limiting is for MacBooks.")

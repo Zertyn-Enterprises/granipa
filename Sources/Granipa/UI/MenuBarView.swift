@@ -176,7 +176,11 @@ private struct BatteryMenuSection: View {
         let snap = battery.snapshot
         Text(BatteryMenuHeadline.text(for: snap))
             .foregroundStyle(.secondary)
-        Toggle("Charge limit", isOn: $battery.limiterEnabled)
+        // Turning a control off stays possible so a broken helper never
+        // traps the Mac in a limited state.
+        let helperHealthy = battery.helperHealthy
+        Toggle("Charge limit (experimental)", isOn: $battery.limiterEnabled)
+            .disabled(!helperHealthy && !battery.limiterEnabled)
         if battery.limiterEnabled {
             Slider(
                 value: Binding(
@@ -187,6 +191,7 @@ private struct BatteryMenuSection: View {
                 onEditingChanged: { editing in
                     if !editing { battery.tick() }
                 })
+            .disabled(!helperHealthy)
             Text("Limit: \(battery.limit)%")
                 .foregroundStyle(.secondary)
             Button(battery.discharging ? "Stop discharge" : "Discharge") {
@@ -197,6 +202,7 @@ private struct BatteryMenuSection: View {
                     battery.beginDischarge()
                 }
             }
+            .disabled(!helperHealthy && !battery.discharging)
             Button(battery.topUp ? "Stop top up" : "Top Up") {
                 if battery.topUp {
                     battery.topUp = false
@@ -205,16 +211,17 @@ private struct BatteryMenuSection: View {
                     battery.beginTopUp()
                 }
             }
+            .disabled(!helperHealthy && !battery.topUp)
         }
         Toggle("Heat Protection", isOn: $battery.heatProtection)
-            .disabled(battery.isCalibrating)
+            .disabled(battery.isCalibrating || (!helperHealthy && !battery.heatProtection))
         if battery.isCalibrating {
             Text("Calibrating: \(battery.calibrationStep?.title ?? "")")
                 .foregroundStyle(.secondary)
             Button("Stop Calibration") { battery.stopCalibration() }
         } else {
             Button("Start Calibration") { battery.startCalibration() }
-                .disabled(!battery.canControl)
+                .disabled(!helperHealthy)
         }
         if battery.hasMagSafeLED {
             Picker("MagSafe LED", selection: $battery.magSafeLED) {
@@ -222,6 +229,7 @@ private struct BatteryMenuSection: View {
                     Text(mode.title).tag(mode)
                 }
             }
+            .disabled(!helperHealthy)
         }
         if battery.canControl {
             Button(

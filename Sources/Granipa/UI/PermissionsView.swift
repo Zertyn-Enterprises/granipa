@@ -520,12 +520,12 @@ private struct PermissionLegend: View {
             legendItem(Theme.statusDone, "Granted")
             legendItem(Theme.statusListening, "Denied")
             legendItem(Theme.statusFailed, "Unchecked")
-            legendItem(Theme.statusLoading, "Not requested")
+            legendItem(Theme.statusLoading, "Not granted")
         }
         .font(.system(size: 11))
         .foregroundStyle(Theme.textTertiary)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Legend: Granted, Denied, Unchecked, Not requested")
+        .accessibilityLabel("Legend: Granted, Denied, Unchecked, Not granted")
     }
 
     private func legendItem(_ color: Color, _ title: String) -> some View {

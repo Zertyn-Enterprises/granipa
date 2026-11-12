@@ -136,7 +136,7 @@ import Testing
         #expect(label(health, .microphone) == "Granted")
         #expect(label(health, .systemAudio) == "Unchecked")
         #expect(label(health, .screenRecording) == "Denied")
-        #expect(label(health, .notifications) == "Not requested")
+        #expect(label(health, .notifications) == "Not granted")
     }
 
     @Test func tonesDoNotInventASeventhStatusColor() {
