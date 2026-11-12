@@ -180,4 +180,23 @@ import Testing
             LanguageDetection.decide(probes, force: false, systemHint: frenchHint)
                 == LanguageDetection.decide(probes, force: false))
     }
+
+    @Test(arguments: [
+        // Region variant of a stored language: shown on, toggling on is a no-op.
+        (["en-US", "es-ES"], "es-MX", true, ["en-US", "es-ES"]),
+        // Toggling it off removes the stored variant, not only an exact match.
+        (["en-US", "es-ES"], "es-MX", false, ["en-US"]),
+        (["en-US"], "fr-FR", true, ["en-US", "fr-FR"]),
+        (["en-US", "es-ES", "de-DE"], "fr-FR", true, ["en-US", "es-ES", "de-DE"]),
+    ])
+    func probeTogglesMatchOnLanguage(
+        selection: [String], id: String, enabled: Bool, expected: [String]
+    ) {
+        #expect(
+            LanguageDetection.toggleProbeLanguage(selection, localeID: id, enabled: enabled)
+                == expected)
+        if enabled, selection.count < LanguageDetection.maxProbeLocales {
+            #expect(LanguageDetection.probeIncludesLanguage(expected, of: id))
+        }
+    }
 }

@@ -435,7 +435,7 @@ private struct GeneralSettings: View {
                 Text("Automatic detection").tag("auto")
                 ForEach(supportedLocales, id: \.identifier) { locale in
                     let id = locale.identifier(.bcp47)
-                    Text(languageName(id)).tag(id)
+                    Text(LanguageDetection.displayName(id)).tag(id)
                 }
             }
             if defaultLocale == "auto" {
@@ -446,9 +446,9 @@ private struct GeneralSettings: View {
                     }
                     ForEach(supportedLocales, id: \.identifier) { locale in
                         let id = locale.identifier(.bcp47)
-                        Toggle(languageName(id), isOn: probeBinding(id))
+                        Toggle(LanguageDetection.displayName(id), isOn: probeBinding(id))
                             .disabled(
-                                !probeSelection.contains(id)
+                                !LanguageDetection.probeIncludesLanguage(probeSelection, of: id)
                                     && probeSelection.count >= LanguageDetection.maxProbeLocales)
                     }
                     Text("Each recording probes these languages for the first seconds and keeps the best match. Each language downloads its on-device model once.")
@@ -517,7 +517,8 @@ private struct GeneralSettings: View {
             notificationsDenied = await NotificationManager.authorizationDenied()
             let locales = await SpeechTranscriber.supportedLocales
             supportedLocales = dedupeByLanguage(locales).sorted {
-                languageName($0.identifier(.bcp47)) < languageName($1.identifier(.bcp47))
+                LanguageDetection.displayName($0.identifier(.bcp47))
+                    < LanguageDetection.displayName($1.identifier(.bcp47))
             }
         }
     }
@@ -562,32 +563,14 @@ private struct GeneralSettings: View {
 
     private func probeBinding(_ id: String) -> Binding<Bool> {
         Binding(
-            get: { probeSelection.contains(id) },
+            get: { LanguageDetection.probeIncludesLanguage(probeSelection, of: id) },
             set: { enabled in
-                var selection = probeSelection
-                if enabled {
-                    if !selection.contains(id),
-                        selection.count < LanguageDetection.maxProbeLocales
-                    {
-                        selection.append(id)
-                    }
-                } else {
-                    selection.removeAll { $0 == id }
-                }
+                let selection = LanguageDetection.toggleProbeLanguage(
+                    probeSelection, localeID: id, enabled: enabled)
                 if !selection.isEmpty {
                     probeLocalesRaw = selection.joined(separator: ",")
                 }
             })
-    }
-
-    private func languageName(_ id: String) -> String {
-        let locale = Locale(identifier: id)
-        if let code = locale.language.languageCode?.identifier,
-            let name = Locale.current.localizedString(forLanguageCode: code)
-        {
-            return name.capitalized
-        }
-        return Locale.current.localizedString(forIdentifier: id)?.capitalized ?? id
     }
 }
 
@@ -630,7 +613,7 @@ private struct DictationSettings: View {
                 Picker("Dictation language", selection: $dictationLocale) {
                     Text("Auto (last meeting / this Mac)").tag("auto")
                     ForEach(probeIDs, id: \.self) { id in
-                        Text(id).tag(id)
+                        Text(LanguageDetection.displayName(id)).tag(id)
                     }
                 }
                 Text("Meetings still probe languages. Dictation uses one model so it stays fast.")

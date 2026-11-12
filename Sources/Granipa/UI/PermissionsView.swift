@@ -568,7 +568,7 @@ private struct PermissionLanguagesCard: View {
                 ForEach(localeIDs, id: \.self) { id in
                     let status = LanguageChipStatus.resolve(
                         knownInstalled: installedIDs, localeID: id)
-                    let name = languageName(id)
+                    let name = LanguageDetection.displayName(id)
                     HStack(spacing: 6) {
                         HStack(spacing: 6) {
                             Text(name)
@@ -674,16 +674,6 @@ private struct PermissionLanguagesCard: View {
         }
         installedIDs = installed
         checkedLocaleIDs = requested
-    }
-
-    private func languageName(_ id: String) -> String {
-        let locale = Locale(identifier: id)
-        if let code = locale.language.languageCode?.identifier,
-            let name = Locale.current.localizedString(forLanguageCode: code)
-        {
-            return name.capitalized
-        }
-        return Locale.current.localizedString(forIdentifier: id)?.capitalized ?? id
     }
 }
 
