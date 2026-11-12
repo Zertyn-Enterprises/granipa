@@ -295,13 +295,17 @@ import Testing
     }
 
     @Test func dayGroupsSortDaysNewestFirst() throws {
-        let db = try makeDatabase()
-        try seed(db, text: "morning", minutesAgo: 300, sourceApp: nil)
-        try seed(db, text: "afternoon", minutesAgo: 30, sourceApp: nil)
-        try seed(db, text: "yesterday", minutesAgo: 60 * 30, sourceApp: nil)
+        // Anchored at noon: offsets from "now" put "morning" on the previous
+        // day whenever the suite ran in the first hours after midnight.
+        let noon = Calendar.current.startOfDay(for: .now).addingTimeInterval(12 * 3600)
+        let entries = [("morning", -3.0), ("afternoon", 2.0), ("yesterday", -24.0)].map {
+            text, hours in
+            var entry = DictationEntry.new(text: text, durationSeconds: 1, sourceApp: nil)
+            entry.createdAt = noon.addingTimeInterval(hours * 3600)
+            return entry
+        }
 
-        let groups = DictationLibraryFormat.dayGroups(
-            from: try db.fetchDictationEntries())
+        let groups = DictationLibraryFormat.dayGroups(from: entries)
         #expect(groups.count == 2)
         #expect(groups[0].entries.map(\.text) == ["afternoon", "morning"])
         #expect(groups[1].entries.map(\.text) == ["yesterday"])
