@@ -453,20 +453,21 @@ final class AppState {
         guard let capture = await stopCapture() else { return }
         let id = capture.id
         let urls = capture.urls
+        let live = transcription
         guard let processor, let meeting = capture.meeting else {
-            if let live = transcription {
+            if let live {
                 await live.finishAndWait()
+                releaseTranscription(live)
             }
-            transcription = nil
             return
         }
 
-        if let live = transcription {
+        if let live {
             await processor.process(
                 meetingID: id,
                 source: .live { [weak self] in
                     await live.finishAndWait()
-                    self?.transcription = nil
+                    self?.releaseTranscription(live)
                     return live.systemUsedMuse
                 })
         } else {
@@ -474,6 +475,13 @@ final class AppState {
                 meetingID: id,
                 source: .files(
                     micURL: urls.micURL, systemURL: urls.systemURL, language: meeting.language))
+        }
+    }
+
+    /// A recording started while `live` was draining owns a newer coordinator.
+    private func releaseTranscription(_ live: TranscriptionCoordinator) {
+        if transcription === live {
+            transcription = nil
         }
     }
 
