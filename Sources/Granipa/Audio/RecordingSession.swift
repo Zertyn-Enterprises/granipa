@@ -3,9 +3,9 @@ import CoreAudio
 import Synchronization
 import os
 
-// File-writing state is queue-confined: micFile, micFramesWritten,
-// micConverter and micPadSeconds (mic), systemFile and systemFramesWritten
-// (system) are touched only on the writer queue. The recorders themselves
+// File-writing state is queue-confined: micWriter and systemWriter are
+// touched only on the writer queue (except their thread-safe frame counts).
+// The recorders themselves
 // keep their pre-existing, not fully queue-confined ownership: started from
 // the caller's thread, restarted and stopped on controlQueue, and never
 // touched from their tap callback threads. Capture lifecycle operations are
@@ -33,14 +33,8 @@ final class RecordingSession: @unchecked Sendable {
     private let writer = DispatchQueue(label: "com.zertyn.granipa.session-write")
     private let controlState = Mutex(ControlState())
 
-    private var micFile: AVAudioFile?
-    private var micFramesWritten: AVAudioFramePosition = 0
-    // Writer-queue-confined: converts buffers whose format differs from the
-    // mic file after the input device changed mid-meeting.
-    private var micConverter = BufferConverter()
-    private var micPadSeconds: Double = 0
-    private var systemFile: AVAudioFile?
-    private var systemFramesWritten: AVAudioFramePosition = 0
+    private let micWriter: ChannelFileWriter
+    private let systemWriter: ChannelFileWriter
     private var sessionStartHostSeconds: Double = 0
     private(set) var systemAudioError: Error?
     private var deviceChangeListener: AudioObjectPropertyListenerBlock?
@@ -56,6 +50,8 @@ final class RecordingSession: @unchecked Sendable {
     var micNonSilentCount: Int { micNonSilent.withLock { $0 } }
     var systemBufferCount: Int { systemBuffers.withLock { $0 } }
     var systemNonSilentCount: Int { systemNonSilent.withLock { $0 } }
+    var micFramesWritten: AVAudioFramePosition { micWriter.audioFramesWritten }
+    var systemFramesWritten: AVAudioFramePosition { systemWriter.audioFramesWritten }
 
     init(
         meetingID: String,
@@ -64,8 +60,12 @@ final class RecordingSession: @unchecked Sendable {
         onLevel: @escaping @Sendable (AudioChannel, Float) -> Void
     ) {
         self.meetingID = meetingID
-        self.micURL = directory.appendingPathComponent("mic.m4a")
-        self.systemURL = directory.appendingPathComponent("system.m4a")
+        let micURL = directory.appendingPathComponent("mic.m4a")
+        let systemURL = directory.appendingPathComponent("system.m4a")
+        self.micURL = micURL
+        self.systemURL = systemURL
+        micWriter = ChannelFileWriter(url: micURL, bitRate: 96_000)
+        systemWriter = ChannelFileWriter(url: systemURL, bitRate: 128_000)
         self.fanOutChunks = fanOutChunks
         self.onLevel = onLevel
         (micChunks, micContinuation) = AsyncStream.makeStream(of: AudioChunk.self)
@@ -148,10 +148,14 @@ final class RecordingSession: @unchecked Sendable {
     }
 
 #if DEBUG
-    // Test seam: injects a mic chunk into the writer path without audio
+    // Test seams: inject a chunk into a channel's writer path without audio
     // hardware. startSeconds is meeting-relative, like handleMic's clock.
     func ingestMicBufferForTesting(_ buffer: AVAudioPCMBuffer, startSeconds: Double?) {
-        writer.sync { writeMic(buffer, startSeconds: startSeconds) }
+        writer.sync { micWriter.write(buffer, startSeconds: startSeconds) }
+    }
+
+    func ingestSystemBufferForTesting(_ buffer: AVAudioPCMBuffer, startSeconds: Double?) {
+        writer.sync { systemWriter.write(buffer, startSeconds: startSeconds) }
     }
 #endif
 
@@ -238,9 +242,7 @@ final class RecordingSession: @unchecked Sendable {
             let pad =
                 AVAudioTime.seconds(forHostTime: mach_absolute_time()) - sessionStartHostSeconds
             writer.async { [weak self] in
-                self?.micFile = nil
-                self?.micFramesWritten = 0
-                self?.micPadSeconds = pad
+                self?.micWriter.reset(padSeconds: pad)
             }
         }
         mic = MicRecorder()
@@ -257,8 +259,8 @@ final class RecordingSession: @unchecked Sendable {
                 mic.stop()
                 tap.stop()
                 writer.sync {
-                    micFile = nil
-                    systemFile = nil
+                    micWriter.close()
+                    systemWriter.close()
                 }
                 micContinuation.finish()
                 systemContinuation.finish()
@@ -289,33 +291,8 @@ final class RecordingSession: @unchecked Sendable {
             micContinuation.yield(chunk)
         }
         writer.async { [weak self] in
-            self?.writeMic(chunk.buffer, startSeconds: chunk.startSeconds)
+            self?.micWriter.write(chunk.buffer, startSeconds: chunk.startSeconds)
         }
-    }
-
-    // Only frames that were actually written are counted (and reported), so a
-    // failed write leaves the gap owed and the next buffer pads it again.
-    @discardableResult
-    private func appendSilence(
-        to file: AVAudioFile, seconds: Double, format: AVAudioFormat
-    ) -> AVAudioFramePosition {
-        var remaining = AVAudioFramePosition((seconds * format.sampleRate).rounded())
-        var appended: AVAudioFramePosition = 0
-        while remaining > 0 {
-            let chunkFrames = AVAudioFrameCount(min(remaining, 16_384))
-            guard let silence = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunkFrames)
-            else { break }
-            silence.frameLength = chunkFrames
-            do {
-                try file.write(from: silence)
-            } catch {
-                Self.log.error("mic silence write failed: \(String(describing: error))")
-                break
-            }
-            remaining -= AVAudioFramePosition(chunkFrames)
-            appended += AVAudioFramePosition(chunkFrames)
-        }
-        return appended
     }
 
     private func handleSystem(_ buffer: AVAudioPCMBuffer, timestamp: AudioTimeStamp) {
@@ -342,111 +319,7 @@ final class RecordingSession: @unchecked Sendable {
             systemContinuation.yield(chunk)
         }
         writer.async { [weak self] in
-            self?.writeSystem(chunk.buffer, startSeconds: chunk.startSeconds)
+            self?.systemWriter.write(chunk.buffer, startSeconds: chunk.startSeconds)
         }
-    }
-
-    // The mic file keeps the format of its first buffer for the whole meeting;
-    // after the input device switches mid-meeting, later buffers may arrive at
-    // a different sample rate or channel count and are converted into the
-    // file's processing format instead of being dropped. Gaps (restart,
-    // stalled route) are padded with silence so file time == meeting time,
-    // mirroring writeSystem.
-    private func writeMic(_ buffer: AVAudioPCMBuffer, startSeconds: Double?) {
-        if micFile == nil {
-            micFile = Self.openAudioFile(url: micURL, format: buffer.format, bitRate: 96_000)
-            if let file = micFile, micPadSeconds > 0 {
-                micFramesWritten += appendSilence(
-                    to: file, seconds: micPadSeconds, format: buffer.format)
-            }
-            micPadSeconds = 0
-        }
-        guard let file = micFile else { return }
-        let fileFormat = file.processingFormat
-        if let start = startSeconds, start > 0 {
-            let expectedFrame = AVAudioFramePosition((start * fileFormat.sampleRate).rounded())
-            let gap = expectedFrame - micFramesWritten
-            if gap > AVAudioFramePosition(fileFormat.sampleRate * 0.25) {
-                micFramesWritten += appendSilence(
-                    to: file, seconds: Double(gap) / fileFormat.sampleRate, format: fileFormat)
-            }
-        }
-        let toWrite: AVAudioPCMBuffer
-        if buffer.format == fileFormat {
-            toWrite = buffer
-        } else {
-            do {
-                toWrite = try micConverter.convert(buffer, to: fileFormat)
-            } catch {
-                Self.log.error(
-                    "mic buffer dropped: conversion \(buffer.format.sampleRate)Hz/\(buffer.format.channelCount)ch -> \(fileFormat.sampleRate)Hz/\(fileFormat.channelCount)ch failed: \(String(describing: error))")
-                return
-            }
-        }
-        do {
-            try file.write(from: toWrite)
-            micFramesWritten += AVAudioFramePosition(toWrite.frameLength)
-        } catch {
-            Self.log.error("mic write failed: \(String(describing: error))")
-        }
-    }
-
-    private func writeSystem(_ buffer: AVAudioPCMBuffer, startSeconds: Double?) {
-        let sampleRate = buffer.format.sampleRate
-        if systemFile == nil {
-            systemFile = Self.openAudioFile(url: systemURL, format: buffer.format, bitRate: 128_000)
-        }
-        if let file = systemFile, let start = startSeconds, start > 0 {
-            let expectedFrame = AVAudioFramePosition((start * sampleRate).rounded())
-            var gap = expectedFrame - systemFramesWritten
-            if gap > AVAudioFramePosition(sampleRate * 0.25) {
-                while gap > 0 {
-                    let chunkFrames = AVAudioFrameCount(min(gap, 16_384))
-                    guard
-                        let silence = AVAudioPCMBuffer(
-                            pcmFormat: buffer.format, frameCapacity: chunkFrames)
-                    else { break }
-                    silence.frameLength = chunkFrames
-                    try? file.write(from: silence)
-                    systemFramesWritten += AVAudioFramePosition(chunkFrames)
-                    gap -= AVAudioFramePosition(chunkFrames)
-                }
-            }
-        }
-        try? systemFile?.write(from: buffer)
-        systemFramesWritten += AVAudioFramePosition(buffer.frameLength)
-    }
-
-    // The AAC encoder rejects a bit rate outside the range its sample rate
-    // allows: 96 kbps is refused at the 24 kHz / 16 kHz a Bluetooth headset
-    // mic delivers, which left the file unopened and the whole channel
-    // unrecorded. Fall back to the encoder's own default for that format.
-    private static func openAudioFile(url: URL, format: AVAudioFormat, bitRate: Int) -> AVAudioFile?
-    {
-        for requestedBitRate in [bitRate, nil] {
-            do {
-                return try AVAudioFile(
-                    forWriting: url,
-                    settings: aacSettings(for: format, bitRate: requestedBitRate),
-                    commonFormat: format.commonFormat,
-                    interleaved: format.isInterleaved)
-            } catch {
-                log.error(
-                    "open \(url.lastPathComponent, privacy: .public) failed at \(format.sampleRate, privacy: .public)Hz/\(format.channelCount)ch bitRate=\(requestedBitRate ?? 0): \(String(describing: error), privacy: .public)")
-            }
-        }
-        return nil
-    }
-
-    private static func aacSettings(for format: AVAudioFormat, bitRate: Int?) -> [String: Any] {
-        var settings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatMPEG4AAC,
-            AVSampleRateKey: format.sampleRate,
-            AVNumberOfChannelsKey: Int(format.channelCount),
-        ]
-        if let bitRate {
-            settings[AVEncoderBitRateKey] = bitRate
-        }
-        return settings
     }
 }
