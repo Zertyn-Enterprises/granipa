@@ -10,6 +10,11 @@ struct APISettings: View {
         Form {
             Toggle("Enable local REST API", isOn: $apiEnabled)
                 .onChange(of: apiEnabled) { app.restartAPIServer() }
+            if let error = app.apiServerError {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
             TextField(
                 "Port",
                 value: Binding(
