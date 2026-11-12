@@ -10,7 +10,17 @@ struct APISettings: View {
         Form {
             Toggle("Enable local REST API", isOn: $apiEnabled)
                 .onChange(of: apiEnabled) { app.restartAPIServer() }
-            TextField("Port", value: $apiPort, format: .number.grouping(.never))
+            if let error = app.apiServerError {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+            TextField(
+                "Port",
+                value: Binding(
+                    get: { apiPort },
+                    set: { apiPort = Int(APIServer.port(stored: $0)) }),
+                format: .number.grouping(.never))
                 .onSubmit { app.restartAPIServer() }
             LabeledContent("Token") {
                 HStack {

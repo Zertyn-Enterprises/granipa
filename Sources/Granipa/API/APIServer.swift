@@ -4,11 +4,19 @@ import Network
 actor APIServer {
     private var listener: NWListener?
 
+    /// The stored setting is a plain Int; 0 (unset) or anything outside UInt16
+    /// falls back to the default instead of trapping.
+    static func port(stored: Int) -> UInt16 {
+        guard let port = UInt16(exactly: stored), port != 0 else { return 7799 }
+        return port
+    }
+
     func start(
         port: UInt16,
         token: String,
         database: AppDatabase,
-        enhanceTrigger: @escaping @Sendable (String) -> Void
+        enhanceTrigger: @escaping @Sendable (String) -> Void,
+        onFailure: @escaping @Sendable (Error) -> Void = { _ in }
     ) throws {
         stopListener()
 
@@ -24,6 +32,12 @@ actor APIServer {
                 token: token,
                 database: database,
                 enhanceTrigger: enhanceTrigger)
+        }
+        // Bind errors such as a port already in use arrive here, not as a throw.
+        listener.stateUpdateHandler = { state in
+            if case .failed(let error) = state {
+                onFailure(error)
+            }
         }
         listener.start(queue: DispatchQueue(label: "com.zertyn.granipa.api"))
         self.listener = listener

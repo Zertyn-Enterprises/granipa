@@ -5,6 +5,8 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private static let lifecycleLog = OSLog(
         subsystem: "com.zertyn.granipa", category: "lifecycle")
+    /// Set by the production AppState so quitting can close an active recording.
+    @MainActor static weak var appState: AppState?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         #if DEBUG
@@ -15,6 +17,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
         AppRelocator.offerMoveIfNeeded()
         os_signpost(.event, log: Self.lifecycleLog, name: "appReady")
+    }
+
+    /// An m4a that is never closed cannot be opened, so quitting mid-recording
+    /// waits for capture to stop (not for transcription or notes).
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let appState = Self.appState, appState.recorder.isBusy else { return .terminateNow }
+        Task {
+            await appState.stopCaptureForQuit()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 
     func applicationWillTerminate(_ notification: Notification) {

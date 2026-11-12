@@ -14,6 +14,14 @@ import Testing
         #expect(request.headers["authorization"] == "Bearer abc")
     }
 
+    @Test(arguments: ["?=", "?&=&"])
+    func skipsQueryPairsWithoutKey(query: String) throws {
+        let raw = "GET /v1/meetings\(query) HTTP/1.1\r\n\r\n"
+        let request = try #require(HTTPRequest.parse(Data(raw.utf8)))
+        #expect(request.path == "/v1/meetings")
+        #expect(request.query.isEmpty)
+    }
+
     @Test func parsesBody() throws {
         let raw = "POST /x HTTP/1.1\r\nContent-Length: 4\r\n\r\nbody"
         let request = try #require(HTTPRequest.parse(Data(raw.utf8)))

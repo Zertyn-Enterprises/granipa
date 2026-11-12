@@ -31,6 +31,8 @@ final class AppState {
     var sidebarDestination: SidebarDestination = .home
     var homeLibraryFilter: HomeLibraryFilter = .all
     var loadError: String?
+    /// Why the local REST API is not listening, or nil when it is (or is disabled).
+    private(set) var apiServerError: String?
 
     var selectedMeeting: Meeting? {
         guard let id = selectedMeetingID else { return nil }
@@ -62,6 +64,7 @@ final class AppState {
         } catch {
             loadError = error.localizedDescription
         }
+        AppDelegate.appState = self
         calendar.start()
         setupDetection()
         setupProductivity()
@@ -249,19 +252,29 @@ final class AppState {
     func startServices(database db: AppDatabase) {
         let defaults = UserDefaults.standard
         let apiEnabled = defaults.object(forKey: "apiEnabled") as? Bool ?? false
+        apiServerError = nil
         if apiEnabled {
-            let port = UInt16(defaults.integer(forKey: "apiPort"))
+            let port = APIServer.port(stored: defaults.integer(forKey: "apiPort"))
             let token = Self.apiToken()
             Task {
-                try? await apiServer.start(
-                    port: port == 0 ? 7799 : port,
-                    token: token,
-                    database: db,
-                    enhanceTrigger: { meetingID in
-                        Task { @MainActor [weak self] in
-                            await self?.enhance(meetingID: meetingID)
-                        }
-                    })
+                do {
+                    try await apiServer.start(
+                        port: port,
+                        token: token,
+                        database: db,
+                        enhanceTrigger: { meetingID in
+                            Task { @MainActor [weak self] in
+                                await self?.enhance(meetingID: meetingID)
+                            }
+                        },
+                        onFailure: { error in
+                            Task { @MainActor [weak self] in
+                                self?.reportAPIServerFailure(port: port, error: error)
+                            }
+                        })
+                } catch {
+                    reportAPIServerFailure(port: port, error: error)
+                }
             }
         }
         webhookLoop?.cancel()
@@ -273,6 +286,12 @@ final class AppState {
                 try? await Task.sleep(for: .seconds(30))
             }
         }
+    }
+
+    private func reportAPIServerFailure(port: UInt16, error: Error) {
+        let message = "Local API couldn't start on port \(port): \(error.localizedDescription)"
+        Logger(subsystem: "com.zertyn.granipa", category: "api").error("\(message, privacy: .public)")
+        apiServerError = message
     }
 
     func restartAPIServer() {
@@ -339,6 +358,11 @@ final class AppState {
         guard recordingStartTask == nil, !recorder.isBusy else { return }
         let targetID: String
         if let meetingID {
+            // Its audio folder is fixed per meeting, so a second take would
+            // overwrite the first recording.
+            guard let existing = meetings.first(where: { $0.id == meetingID }),
+                existing.audioMicPath == nil, existing.audioSystemPath == nil
+            else { return }
             targetID = meetingID
         } else {
             let event = calendar.currentEvent()
@@ -369,6 +393,9 @@ final class AppState {
             }
             meeting.status = .recording
             meeting.startedAt = .now
+            // Linked now so a crash still leaves the row pointing at its audio folder.
+            meeting.audioMicPath = session.micURL.path
+            meeting.audioSystemPath = session.systemURL.path
             update(meeting)
             selectedMeetingID = targetID
             startMeetingEndWatch()
@@ -392,37 +419,22 @@ final class AppState {
     }
 
     func stopRecording() async {
-        autoStopTask?.cancel()
-        autoStopTask = nil
-        let wasStarting = recorder.isStarting && !recorder.isRecording
-        recordingStartTask?.cancel()
-        dictation.meetingIsRecording = false
-        CaptionsOverlayController.shared.setVisible(false)
-        guard let id = recorder.meetingID, let urls = await recorder.stop() else { return }
-        if wasStarting {
-            try? FileManager.default.removeItem(at: urls.micURL.deletingLastPathComponent())
-            return
-        }
+        guard let capture = await stopCapture() else { return }
+        let id = capture.id
+        let urls = capture.urls
         processingMeetingID = id
         defer {
             if processingMeetingID == id {
                 processingMeetingID = nil
             }
         }
-        // Re-fetch: the transcription coordinator may have written the detected
-        // language while the array copy was stale.
-        guard let db = database, var meeting = try? db.fetchMeeting(id: id) else {
+        guard let db = database, let meeting = capture.meeting else {
             if let live = transcription {
                 await live.finishAndWait()
             }
             transcription = nil
             return
         }
-        meeting.status = .processing
-        meeting.endedAt = .now
-        meeting.audioMicPath = urls.micURL.path
-        meeting.audioSystemPath = urls.systemURL.path
-        update(meeting)
 
         if let live = transcription {
             await live.finishAndWait()
@@ -444,6 +456,43 @@ final class AppState {
                 meetingID: id,
                 skipLocalDiarize: false,
                 fileTranscription: outcome)
+        }
+    }
+
+    /// Stops capture, closes the audio files and marks the meeting processing.
+    /// Returns nil when nothing was captured (idle, or cancelled while starting).
+    private func stopCapture() async -> (
+        id: String, urls: (micURL: URL, systemURL: URL), meeting: Meeting?
+    )? {
+        autoStopTask?.cancel()
+        autoStopTask = nil
+        let wasStarting = recorder.isStarting && !recorder.isRecording
+        recordingStartTask?.cancel()
+        dictation.meetingIsRecording = false
+        CaptionsOverlayController.shared.setVisible(false)
+        guard let id = recorder.meetingID, let urls = await recorder.stop() else { return nil }
+        if wasStarting {
+            try? FileManager.default.removeItem(at: urls.micURL.deletingLastPathComponent())
+            return nil
+        }
+        // Re-fetch: the transcription coordinator may have written the detected
+        // language while the array copy was stale.
+        guard var meeting = try? database?.fetchMeeting(id: id) else { return (id, urls, nil) }
+        meeting.status = .processing
+        meeting.endedAt = .now
+        meeting.audioMicPath = urls.micURL.path
+        meeting.audioSystemPath = urls.systemURL.path
+        update(meeting)
+        return (id, urls, meeting)
+    }
+
+    /// Quit path: only waits for the audio files to close. The meeting stays
+    /// `.processing`, which launch recovery turns into a ready meeting.
+    func stopCaptureForQuit() async {
+        _ = await stopCapture()
+        // A Stop already in flight owns the session; let it finish closing the files.
+        while recorder.isBusy {
+            try? await Task.sleep(for: .milliseconds(50))
         }
     }
 
@@ -688,8 +737,15 @@ final class AppState {
 
     func deleteMeeting(id: String) {
         guard let db = database else { return }
+        guard recorder.meetingID != id, processingMeetingID != id else {
+            loadError = "This meeting is still recording or processing. Delete it once it's done."
+            return
+        }
         do {
             try db.deleteMeeting(id: id)
+            if let dir = try? AppPaths.audioDirectory(meetingID: id) {
+                try? FileManager.default.removeItem(at: dir)
+            }
             meetings.removeAll { $0.id == id }
             if selectedMeetingID == id {
                 selectedMeetingID = nil
