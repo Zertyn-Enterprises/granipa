@@ -36,7 +36,10 @@ final class RecordingSession: @unchecked Sendable {
     private let micWriter: ChannelFileWriter
     private let systemWriter: ChannelFileWriter
     private var sessionStartHostSeconds: Double = 0
-    private(set) var systemAudioError: Error?
+    // Whether the latest start or restart of each recorder threw; read by the
+    // watchdog, written on the control queue.
+    private let micStartFailure = Mutex(false)
+    private let systemTapFailure = Mutex(false)
     private var deviceChangeListener: AudioObjectPropertyListenerBlock?
     private var inputDeviceChangeListener: AudioObjectPropertyListenerBlock?
 
@@ -52,6 +55,8 @@ final class RecordingSession: @unchecked Sendable {
     var systemNonSilentCount: Int { systemNonSilent.withLock { $0 } }
     var micFramesWritten: AVAudioFramePosition { micWriter.audioFramesWritten }
     var systemFramesWritten: AVAudioFramePosition { systemWriter.audioFramesWritten }
+    var micStartFailed: Bool { micStartFailure.withLock { $0 } }
+    var systemTapFailed: Bool { systemTapFailure.withLock { $0 } }
 
     init(
         meetingID: String,
@@ -76,8 +81,25 @@ final class RecordingSession: @unchecked Sendable {
     // and hangs Record (pid 25501: 134% CPU, 8 hangs) even with live ASR off.
     func startMic() throws {
         sessionStartHostSeconds = AVAudioTime.seconds(forHostTime: mach_absolute_time())
-        try mic.start(echoCancellation: false) { [weak self] buffer, time in
-            self?.handleMic(buffer, time: time)
+        try startMicRecorder()
+    }
+
+    // A configuration change stops the engine; restarting keeps appending to
+    // the same file, like a default-input switch.
+    private func startMicRecorder() throws {
+        do {
+            try mic.start(
+                echoCancellation: false,
+                onBuffer: { [weak self] buffer, time in
+                    self?.handleMic(buffer, time: time)
+                },
+                onConfigurationChange: { [weak self] in
+                    self?.restartMic(recreateFile: false)
+                })
+            micStartFailure.withLock { $0 = false }
+        } catch {
+            micStartFailure.withLock { $0 = true }
+            throw error
         }
     }
 
@@ -86,9 +108,10 @@ final class RecordingSession: @unchecked Sendable {
             try tap.start { [weak self] buffer, timestamp in
                 self?.handleSystem(buffer, timestamp: timestamp)
             }
-            systemAudioError = nil
+            systemTapFailure.withLock { $0 = false }
         } catch {
-            systemAudioError = error
+            Self.log.error("system tap start failed: \(String(describing: error), privacy: .public)")
+            systemTapFailure.withLock { $0 = true }
         }
     }
 
@@ -199,14 +222,7 @@ final class RecordingSession: @unchecked Sendable {
     private func performSystemTapRestart() {
         Self.log.info("restarting system tap (buffers so far: \(self.systemBufferCount))")
         tap.stop()
-        do {
-            try tap.start { [weak self] buffer, timestamp in
-                self?.handleSystem(buffer, timestamp: timestamp)
-            }
-            systemAudioError = nil
-        } catch {
-            systemAudioError = error
-        }
+        startSystemTap()
     }
 
     // Recovery for a dead or stalled mic: an engine can start before the mic TCC
@@ -240,8 +256,10 @@ final class RecordingSession: @unchecked Sendable {
             }
         }
         mic = MicRecorder()
-        try? mic.start(echoCancellation: false) { [weak self] buffer, time in
-            self?.handleMic(buffer, time: time)
+        do {
+            try startMicRecorder()
+        } catch {
+            Self.log.error("mic restart failed: \(String(describing: error), privacy: .public)")
         }
     }
 

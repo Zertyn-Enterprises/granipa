@@ -29,6 +29,10 @@ final class RecordingEngine {
 
     var isBusy: Bool { isRecording || isStarting }
 
+    private static let systemTapFailedWarning =
+        "System audio capture failed - only your microphone is being recorded. "
+        + "Check System Settings > Privacy & Security > Screen & System Audio Recording."
+
     func start(meetingID: String) async throws -> RecordingSession {
         guard !isRecording, !isStarting else {
             throw NSError(
@@ -72,13 +76,7 @@ final class RecordingEngine {
         try Task.checkCancellation()
         guard startingSession === session else { throw CancellationError() }
         session.installListeners()
-        if session.systemAudioError != nil {
-            systemAudioWarning =
-                "System audio capture failed - only your microphone is being recorded. "
-                + "Check System Settings > Privacy & Security > Screen & System Audio Recording."
-        } else {
-            systemAudioWarning = nil
-        }
+        systemAudioWarning = session.systemTapFailed ? Self.systemTapFailedWarning : nil
         self.session = session
         startingSession = nil
         self.startedAt = .now

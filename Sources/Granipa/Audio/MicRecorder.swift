@@ -5,10 +5,14 @@ final class MicRecorder {
     private static let log = Logger(subsystem: "com.zertyn.granipa", category: "mic")
     private let engine = AVAudioEngine()
     private var hasTap = false
+    private var configurationObserver: NSObjectProtocol?
 
+    /// `onConfigurationChange` fires when the engine stopped itself because the
+    /// input hardware's sample rate or channel count changed.
     func start(
         echoCancellation: Bool,
-        onBuffer: @escaping @Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void
+        onBuffer: @escaping @Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void,
+        onConfigurationChange: (@Sendable () -> Void)? = nil
     ) throws {
         let input = engine.inputNode
         if echoCancellation {
@@ -41,9 +45,21 @@ final class MicRecorder {
             throw error
         }
         Self.log.info("mic engine running")
+        if let onConfigurationChange {
+            configurationObserver = NotificationCenter.default.addObserver(
+                forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil
+            ) { _ in
+                Self.log.info("mic engine configuration changed")
+                onConfigurationChange()
+            }
+        }
     }
 
     func stop() {
+        if let configurationObserver {
+            NotificationCenter.default.removeObserver(configurationObserver)
+            self.configurationObserver = nil
+        }
         if hasTap {
             engine.inputNode.removeTap(onBus: 0)
             hasTap = false
