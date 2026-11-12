@@ -32,10 +32,17 @@ final class ShortcutHub {
             if !PasteService.isTrusted {
                 PasteService.requestTrust()
             }
-            HyperKeyMonitor.shared.start(hyperKeyCode: hyperCode, bindings: keyToID) { id in
+            let started = HyperKeyMonitor.shared.start(
+                hyperKeyCode: hyperCode, bindings: keyToID
+            ) { id in
+                // The tap swallowed this key, so the dictation modifier's own
+                // monitor never saw it; it is still a chord, not a dictation press.
+                HotkeyManager.shared.noteChord()
                 Self.dispatch(id)
             }
-            return
+            // Without Accessibility there is no tap; the Carbon chords below
+            // need no permission, so shortcuts keep working until it is granted.
+            if started { return }
         }
 
         for extra in ExtraShortcut.allCases {
