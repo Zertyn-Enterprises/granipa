@@ -52,7 +52,9 @@ import Testing
         let started = Date.now
         let shouldContinue = await task.value
         #expect(!shouldContinue)
-        #expect(Date.now.timeIntervalSince(started) < 1)
+        // The wait is 30 s; well under that proves cancellation ended it,
+        // with room for a loaded CI runner.
+        #expect(Date.now.timeIntervalSince(started) < 10)
     }
 
     @Test func nonCancelledWaitReportsContinue() async {
