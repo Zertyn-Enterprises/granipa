@@ -155,7 +155,7 @@ struct ClipboardHistoryView: View {
                             .padding(14)
                     } else {
                         ScrollView {
-                            Text(item.textContent ?? "")
+                            Text(Self.previewText(item.textContent ?? ""))
                                 .font(.system(size: 15))
                                 .foregroundStyle(Theme.textPrimary)
                                 .textSelection(.enabled)
@@ -243,6 +243,13 @@ struct ClipboardHistoryView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
+    }
+
+    /// SwiftUI lays out a Text in full, so a huge clip would stall the panel;
+    /// Copy still uses the full stored text.
+    static func previewText(_ text: String, limit: Int = 20_000) -> String {
+        let head = text.prefix(limit)
+        return head.endIndex == text.endIndex ? text : head + "…"
     }
 
     // MARK: - Actions
@@ -352,7 +359,7 @@ private struct ClipboardRow: View {
             let first = (item.textContent ?? "").split(separator: "\n").first.map(String.init) ?? ""
             return (first as NSString).lastPathComponent
         case .text, .link:
-            return (item.textContent ?? "")
+            return ClipboardHistoryView.previewText(item.textContent ?? "", limit: 300)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .replacingOccurrences(of: "\n", with: " ")
         }
