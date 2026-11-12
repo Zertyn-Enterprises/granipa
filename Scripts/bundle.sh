@@ -44,6 +44,14 @@ BIN_DIR="$(swift build -c "$CONFIG" --show-bin-path)"
 BIN="$BIN_DIR/Granipa"
 HELPER="$BIN_DIR/GranipaBatteryHelper"
 
+# The binary links Sparkle: a bundle without it signs and notarizes fine and
+# then crashes at launch in dyld. Checked before the previous bundle is deleted.
+SPARKLE_SRC="$(find .build -type d -name "Sparkle.framework" -path "*macos*" 2>/dev/null | head -1)"
+if [ -z "$SPARKLE_SRC" ]; then
+  echo "ERROR: Sparkle.framework (macos slice) not found under .build; run 'swift package resolve' and rebuild." >&2
+  exit 1
+fi
+
 APP="build/Grañipa.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Library/LaunchDaemons"
@@ -55,13 +63,10 @@ cp Resources/com.zertyn.granipa.batteryhelper.plist \
   "$APP/Contents/Library/LaunchDaemons/com.zertyn.granipa.batteryhelper.plist"
 
 # Embed Sparkle (SPM binary artifact) so the bundle is self-contained.
-SPARKLE_SRC="$(find .build -type d -name "Sparkle.framework" -path "*macos*" 2>/dev/null | head -1)"
-if [ -n "$SPARKLE_SRC" ]; then
-  mkdir -p "$APP/Contents/Frameworks"
-  cp -R "$SPARKLE_SRC" "$APP/Contents/Frameworks/"
-  install_name_tool -add_rpath "@executable_path/../Frameworks" \
-    "$APP/Contents/MacOS/Granipa" 2>/dev/null || true
-fi
+mkdir -p "$APP/Contents/Frameworks"
+cp -R "$SPARKLE_SRC" "$APP/Contents/Frameworks/"
+install_name_tool -add_rpath "@executable_path/../Frameworks" \
+  "$APP/Contents/MacOS/Granipa" 2>/dev/null || true
 
 # Hardened runtime + entitlements are required for notarization. Sparkle's
 # nested executables must be signed before the framework and the app; the
@@ -70,13 +75,11 @@ sign_bundle() {
   local id="$1"; shift
   local options=(--force --options runtime)
   local fw="$APP/Contents/Frameworks/Sparkle.framework"
-  if [ -d "$fw" ]; then
-    find "$fw" \( -name "*.xpc" -o -name "Autoupdate" -o -name "Updater.app" \) -print0 \
-      | while IFS= read -r -d '' item; do
-        codesign "${options[@]}" "$@" --sign "$id" "$item" || exit 1
-      done
-    codesign "${options[@]}" "$@" --sign "$id" "$fw"
-  fi
+  find "$fw" \( -name "*.xpc" -o -name "Autoupdate" -o -name "Updater.app" \) -print0 \
+    | while IFS= read -r -d '' item; do
+      codesign "${options[@]}" "$@" --sign "$id" "$item" || exit 1
+    done
+  codesign "${options[@]}" "$@" --sign "$id" "$fw"
   codesign "${options[@]}" --identifier com.zertyn.granipa.batteryhelper \
     "$@" --sign "$id" \
     "$APP/Contents/MacOS/GranipaBatteryHelper"
