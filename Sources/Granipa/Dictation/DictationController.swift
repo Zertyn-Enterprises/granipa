@@ -130,6 +130,21 @@ final class DictationController {
             fail(DictationError.micBusy)
             return
         }
+        let generation = beginSession(latched: latched)
+        if presentsChrome {
+            DictationOverlayController.shared.attach(self)
+            DictationOverlayController.shared.setClickThrough(false)
+            DictationOverlayController.shared.setVisible(true)
+            CaptionsOverlayController.shared.setVisible(false)
+            registerEscape()
+        }
+        transcribeTask = Task { [weak self] in
+            await self?.runSession(generation: generation)
+        }
+    }
+
+    /// Resets per-session state, enters `.preparing` and returns the new generation.
+    private func beginSession(latched: Bool) -> Int {
         hideTask?.cancel()
         pressStartedAt = .now
         stoppedAt = nil
@@ -143,63 +158,61 @@ final class DictationController {
             rawValue: UserDefaults.standard.string(forKey: "dictationEngine") ?? "local")
             ?? .local
         sessionGeneration += 1
-        let generation = sessionGeneration
         let front = NSWorkspace.shared.frontmostApplication
         sourceApp =
             front?.bundleIdentifier == Bundle.main.bundleIdentifier
             ? nil : front?.localizedName
         phase = .preparing
         reachedListening = false
-        if presentsChrome {
-            DictationOverlayController.shared.attach(self)
-            DictationOverlayController.shared.setClickThrough(false)
-            DictationOverlayController.shared.setVisible(true)
-            CaptionsOverlayController.shared.setVisible(false)
-            registerEscape()
-        }
+        return sessionGeneration
+    }
 
-        transcribeTask = Task { [weak self] in
-            guard let self else { return }
-            do {
-                #if DEBUG
-                    if let beforeCapture = self.testHooks?.beforeCapture {
-                        await beforeCapture()
-                    }
-                #endif
-                guard !Task.isCancelled, generation == self.sessionGeneration,
-                    self.phase == .preparing
-                else { return }
-                let stream = try self.beginCapture()
-                guard !Task.isCancelled, generation == self.sessionGeneration else {
-                    if self.captureGeneration == generation { self.finishMic() }
-                    return
-                }
-                if self.phase == .preparing {
-                    self.phase = .listening
-                    self.reachedListening = true
-                    if self.presentsChrome {
-                        DictationOverlayController.shared.setClickThrough(false)
-                    }
-                    self.watchForMicStall(generation: generation)
-                }
-                guard self.phase == .listening || self.phase == .processing else {
-                    if self.captureGeneration == generation { self.finishMic() }
-                    return
-                }
-                try await self.prepareEngine()
-                guard !Task.isCancelled, generation == self.sessionGeneration else { return }
-                let text = try await self.runEngine(chunks: stream, generation: generation)
-                guard !Task.isCancelled, generation == self.sessionGeneration else { return }
-                await self.finish(text: text)
-            } catch is CancellationError {
-                return
-            } catch let error as DictationError where error.isCancelled {
-                return
-            } catch {
-                guard generation == self.sessionGeneration else { return }
-                self.fail(error)
-            }
+    private func runSession(generation: Int) async {
+        do {
+            guard let stream = try await openCapture(generation: generation) else { return }
+            try await prepareEngine()
+            guard !Task.isCancelled, generation == sessionGeneration else { return }
+            let text = try await runEngine(chunks: stream, generation: generation)
+            guard !Task.isCancelled, generation == sessionGeneration else { return }
+            await finish(text: text)
+        } catch is CancellationError {
+            return
+        } catch let error as DictationError where error.isCancelled {
+            return
+        } catch {
+            guard generation == sessionGeneration else { return }
+            fail(error)
         }
+    }
+
+    /// Opens the mic and enters `.listening`; nil when the session was
+    /// cancelled or stopped before the capture was usable.
+    private func openCapture(generation: Int) async throws -> AsyncStream<AudioChunk>? {
+        #if DEBUG
+            if let beforeCapture = testHooks?.beforeCapture {
+                await beforeCapture()
+            }
+        #endif
+        guard !Task.isCancelled, generation == sessionGeneration, phase == .preparing
+        else { return nil }
+        let stream = try beginCapture()
+        guard !Task.isCancelled, generation == sessionGeneration else {
+            if captureGeneration == generation { finishMic() }
+            return nil
+        }
+        if phase == .preparing {
+            phase = .listening
+            reachedListening = true
+            if presentsChrome {
+                DictationOverlayController.shared.setClickThrough(false)
+            }
+            watchForMicStall(generation: generation)
+        }
+        guard phase == .listening || phase == .processing else {
+            if captureGeneration == generation { finishMic() }
+            return nil
+        }
+        return stream
     }
 
     private func prepareEngine() async throws {
