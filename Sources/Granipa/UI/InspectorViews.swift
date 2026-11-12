@@ -514,7 +514,8 @@ private struct MeetingInspectorView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .task(id: meeting.id) {
+        // Status too: the transcript and speakers change when processing ends.
+        .task(id: "\(meeting.id)|\(meeting.status.rawValue)") {
             guard let db = app.database else {
                 segments = []
                 talk = SpeakerTalkTime.report(segments: [])
