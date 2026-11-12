@@ -58,6 +58,12 @@ final class RecordingEngine {
 
     var isBusy: Bool { isRecording || isStarting }
 
+    /// Both capture warnings in one string, for surfaces with room for one.
+    var captureWarningText: String? {
+        let text = [micWarning, systemAudioWarning].compactMap { $0 }.joined(separator: "\n")
+        return text.isEmpty ? nil : text
+    }
+
     private static let systemTapFailedWarning =
         "System audio capture failed - only your microphone is being recorded. "
         + "Check System Settings > Privacy & Security > Screen & System Audio Recording."

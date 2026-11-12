@@ -135,6 +135,7 @@ enum MenuBarStatus: Equatable, Sendable {
     case idle
     case dictating
     case recording
+    case recordingWithWarning
     case processing
 
     var symbolName: String {
@@ -142,6 +143,7 @@ enum MenuBarStatus: Equatable, Sendable {
         case .idle: "waveform"
         case .dictating: "mic.fill"
         case .recording: "record.circle.fill"
+        case .recordingWithWarning: "exclamationmark.triangle.fill"
         case .processing: "ellipsis.circle.fill"
         }
     }
@@ -151,16 +153,18 @@ enum MenuBarStatus: Equatable, Sendable {
         case .idle: "Grañipa"
         case .dictating: "Dictating"
         case .recording: "Recording"
+        case .recordingWithWarning: "Recording — audio problem"
         case .processing: "Processing notes"
         }
     }
 
     static func resolve(
         recorderBusy: Bool,
+        captureWarning: Bool = false,
         dictationActive: Bool,
         processingNotes: Bool
     ) -> MenuBarStatus {
-        if recorderBusy { return .recording }
+        if recorderBusy { return captureWarning ? .recordingWithWarning : .recording }
         if dictationActive { return .dictating }
         if processingNotes { return .processing }
         return .idle
@@ -173,6 +177,7 @@ private struct MenuBarLabel: View {
     var body: some View {
         let status = MenuBarStatus.resolve(
             recorderBusy: app.recorder.isBusy,
+            captureWarning: app.recorder.captureWarningText != nil,
             dictationActive: app.dictation.phase.isActive,
             processingNotes: app.processingMeetingID != nil
                 || !app.enhancingMeetingIDs.isEmpty)
