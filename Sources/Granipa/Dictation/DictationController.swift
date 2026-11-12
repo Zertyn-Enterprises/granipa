@@ -451,7 +451,8 @@ final class DictationController {
         if !autoPaste {
             ToastController.shared.show("Copied")
         } else if !sameApp {
-            ToastController.shared.show("Copied — app changed, press ⌘V to paste", style: .warning)
+            ToastController.shared.show(
+                "Copied — app changed, press ⌘V to paste", style: .warning)
         } else {
             ToastController.shared.show(
                 "Copied — grant Accessibility to auto-paste", style: .warning)
