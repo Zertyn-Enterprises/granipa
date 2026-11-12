@@ -102,6 +102,7 @@ import Testing
         (true, nil, nil, true, .control),
         (false, .inhibit, nil, false, .control),  // limit off but charging not yet restored
         (false, nil, 1, false, .control),  // LED left in a custom mode
+        (false, nil, 0, false, .off),  // LED back on system control
     ])
     func batteryLoopRunsOnlyWhileNeeded(
         featureOn: Bool, action: ChargeAction?, ledByte: UInt8?, viewOpen: Bool,
