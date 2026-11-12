@@ -204,9 +204,15 @@ final class BatteryHelperClient {
         }
     }
 
+    /// Called whenever the helper may have restarted: it restores charging
+    /// on exit, so whatever the app last applied no longer holds.
+    var onConnectionLost: (@MainActor () -> Void)?
+    private var connectionGeneration = 0
+
     private func resetConnection() {
         connection?.invalidate()
         connection = nil
+        onConnectionLost?()
     }
 
     private func proxy(errorHandler: @escaping @Sendable (Error) -> Void)
@@ -217,8 +223,16 @@ final class BatteryHelperClient {
             let conn = NSXPCConnection(
                 machServiceName: batteryHelperMachName, options: .privileged)
             conn.remoteObjectInterface = NSXPCInterface(with: GranipaBatteryHelping.self)
+            connectionGeneration += 1
+            let generation = connectionGeneration
             conn.invalidationHandler = BatteryHelperCallbacks.mainActor { [weak self] in
-                self?.connection = nil
+                guard let self else { return }
+                // A late handler from a replaced connection must not drop the new one.
+                if self.connectionGeneration == generation { self.connection = nil }
+                self.onConnectionLost?()
+            }
+            conn.interruptionHandler = BatteryHelperCallbacks.mainActor { [weak self] in
+                self?.onConnectionLost?()
             }
             conn.resume()
             connection = conn
