@@ -478,7 +478,9 @@ final class AppState {
                 source: .live { [weak self] in
                     await live.finishAndWait()
                     self?.releaseTranscription(live)
-                    return live.systemUsedMuse
+                    var failure: String?
+                    if case .failed(let message) = live.phase { failure = message }
+                    return .init(usedMuseForSystem: live.systemUsedMuse, failure: failure)
                 })
         } else {
             await processor.process(

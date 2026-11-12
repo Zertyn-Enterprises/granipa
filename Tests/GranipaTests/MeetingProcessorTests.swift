@@ -29,7 +29,7 @@ import Testing
                 events.log.append("\(name) start")
                 if waits { for await _ in gate {} }
                 events.log.append("\(name) end")
-                return false
+                return .init(usedMuseForSystem: false)
             }
         }
 
@@ -64,7 +64,7 @@ import Testing
         let job = Task {
             await processor.process(meetingID: meeting.id, source: .live {
                 for await _ in gate {}
-                return false
+                return .init(usedMuseForSystem: false)
             })
         }
         while processor.processingMeetingID != meeting.id { await Task.yield() }
@@ -75,23 +75,22 @@ import Testing
     }
 
     @Test(arguments: [
-        (FileMeetingTranscriber.Outcome?.some(.failed(.modelInstall(localeID: "en-US"))),
-         MeetingProcessor.EnhanceOutcome.ran, "Transcription failed"),
-        (.completed(localeID: "en-US"), .ran, "Notes ready"),
-        (nil, .ran, "Notes ready"),
-        (.completed(localeID: "en-US"), .failed("CLI missing"), "Notes not written"),
-        (.completed(localeID: "en-US"), .nothingToEnhance, "Recording processed"),
+        (true, MeetingProcessor.EnhanceOutcome.ran, "Transcription failed"),
+        (true, .failed("CLI missing"), "Transcription failed"),
+        (false, .ran, "Notes ready"),
+        (false, .failed("CLI missing"), "Notes not written"),
+        (false, .nothingToEnhance, "Recording processed"),
     ])
     func completionNoticeNamesTheOutcome(
-        _ transcription: FileMeetingTranscriber.Outcome?,
+        _ transcriptionFailed: Bool,
         _ enhancement: MeetingProcessor.EnhanceOutcome,
         _ expectedTitle: String
     ) {
         let notice = MeetingProcessor.completionNotice(
-            title: "Standup", transcription: transcription, enhancement: enhancement)
+            title: "Standup", transcriptionFailed: transcriptionFailed, enhancement: enhancement)
         #expect(notice.title == expectedTitle)
         #expect(notice.body.hasPrefix("Standup"))
-        if case .failed(let message) = enhancement {
+        if !transcriptionFailed, case .failed(let message) = enhancement {
             #expect(notice.body.contains(message))
         }
     }

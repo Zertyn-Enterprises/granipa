@@ -15,15 +15,16 @@ enum FileMeetingTranscriber {
 
     /// The two external failure sources that used to be swallowed into a
     /// silent Void return: on-device model installation and per-channel file
-    /// analysis. Tests inject fakes here to drive the typed outcome.
+    /// analysis (which returns the channel's final segments). Tests inject
+    /// fakes here to drive the typed outcome.
     struct Boundary: Sendable {
         var installModel: @Sendable (Locale) async throws -> Void
-        var analyzeChannel: @Sendable (ChannelAnalysis) async throws -> Void
+        var analyzeChannel: @Sendable (ChannelAnalysis) async throws -> [TranscriptSegment]
         var isInstalled: @Sendable (Locale) async -> Bool = { _ in true }
 
         static let live = Boundary(
             installModel: { locale in try await SpeechModels.ensureInstalled(locale: locale) },
-            analyzeChannel: { try await analyzeToDatabase($0) },
+            analyzeChannel: { try await analyze($0) },
             isInstalled: { await SpeechModels.isInstalled(locale: $0) })
     }
 
@@ -39,20 +40,21 @@ enum FileMeetingTranscriber {
         let channel: AudioChannel
         let locale: Locale
         let meetingID: String
-        let database: AppDatabase
     }
 
     /// Distinguishes "ran fine; the transcript may legitimately be empty for
-    /// a silent meeting" from "failed; whatever segments exist are partial".
+    /// a silent meeting" from "failed; a failed channel kept its previous
+    /// segments".
     enum Outcome: Sendable, Equatable {
         case completed(localeID: String)
         case failed(Failure)
     }
 
-    /// Some final segments could not be written; the channel's transcript is partial.
-    struct SegmentSaveFailure: LocalizedError {
-        let count: Int
-        var errorDescription: String? { "\(count) transcript segment(s) could not be saved" }
+    struct Transcription: Sendable, Equatable {
+        let outcome: Outcome
+        /// The meeting's language once known for sure (a probe of speech
+        /// decided, or there was one candidate); the caller saves it.
+        let language: String?
     }
 
     enum Failure: Sendable, Equatable {
@@ -80,13 +82,15 @@ enum FileMeetingTranscriber {
         database: AppDatabase,
         onChannel: @Sendable (AudioChannel) async -> Void = { _ in },
         boundary: Boundary = .live
-    ) async -> Outcome {
+    ) async -> Transcription {
         let localeIDs = LanguageDetection.fileProbeLocales(
             requested: language,
             last: UserDefaults.standard.string(forKey: "lastSpeechLocale"))
         // Unreachable with LanguageDetection's non-empty defaults; keep the
         // old silent no-op rather than inventing an install error.
-        guard !localeIDs.isEmpty else { return .completed(localeID: language) }
+        guard !localeIDs.isEmpty else {
+            return Transcription(outcome: .completed(localeID: language), language: nil)
+        }
         let choice = await chooseLocale(
             candidates: localeIDs, micURL: micURL, systemURL: systemURL, boundary: boundary)
         let localeID = choice.localeID
@@ -97,17 +101,19 @@ enum FileMeetingTranscriber {
             log.error(
                 "model installation failed for locale \(localeID, privacy: .public): \(error.localizedDescription, privacy: .public)"
             )
-            return .failed(.modelInstall(localeID: localeID))
+            return Transcription(outcome: .failed(.modelInstall(localeID: localeID)), language: nil)
         }
         var failedChannels: [AudioChannel] = []
+        // A channel's previous segments are swapped for the new ones in one
+        // transaction, and only once its analysis succeeded: a channel with no
+        // audio or a failed analysis keeps the transcript it had.
         for (url, channel) in [(micURL, AudioChannel.mic), (systemURL, AudioChannel.system)] {
             guard hasAudioToTranscribe(at: url) else { continue }
             await onChannel(channel)
             do {
-                try await boundary.analyzeChannel(
-                    ChannelAnalysis(
-                        url: url, channel: channel, locale: locale,
-                        meetingID: meetingID, database: database))
+                let segments = try await boundary.analyzeChannel(
+                    ChannelAnalysis(url: url, channel: channel, locale: locale, meetingID: meetingID))
+                try database.replaceSegments(meetingID: meetingID, channel: channel, with: segments)
             } catch {
                 log.error(
                     "\(channel.rawValue, privacy: .public) channel analysis failed for meeting \(meetingID, privacy: .public): \(error.localizedDescription, privacy: .public)"
@@ -121,13 +127,12 @@ enum FileMeetingTranscriber {
         if choice.probed {
             UserDefaults.standard.set(localeID, forKey: "lastSpeechLocale")
         }
-        if choice.probed || localeIDs.count == 1 {
-            persistLanguage(localeID, meetingID: meetingID, database: database)
-        }
+        let known = choice.probed || localeIDs.count == 1 ? localeID : nil
         guard failedChannels.isEmpty else {
-            return .failed(.channels(failedChannels, localeID: localeID))
+            return Transcription(
+                outcome: .failed(.channels(failedChannels, localeID: localeID)), language: known)
         }
-        return .completed(localeID: localeID)
+        return Transcription(outcome: .completed(localeID: localeID), language: known)
     }
 
     /// A missing or near-empty file means "no audio to transcribe", not a
@@ -168,20 +173,6 @@ enum FileMeetingTranscriber {
         }
         guard let decided = LanguageDetection.decide(results, force: true) else { return fallback }
         return LocaleChoice(localeID: decided, probed: true)
-    }
-
-    private static func persistLanguage(_ localeID: String, meetingID: String, database: AppDatabase) {
-        do {
-            guard var meeting = try database.fetchMeeting(id: meetingID),
-                meeting.language != localeID
-            else { return }
-            meeting.language = localeID
-            try database.save(meeting)
-        } catch {
-            log.error(
-                "saving the detected language failed for meeting \(meetingID, privacy: .public): \(error.localizedDescription, privacy: .public)"
-            )
-        }
     }
 
     private static func probe(localeID: String, chunks: [AudioChunk]) async throws
@@ -240,11 +231,11 @@ enum FileMeetingTranscriber {
         return chunks.isEmpty ? nil : chunks
     }
 
-    /// Saves each final result as a segment; returns how many saves failed.
-    private static func persistFinals(
+    /// The channel's final results as segments.
+    private static func collectFinals(
         of transcriber: SpeechTranscriber, _ analysis: ChannelAnalysis
-    ) async throws -> Int {
-        var failedSaves = 0
+    ) async throws -> [TranscriptSegment] {
+        var segments: [TranscriptSegment] = []
         for try await result in transcriber.results {
             let text = String(result.text.characters)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -259,21 +250,17 @@ enum FileMeetingTranscriber {
                 startSeconds: start.isFinite ? start : 0,
                 endSeconds: end.isFinite ? end : (start.isFinite ? start : 0),
                 isFinal: true)
-            do {
-                try analysis.database.save(segment)
-            } catch {
-                failedSaves += 1
-            }
+            segments.append(segment)
         }
-        return failedSaves
+        return segments
     }
 
     /// Live per-channel analysis: open the recording, run the SpeechAnalyzer,
-    /// persist final segments. Throws on any analyzer error so the caller can
-    /// report it; a zero-length file is simply "no audio", not an error.
-    private static func analyzeToDatabase(_ analysis: ChannelAnalysis) async throws {
+    /// return its final segments. Throws on any analyzer error so the caller
+    /// can report it; a zero-length file is simply "no audio", not an error.
+    private static func analyze(_ analysis: ChannelAnalysis) async throws -> [TranscriptSegment] {
         let file = try AVAudioFile(forReading: analysis.url)
-        guard file.length > 0 else { return }
+        guard file.length > 0 else { return [] }
         let transcriber = SpeechTranscriber(
             locale: analysis.locale,
             transcriptionOptions: [],
@@ -284,7 +271,7 @@ enum FileMeetingTranscriber {
             options: SpeechAnalyzer.Options(
                 priority: .utility,
                 modelRetention: .lingering))
-        let resultsTask = Task { try await persistFinals(of: transcriber, analysis) }
+        let resultsTask = Task { try await collectFinals(of: transcriber, analysis) }
         // Every exit path must wind the analyzer down (finalize or cancel) and
         // join the results pump. A stranded task or lingering analyzer —
         // modelRetention is .lingering — would bleed into the next channel's
@@ -305,12 +292,9 @@ enum FileMeetingTranscriber {
             }
             analyzerFinished = true
             // A throw here means the results stream itself broke mid-meeting;
-            // surfacing it marks the channel failed instead of silently
-            // keeping whatever finals the pump already persisted.
-            let failedSaves = try await resultsTask.value
-            if failedSaves > 0 {
-                throw SegmentSaveFailure(count: failedSaves)
-            }
+            // surfacing it marks the channel failed instead of replacing its
+            // transcript with a partial one.
+            return try await resultsTask.value
         } catch {
             if !analyzerFinished {
                 await analyzer.cancelAndFinishNow()

@@ -17,11 +17,18 @@ final class MeetingProcessor {
     }
 
     enum Source {
-        /// Replaces any existing transcript with one made from the files.
+        /// Replaces each channel's transcript with one made from its file,
+        /// once that channel's analysis succeeded.
         case files(micURL: URL, systemURL: URL, language: String)
-        /// Waits for the live coordinator to finish; returns whether the
-        /// system channel was transcribed by Muse (which also diarizes).
-        case live(drain: @MainActor () async -> Bool)
+        /// Waits for the live coordinator to finish.
+        case live(drain: @MainActor () async -> LiveResult)
+    }
+
+    struct LiveResult {
+        /// Muse transcribed (and diarized) the system channel.
+        var usedMuseForSystem: Bool
+        /// Why live transcription failed, if it did (e.g. lines not saved).
+        var failure: String?
     }
 
     enum EnhanceOutcome: Equatable {
@@ -103,18 +110,24 @@ final class MeetingProcessor {
                 stage = nil
             }
         }
-        var transcription: FileMeetingTranscriber.Outcome?
+        let transcriptionFailed: Bool
         var skipLocalDiarize = false
         switch source {
         case .live(let drain):
-            skipLocalDiarize = await drain()
-        case .files(let micURL, let systemURL, let language):
-            guard clearTranscript(meetingID: id) else {
-                finish(meetingID: id)
-                return
+            let result = await drain()
+            skipLocalDiarize = result.usedMuseForSystem
+            transcriptionFailed = result.failure != nil
+            if let failure = result.failure {
+                Self.log.error(
+                    "live transcription failed for \(id, privacy: .public): \(failure, privacy: .public)")
             }
-            transcription = await transcribe(
+        case .files(let micURL, let systemURL, let language):
+            transcriptionFailed = await transcribe(
                 meetingID: id, micURL: micURL, systemURL: systemURL, language: language)
+        }
+        if transcriptionFailed {
+            ToastController.shared.show(
+                "Transcription failed — your audio was saved", style: .warning)
         }
         stage = .identifyingSpeakers
         await diarize(meetingID: id, skipLocalDiarize: skipLocalDiarize)
@@ -128,29 +141,18 @@ final class MeetingProcessor {
         finish(meetingID: id)
         if let meeting = try? database.fetchMeeting(id: id) {
             let notice = Self.completionNotice(
-                title: meeting.title, transcription: transcription, enhancement: enhanced)
+                title: meeting.title, transcriptionFailed: transcriptionFailed, enhancement: enhanced)
             NotificationManager.shared.notify(title: notice.title, body: notice.body)
         }
     }
 
-    private func clearTranscript(meetingID id: String) -> Bool {
-        do {
-            for channel in [AudioChannel.mic, .system] {
-                try database.replaceSegments(meetingID: id, channel: channel, with: [])
-            }
-            return true
-        } catch {
-            host.reportError("Couldn't replace the transcript: \(error.localizedDescription)")
-            return false
-        }
-    }
-
+    /// Returns whether transcription failed (a failed channel keeps its old segments).
     private func transcribe(
         meetingID id: String, micURL: URL, systemURL: URL, language: String
-    ) async -> FileMeetingTranscriber.Outcome {
+    ) async -> Bool {
         stage = .transcribingAudio
         let db = database
-        let outcome = await Task.detached {
+        let result = await Task.detached {
             await FileMeetingTranscriber.transcribe(
                 micURL: micURL,
                 systemURL: systemURL,
@@ -161,21 +163,24 @@ final class MeetingProcessor {
                     await self.setStage(channel == .mic ? .transcribingAudio : .transcribingCall)
                 })
         }.value
-        // The transcriber wrote the detected language to the store; sync the
-        // in-memory copy before an editor save can merge onto a stale one.
-        if let fresh = try? db.fetchMeeting(id: id) {
-            host.update(fresh)
+        if let detected = result.language {
+            saveLanguage(detected, meetingID: id)
         }
-        if case .failed(let failure) = outcome {
-            // Generic toast for the user; the underlying error is logged at
-            // the catch site in FileMeetingTranscriber.
-            Self.log.error(
-                "post-meeting transcription failed for \(id, privacy: .public): \(failure.logDescription, privacy: .public)"
-            )
-            ToastController.shared.show(
-                "Transcription failed — your audio was saved", style: .warning)
-        }
-        return outcome
+        guard case .failed(let failure) = result.outcome else { return false }
+        // The underlying error is logged at the catch site in FileMeetingTranscriber.
+        Self.log.error(
+            "post-meeting transcription failed for \(id, privacy: .public): \(failure.logDescription, privacy: .public)"
+        )
+        return true
+    }
+
+    /// On the main actor, with no suspension between the read and the write,
+    /// so no other in-app edit of the meeting can be lost in between.
+    private func saveLanguage(_ language: String, meetingID id: String) {
+        guard var meeting = try? database.fetchMeeting(id: id), meeting.language != language
+        else { return }
+        meeting.language = language
+        host.update(meeting)
     }
 
     private func setStage(_ next: Stage) {
@@ -185,10 +190,10 @@ final class MeetingProcessor {
     /// What the user is told when a meeting finishes processing.
     static func completionNotice(
         title: String,
-        transcription: FileMeetingTranscriber.Outcome?,
+        transcriptionFailed: Bool,
         enhancement: EnhanceOutcome
     ) -> (title: String, body: String) {
-        if case .failed = transcription {
+        if transcriptionFailed {
             return (
                 "Transcription failed",
                 "\(title): your audio was saved. Open the meeting and choose Transcribe again.")
@@ -350,3 +355,4 @@ final class MeetingProcessor {
         Task { await WebhookService.deliverDue(database: db) }
     }
 }
+
