@@ -417,21 +417,36 @@ final class RecordingSession: @unchecked Sendable {
         systemFramesWritten += AVAudioFramePosition(buffer.frameLength)
     }
 
+    // The AAC encoder rejects a bit rate outside the range its sample rate
+    // allows: 96 kbps is refused at the 24 kHz / 16 kHz a Bluetooth headset
+    // mic delivers, which left the file unopened and the whole channel
+    // unrecorded. Fall back to the encoder's own default for that format.
     private static func openAudioFile(url: URL, format: AVAudioFormat, bitRate: Int) -> AVAudioFile?
     {
-        try? AVAudioFile(
-            forWriting: url,
-            settings: aacSettings(for: format, bitRate: bitRate),
-            commonFormat: format.commonFormat,
-            interleaved: format.isInterleaved)
+        for requestedBitRate in [bitRate, nil] {
+            do {
+                return try AVAudioFile(
+                    forWriting: url,
+                    settings: aacSettings(for: format, bitRate: requestedBitRate),
+                    commonFormat: format.commonFormat,
+                    interleaved: format.isInterleaved)
+            } catch {
+                log.error(
+                    "open \(url.lastPathComponent, privacy: .public) failed at \(format.sampleRate, privacy: .public)Hz/\(format.channelCount)ch bitRate=\(requestedBitRate ?? 0): \(String(describing: error), privacy: .public)")
+            }
+        }
+        return nil
     }
 
-    private static func aacSettings(for format: AVAudioFormat, bitRate: Int) -> [String: Any] {
-        [
+    private static func aacSettings(for format: AVAudioFormat, bitRate: Int?) -> [String: Any] {
+        var settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
             AVSampleRateKey: format.sampleRate,
             AVNumberOfChannelsKey: Int(format.channelCount),
-            AVEncoderBitRateKey: bitRate,
         ]
+        if let bitRate {
+            settings[AVEncoderBitRateKey] = bitRate
+        }
+        return settings
     }
 }

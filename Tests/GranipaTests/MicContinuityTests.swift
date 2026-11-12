@@ -108,6 +108,26 @@ import Testing
         #expect(rms(audio, seconds: 1.0..<2.0) < 0.02)
         #expect(rms(audio, seconds: 3.3..<3.5) > 0.2)
     }
+
+    /// Regression: a meeting started on a Bluetooth headset mic (24 kHz mono)
+    /// left a header-only mic.m4a and no "Me" transcript, because the file
+    /// could not be opened at that sample rate.
+    @Test func meetingStartedOnBluetoothHeadsetMicIsRecorded() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mic-continuity-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let session = makeSession(directory: directory)
+
+        session.ingestMicBufferForTesting(
+            tone(sampleRate: 24_000, channels: 1, seconds: 1, amplitude: 0.5), startSeconds: 0)
+        await session.stop()
+
+        let (audio, format) = try readMicAudio(from: session.micURL)
+        #expect(format.sampleRate == 24_000)
+        #expect(Double(audio.frameLength) / format.sampleRate > 0.8)
+        #expect(rms(audio, seconds: 0.2..<0.8) > 0.2)
+    }
 #endif
 
     /// The one piece of the fix a hardware-free test cannot drive is the
