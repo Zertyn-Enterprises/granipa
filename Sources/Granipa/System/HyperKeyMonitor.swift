@@ -162,33 +162,12 @@ enum HyperKeyRoute: Equatable {
     ) -> HyperKeyRoute {
         // The app's own ⌘V must reach the target app even while the layer is armed.
         if synthetic { return .pass }
-        let hyperModifier = HotkeyBinding.modifierFlag(forKeyCode: hyper)
         if code == hyper {
-            if hyper == UInt32(kVK_CapsLock) {
-                // Caps Lock usually arrives as flagsChanged, not keyDown/keyUp.
-                // Toggle a layer: press ⇪ to arm, press ⇪ again to disarm.
-                if type == .flagsChanged { armed.toggle() }
-                return .swallow
-            }
-            if hyperModifier != nil {
-                // Modifiers only emit flagsChanged. Pass it on: other features
-                // (the Right ⌥ dictation key) listen to the same modifier.
-                if type == .flagsChanged {
-                    armed = HotkeyBinding.eventReportsModifierDown(
-                        keyCode: hyper,
-                        flags: NSEvent.ModifierFlags(rawValue: UInt(flags.rawValue)))
-                }
-                return .pass
-            }
-            if type == .keyDown {
-                armed = true
-            } else if type == .keyUp {
-                armed = false
-            }
-            return .swallow
+            return arm(type: type, flags: flags, hyper: hyper, armed: &armed)
         }
 
         guard armed, type == .keyDown, let hotkeyID = bindings[code] else { return .pass }
+        let hyperModifier = HotkeyBinding.modifierFlag(forKeyCode: hyper)
         // ⌘/⌃ shortcuts (⌘C, ⌃A) belong to the frontmost app, unless that
         // modifier is the macro key itself.
         var foreign: CGEventFlags = [.maskCommand, .maskControl]
@@ -196,5 +175,33 @@ enum HyperKeyRoute: Equatable {
         if hyperModifier == .control { foreign.remove(.maskControl) }
         guard flags.intersection(foreign).isEmpty else { return .pass }
         return .fire(hotkeyID)
+    }
+
+    /// An event of the macro key itself: updates whether the layer is armed.
+    private static func arm(
+        type: CGEventType, flags: CGEventFlags, hyper: UInt32, armed: inout Bool
+    ) -> HyperKeyRoute {
+        if hyper == UInt32(kVK_CapsLock) {
+            // Caps Lock usually arrives as flagsChanged, not keyDown/keyUp.
+            // Toggle a layer: press ⇪ to arm, press ⇪ again to disarm.
+            if type == .flagsChanged { armed.toggle() }
+            return .swallow
+        }
+        if HotkeyBinding.modifierFlag(forKeyCode: hyper) != nil {
+            // Modifiers only emit flagsChanged. Pass it on: other features
+            // (the Right ⌥ dictation key) listen to the same modifier.
+            if type == .flagsChanged {
+                armed = HotkeyBinding.eventReportsModifierDown(
+                    keyCode: hyper,
+                    flags: NSEvent.ModifierFlags(rawValue: UInt(flags.rawValue)))
+            }
+            return .pass
+        }
+        if type == .keyDown {
+            armed = true
+        } else if type == .keyUp {
+            armed = false
+        }
+        return .swallow
     }
 }
