@@ -87,7 +87,7 @@ final class RecordingSession: @unchecked Sendable {
     // A configuration change stops the engine; restarting keeps appending to
     // the same file, like a default-input switch.
     private func startMicRecorder() throws {
-        do {
+        try recordMicStart {
             try mic.start(
                 echoCancellation: false,
                 onBuffer: { [weak self] buffer, time in
@@ -96,6 +96,12 @@ final class RecordingSession: @unchecked Sendable {
                 onConfigurationChange: { [weak self] in
                     self?.restartMic(recreateFile: false)
                 })
+        }
+    }
+
+    private func recordMicStart(_ start: () throws -> Void) throws {
+        do {
+            try start()
             micStartFailure.withLock { $0 = false }
         } catch {
             micStartFailure.withLock { $0 = true }
@@ -167,10 +173,14 @@ final class RecordingSession: @unchecked Sendable {
     }
 
 #if DEBUG
-    // Test seams: inject a chunk into a channel's writer path without audio
-    // hardware. startSeconds is meeting-relative, like handleMic's clock.
+    // Test seams: inject a chunk into a channel's writer path, or a mic start
+    // result, without audio hardware. startSeconds is meeting-relative, like handleMic's clock.
     func ingestMicBufferForTesting(_ buffer: AVAudioPCMBuffer, startSeconds: Double?) {
         writer.sync { micWriter.write(buffer, startSeconds: startSeconds) }
+    }
+
+    func recordMicStartForTesting(_ start: () throws -> Void) throws {
+        try recordMicStart(start)
     }
 
     func ingestSystemBufferForTesting(_ buffer: AVAudioPCMBuffer, startSeconds: Double?) {
@@ -225,10 +235,14 @@ final class RecordingSession: @unchecked Sendable {
         startSystemTap()
     }
 
-    // Recovery for a dead or stalled mic: an engine can start before the mic TCC
-    // grant, and routes die mid-meeting. When the mic stalled before capturing anything usable, recreate the file and pad it to
-    // the current meeting time so "file time == meeting time" stays true across the
-    // gap; otherwise keep appending to preserve already-recorded audio.
+    // Recovery for a mic that stopped delivering after it had started (a route
+    // that died or stalled mid-meeting, an input switch or reconfiguration) or
+    // whose last restart threw. The stall check needs at least one buffer, so a
+    // mic that never delivered (e.g. no mic permission) is only warned about,
+    // not restarted. When the mic stalled before capturing anything usable,
+    // recreate the file and pad it to the current meeting time so "file time ==
+    // meeting time" stays true across the gap; otherwise keep appending to
+    // preserve already-recorded audio.
     func restartMic(recreateFile: Bool) {
         let shouldSchedule = controlState.withLock { state in
             guard !state.isStopping, !state.micRestartPending else { return false }
