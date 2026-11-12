@@ -41,10 +41,12 @@ struct AppliedBatteryState: Equatable, Sendable {
     }
 
     /// After a lost connection the helper either restored charging and the LED
-    /// (it does when a client it served disconnects) or died without doing so;
-    /// either way the cache is unknown, so the next tick re-sends.
+    /// (it does when a client it served disconnects) or died without doing so.
+    /// What was applied is kept, because it may still hold and must then be
+    /// undone; only the route is forgotten, so the next tick re-sends.
     mutating func helperConnectionLost() {
-        self = Self()
+        actionViaHelper = nil
+        ledViaHelper = nil
     }
 }
 

@@ -94,6 +94,12 @@ import Testing
         applied.helperConnectionLost()
         #expect(applied.needsAction(.inhibit, viaHelper: true))
         #expect(applied.needsLED(1, viaHelper: true))
+        // A helper that died without restoring leaves charging inhibited:
+        // the obligation to undo it must survive the lost connection.
+        #expect(applied.action == .inhibit)
+        #expect(
+            BatteryPollingPolicy.loopMode(
+                featureOn: false, applied: applied, readoutObserved: false) == .control)
     }
 
     @Test(arguments: [
