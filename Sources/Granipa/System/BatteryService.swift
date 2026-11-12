@@ -52,10 +52,7 @@ final class BatteryService {
     var isCalibrating: Bool { calibrationStep != nil }
 
     private var chargingAllowed = true
-    private var lastAction: ChargeAction?
-    private var lastActionUsedHelper: Bool?
-    private var lastMagSafeLEDByte: UInt8?
-    private var lastMagSafeLEDUsedHelper: Bool?
+    private var applied = AppliedBatteryState()
     private var holdStartedAt: Date?
     private var didOfferHelperInstall = false
 
@@ -81,6 +78,9 @@ final class BatteryService {
     private var temperatureKey: String?
 
     func start() {
+        BatteryHelperClient.shared.onConnectionLost = { [weak self] in
+            self?.applied.helperConnectionLost()
+        }
         probeControl()
         tick()
         loop?.cancel()
@@ -111,8 +111,7 @@ final class BatteryService {
             {
                 Self.log.error("Timed out while restoring charging during termination")
             }
-            lastAction = nil
-            lastActionUsedHelper = nil
+            applied.clearAction()
         } else {
             restoreCharging()
         }
@@ -140,10 +139,9 @@ final class BatteryService {
             && (temperatureC ?? 0) >= Double(heatThresholdC)
         let wantsControl = limiterEnabled || hot
         if !wantsControl {
-            if lastAction != nil {
+            if applied.action != nil {
                 apply(.charge)
-                lastAction = nil
-                lastActionUsedHelper = nil
+                applied.clearAction()
             }
             return
         }
@@ -255,8 +253,7 @@ final class BatteryService {
                 applyMagSafeLED(forceSystem: true)
             }
         }
-        lastAction = nil
-        lastActionUsedHelper = nil
+        applied.clearAction()
     }
 
     func startCalibration() {
@@ -338,26 +335,25 @@ final class BatteryService {
             ? MagSafeLEDMode.system.smcByte(isCharging: false)
             : magSafeLED.smcByte(isCharging: snapshot.isCharging)
         let usesHelper = BatteryHelperClient.shared.isEnabled
-        guard byte != lastMagSafeLEDByte || usesHelper != lastMagSafeLEDUsedHelper else { return }
+        guard applied.needsLED(byte, viaHelper: usesHelper) else { return }
         if usesHelper {
-            lastMagSafeLEDByte = byte
-            lastMagSafeLEDUsedHelper = true
+            applied.ledByte = byte
+            applied.ledViaHelper = true
             BatteryHelperClient.shared.applyLED(byte) { [weak self] ok, _ in
                 guard !ok else { return }
                 Task { @MainActor in
-                    guard self?.lastMagSafeLEDByte == byte,
-                        self?.lastMagSafeLEDUsedHelper == true
+                    guard let self, self.applied.ledByte == byte,
+                        self.applied.ledViaHelper == true
                     else { return }
-                    self?.lastMagSafeLEDByte = nil
-                    self?.lastMagSafeLEDUsedHelper = nil
+                    self.applied.clearLED()
                 }
             }
             return
         }
         do {
             try smc.writeU8("ACLC", byte)
-            lastMagSafeLEDByte = byte
-            lastMagSafeLEDUsedHelper = false
+            applied.ledByte = byte
+            applied.ledViaHelper = false
         } catch {
             Self.log.error("MagSafe LED write failed")
         }
@@ -365,10 +361,10 @@ final class BatteryService {
 
     private func applyIfChanged(_ action: ChargeAction) {
         let usesHelper = BatteryHelperClient.shared.isEnabled
-        guard action != lastAction || usesHelper != lastActionUsedHelper else { return }
+        guard applied.needsAction(action, viaHelper: usesHelper) else { return }
         if apply(action, usesHelper: usesHelper) {
-            lastAction = action
-            lastActionUsedHelper = usesHelper
+            applied.action = action
+            applied.actionViaHelper = usesHelper
         }
     }
 
@@ -388,9 +384,8 @@ final class BatteryService {
                     if !self.helperBusy {
                         self.helperSetupMessage = ok ? nil : (err ?? "Helper write failed")
                     }
-                    if !ok, self.lastAction == action, self.lastActionUsedHelper == true {
-                        self.lastAction = nil
-                        self.lastActionUsedHelper = nil
+                    if !ok, self.applied.action == action, self.applied.actionViaHelper == true {
+                        self.applied.clearAction()
                     }
                 }
             }

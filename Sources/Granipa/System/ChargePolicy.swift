@@ -15,6 +15,38 @@ enum ChargeAction: Equatable, Sendable {
     }
 }
 
+/// What the app last wrote, so an unchanged state is not re-sent every tick.
+struct AppliedBatteryState: Equatable, Sendable {
+    var action: ChargeAction?
+    var actionViaHelper: Bool?
+    var ledByte: UInt8?
+    var ledViaHelper: Bool?
+
+    func needsAction(_ next: ChargeAction, viaHelper: Bool) -> Bool {
+        next != action || viaHelper != actionViaHelper
+    }
+
+    func needsLED(_ byte: UInt8, viaHelper: Bool) -> Bool {
+        byte != ledByte || viaHelper != ledViaHelper
+    }
+
+    mutating func clearAction() {
+        action = nil
+        actionViaHelper = nil
+    }
+
+    mutating func clearLED() {
+        ledByte = nil
+        ledViaHelper = nil
+    }
+
+    /// The helper restores charging and the LED whenever it exits, so after
+    /// a lost connection nothing cached still holds and the next tick re-sends.
+    mutating func helperConnectionLost() {
+        self = Self()
+    }
+}
+
 enum ChargePolicy {
     static let minLimit = 50
     static let maxLimit = 100

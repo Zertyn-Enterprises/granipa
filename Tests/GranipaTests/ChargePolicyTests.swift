@@ -83,6 +83,19 @@ import Testing
         #expect(MagSafeLEDMode.system.smcByte(isCharging: true) == 0)
     }
 
+    @Test func helperRestartMakesTheNextTickResend() {
+        var applied = AppliedBatteryState()
+        applied.action = .inhibit
+        applied.actionViaHelper = true
+        applied.ledByte = 1
+        applied.ledViaHelper = true
+        #expect(!applied.needsAction(.inhibit, viaHelper: true))
+        #expect(!applied.needsLED(1, viaHelper: true))
+        applied.helperConnectionLost()
+        #expect(applied.needsAction(.inhibit, viaHelper: true))
+        #expect(applied.needsLED(1, viaHelper: true))
+    }
+
     @Test(arguments: [
         ("sp78", [0x23, 0x80, 0, 0] as [UInt8], 35.5 as Double?),
         ("flt ", [0x00, 0x00, 0x0E, 0x42], 35.5),
