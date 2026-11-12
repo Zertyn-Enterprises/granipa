@@ -44,7 +44,7 @@ enum LanguageInstallProbe {
 struct PermissionsSettings: View {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var center = PermissionCenter()
+    private let center = PermissionCenter.shared
     @State private var isRefreshing = true
 
     private var health: PermissionHealth {
@@ -67,6 +67,7 @@ struct PermissionsSettings: View {
                         }
                     }
                     requiredSection
+                    optionalSection
                     bottomCards
                     footer
                 }
@@ -125,9 +126,26 @@ struct PermissionsSettings: View {
                 .foregroundStyle(Theme.textPrimary)
             PermissionRowsCard(
                 health: health,
+                rows: health.rows.filter(\.kind.isRequired),
                 onAction: perform,
                 onOpenPane: openPermissionPane)
             PermissionLegend()
+        }
+    }
+
+    private var optionalSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Optional permissions")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+            Text("Only the feature next to each one needs it. Recording works without them.")
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.textSecondary)
+            PermissionRowsCard(
+                health: health,
+                rows: health.rows.filter { !$0.kind.isRequired },
+                onAction: perform,
+                onOpenPane: openPermissionPane)
         }
     }
 
@@ -205,7 +223,7 @@ struct PermissionsSettings: View {
 }
 
 struct PermissionsListView: View {
-    @State private var center = PermissionCenter()
+    private let center = PermissionCenter.shared
     @State private var isRefreshing = true
 
     private var health: PermissionHealth {
@@ -215,6 +233,7 @@ struct PermissionsListView: View {
     var body: some View {
         PermissionRowsCard(
             health: health,
+            rows: health.rows,
             onAction: { row in
                 Task { await performPermissionAction(row, center: center) }
             },
@@ -346,12 +365,13 @@ private struct PermissionHealthStrip: View {
 
 private struct PermissionRowsCard: View {
     let health: PermissionHealth
+    let rows: [PermissionRowModel]
     let onAction: (PermissionRowModel) -> Void
     let onOpenPane: (String) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
-            ForEach(Array(health.rows.enumerated()), id: \.element.id) { index, row in
+            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                 PermissionRowView(
                     row: row,
                     highlighted: health.firstActionable == row.kind && !health.snapshot.isRefreshing,
@@ -359,7 +379,7 @@ private struct PermissionRowsCard: View {
                     onAction: { onAction(row) },
                     onOpenPane: { onOpenPane(row.kind.settingsPane) })
                     .id(row.kind)
-                if index < health.rows.count - 1 {
+                if index < rows.count - 1 {
                     Rectangle()
                         .fill(Theme.border)
                         .frame(height: 1)
@@ -500,12 +520,12 @@ private struct PermissionLegend: View {
             legendItem(Theme.statusDone, "Granted")
             legendItem(Theme.statusListening, "Denied")
             legendItem(Theme.statusFailed, "Unchecked")
-            legendItem(Theme.statusLoading, "Not asked")
+            legendItem(Theme.statusLoading, "Not requested")
         }
         .font(.system(size: 11))
         .foregroundStyle(Theme.textTertiary)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Legend: Granted, Denied, Unchecked, Not asked")
+        .accessibilityLabel("Legend: Granted, Denied, Unchecked, Not requested")
     }
 
     private func legendItem(_ color: Color, _ title: String) -> some View {

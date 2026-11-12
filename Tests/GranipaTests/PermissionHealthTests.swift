@@ -12,8 +12,12 @@ import Testing
         #expect(PermissionKind.allCases.count == 6)
     }
 
-    @Test func attentionCountIsTheNonGrantedTotal() {
+    @Test func attentionCountIsTheNonGrantedRequiredTotal() {
         #expect(PermissionHealth(snapshot: .allGranted).attentionCount == 0)
+        let optionalOnly = PermissionHealth(
+            snapshot: snapshot(screenRecording: .denied, accessibility: .notDetermined))
+        #expect(optionalOnly.attentionCount == 0)
+        #expect(optionalOnly.headline == "All granted")
 
         let mixed = snapshot(
             microphone: .denied,
@@ -23,16 +27,15 @@ import Testing
             notifications: .notDetermined,
             calendar: .granted)
         let health = PermissionHealth(snapshot: mixed)
-        #expect(health.attentionCount == 3)
-        #expect(health.totalCount == 6)
-        #expect(health.detail.contains("3 of 6"))
-        #expect(!health.detail.contains("2 of 6"))
+        #expect(health.attentionCount == 2)
+        #expect(health.totalCount == 2)
+        #expect(health.detail.contains("2 of 2"))
     }
 
-    @Test func sixUncheckedNeedSixAttentions() {
+    @Test func allUncheckedNeedBothRequiredAttentions() {
         let health = PermissionHealth(snapshot: PermissionSnapshot())
-        #expect(health.attentionCount == 6)
-        #expect(health.detail.contains("6 of 6"))
+        #expect(health.attentionCount == 2)
+        #expect(health.detail.contains("2 of 2"))
     }
 
     @Test func firstActionableFollowsDisplayOrder() {
@@ -42,7 +45,7 @@ import Testing
             microphone: .granted,
             systemAudio: .granted,
             screenRecording: .denied)
-        #expect(PermissionHealth(snapshot: screenFirst).firstActionable == .screenRecording)
+        #expect(PermissionHealth(snapshot: screenFirst).firstActionable == nil)
 
         let systemFirst = snapshot(
             microphone: .granted,
@@ -84,6 +87,8 @@ import Testing
         #expect(action(health, .accessibility) == .openSettings)
         #expect(action(health, .notifications) == .request)
         #expect(action(health, .calendar) == .none)
+        let neverAsked = PermissionHealth(snapshot: snapshot(accessibility: .notDetermined))
+        #expect(action(neverAsked, .accessibility) == .openSettings)
     }
 
     @Test func systemAudioKeepsAnExplicitCheckAndDoesNotRequest() {
@@ -131,7 +136,7 @@ import Testing
         #expect(label(health, .microphone) == "Granted")
         #expect(label(health, .systemAudio) == "Unchecked")
         #expect(label(health, .screenRecording) == "Denied")
-        #expect(label(health, .notifications) == "Not asked")
+        #expect(label(health, .notifications) == "Not requested")
     }
 
     @Test func tonesDoNotInventASeventhStatusColor() {
