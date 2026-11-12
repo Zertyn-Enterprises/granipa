@@ -51,6 +51,11 @@ enum PermissionKind: String, CaseIterable, Equatable, Identifiable, Sendable {
         }
     }
 
+    /// Recording a meeting needs these; the rest only gate individual features.
+    var isRequired: Bool {
+        self == .microphone || self == .systemAudio
+    }
+
     var canRequest: Bool {
         switch self {
         case .microphone, .calendar, .notifications: true
@@ -156,16 +161,18 @@ struct PermissionRowModel: Equatable, Identifiable, Sendable {
 struct PermissionHealth: Equatable, Sendable {
     var snapshot: PermissionSnapshot
 
-    var totalCount: Int { PermissionKind.allCases.count }
+    private static let required = PermissionKind.allCases.filter(\.isRequired)
+
+    var totalCount: Int { Self.required.count }
 
     var attentionCount: Int {
-        PermissionKind.allCases.reduce(0) { count, kind in
+        Self.required.reduce(0) { count, kind in
             snapshot.state(for: kind) == .granted ? count : count + 1
         }
     }
 
     var firstActionable: PermissionKind? {
-        PermissionKind.allCases.first { snapshot.state(for: $0) != .granted }
+        Self.required.first { snapshot.state(for: $0) != .granted }
     }
 
     var showsFixRecommended: Bool {
@@ -179,8 +186,8 @@ struct PermissionHealth: Equatable, Sendable {
 
     var detail: String {
         if snapshot.isRefreshing { return "Reading current status from macOS." }
-        if attentionCount == 0 { return "All 6 permissions are granted." }
-        return "\(attentionCount) of \(totalCount) permissions need attention"
+        if attentionCount == 0 { return "All \(totalCount) required permissions are granted." }
+        return "\(attentionCount) of \(totalCount) required permissions need attention"
     }
 
     var rows: [PermissionRowModel] {
@@ -210,7 +217,7 @@ struct PermissionHealth: Equatable, Sendable {
         switch state {
         case .granted: "Granted"
         case .denied: "Denied"
-        case .notDetermined: "Not asked"
+        case .notDetermined: "Not granted"
         case .unchecked: "Unchecked"
         }
     }
@@ -224,7 +231,7 @@ struct PermissionHealth: Equatable, Sendable {
         }
         switch state {
         case .notDetermined where kind.canRequest: return .request
-        case .denied: return .openSettings
+        case .notDetermined, .denied: return .openSettings
         default: return .none
         }
     }

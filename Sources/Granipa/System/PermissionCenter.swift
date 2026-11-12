@@ -13,6 +13,10 @@ enum PermissionState: Sendable {
 @MainActor
 @Observable
 final class PermissionCenter {
+    /// One instance for the app's lifetime: the system-audio grant can only be
+    /// learned by a real tap, so its result must outlive any one view.
+    static let shared = PermissionCenter()
+
     private(set) var microphone: PermissionState = .unchecked
     private(set) var systemAudio: PermissionState = .unchecked
     private(set) var calendar: PermissionState = .unchecked
@@ -20,6 +24,8 @@ final class PermissionCenter {
     private(set) var accessibility: PermissionState = .unchecked
     private(set) var screenRecording: PermissionState = .unchecked
     private(set) var probingSystemAudio = false
+
+    private init() {}
 
     nonisolated static let securityPane = "x-apple.systempreferences:com.apple.preference.security"
 
@@ -36,8 +42,9 @@ final class PermissionCenter {
             case .denied, .restricted, .writeOnly: .denied
             default: .notDetermined
             }
-        accessibility = AXIsProcessTrusted() ? .granted : .denied
-        screenRecording = CGPreflightScreenCaptureAccess() ? .granted : .denied
+        // Neither API distinguishes "never asked" from "denied".
+        accessibility = AXIsProcessTrusted() ? .granted : .notDetermined
+        screenRecording = CGPreflightScreenCaptureAccess() ? .granted : .notDetermined
         if NotificationManager.isAvailable {
             let settings = await UNUserNotificationCenter.current().notificationSettings()
             notifications =

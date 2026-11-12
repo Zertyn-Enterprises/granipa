@@ -176,6 +176,10 @@ final class BatteryService {
 
     var helperEnabled: Bool { BatteryHelperClient.shared.isEnabled }
 
+    /// Registration alone does not prove writes work; a failed install,
+    /// repair or helper write leaves helperSetupMessage set.
+    var helperHealthy: Bool { canControl && helperEnabled && helperSetupMessage == nil }
+
     private func offerHelperInstallIfNeeded() {
         guard !didOfferHelperInstall, !helperEnabled else { return }
         didOfferHelperInstall = true

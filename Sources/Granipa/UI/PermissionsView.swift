@@ -44,7 +44,7 @@ enum LanguageInstallProbe {
 struct PermissionsSettings: View {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var center = PermissionCenter()
+    private let center = PermissionCenter.shared
     @State private var isRefreshing = true
 
     private var health: PermissionHealth {
@@ -67,6 +67,7 @@ struct PermissionsSettings: View {
                         }
                     }
                     requiredSection
+                    optionalSection
                     bottomCards
                     footer
                 }
@@ -125,9 +126,26 @@ struct PermissionsSettings: View {
                 .foregroundStyle(Theme.textPrimary)
             PermissionRowsCard(
                 health: health,
+                rows: health.rows.filter(\.kind.isRequired),
                 onAction: perform,
                 onOpenPane: openPermissionPane)
             PermissionLegend()
+        }
+    }
+
+    private var optionalSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Optional permissions")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+            Text("Only the feature next to each one needs it. Recording works without them.")
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.textSecondary)
+            PermissionRowsCard(
+                health: health,
+                rows: health.rows.filter { !$0.kind.isRequired },
+                onAction: perform,
+                onOpenPane: openPermissionPane)
         }
     }
 
@@ -205,7 +223,7 @@ struct PermissionsSettings: View {
 }
 
 struct PermissionsListView: View {
-    @State private var center = PermissionCenter()
+    private let center = PermissionCenter.shared
     @State private var isRefreshing = true
 
     private var health: PermissionHealth {
@@ -215,6 +233,7 @@ struct PermissionsListView: View {
     var body: some View {
         PermissionRowsCard(
             health: health,
+            rows: health.rows,
             onAction: { row in
                 Task { await performPermissionAction(row, center: center) }
             },
@@ -346,12 +365,13 @@ private struct PermissionHealthStrip: View {
 
 private struct PermissionRowsCard: View {
     let health: PermissionHealth
+    let rows: [PermissionRowModel]
     let onAction: (PermissionRowModel) -> Void
     let onOpenPane: (String) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
-            ForEach(Array(health.rows.enumerated()), id: \.element.id) { index, row in
+            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                 PermissionRowView(
                     row: row,
                     highlighted: health.firstActionable == row.kind && !health.snapshot.isRefreshing,
@@ -359,7 +379,7 @@ private struct PermissionRowsCard: View {
                     onAction: { onAction(row) },
                     onOpenPane: { onOpenPane(row.kind.settingsPane) })
                     .id(row.kind)
-                if index < health.rows.count - 1 {
+                if index < rows.count - 1 {
                     Rectangle()
                         .fill(Theme.border)
                         .frame(height: 1)
@@ -500,12 +520,12 @@ private struct PermissionLegend: View {
             legendItem(Theme.statusDone, "Granted")
             legendItem(Theme.statusListening, "Denied")
             legendItem(Theme.statusFailed, "Unchecked")
-            legendItem(Theme.statusLoading, "Not asked")
+            legendItem(Theme.statusLoading, "Not granted")
         }
         .font(.system(size: 11))
         .foregroundStyle(Theme.textTertiary)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Legend: Granted, Denied, Unchecked, Not asked")
+        .accessibilityLabel("Legend: Granted, Denied, Unchecked, Not granted")
     }
 
     private func legendItem(_ color: Color, _ title: String) -> some View {
@@ -521,6 +541,8 @@ private struct PermissionLanguagesCard: View {
     @State private var installedIDs: Set<String>?
     @State private var checkedLocaleIDs: [String] = []
     @State private var refreshTick = 0
+    @State private var downloadErrors: [String: String] = [:]
+    @State private var downloading: Set<String> = []
 
     private var localeIDs: [String] {
         LanguageDetection.parseProbeLocales(probeLocalesRaw)
@@ -546,18 +568,23 @@ private struct PermissionLanguagesCard: View {
                 ForEach(localeIDs, id: \.self) { id in
                     let status = LanguageChipStatus.resolve(
                         knownInstalled: installedIDs, localeID: id)
-                    let name = languageName(id)
+                    let name = LanguageDetection.displayName(id)
                     HStack(spacing: 6) {
-                        Text(name)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(Theme.textPrimary)
-                        chipAccessory(status, name: name)
+                        HStack(spacing: 6) {
+                            Text(name)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Theme.textPrimary)
+                            chipAccessory(status, name: name)
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("\(name) \(status.accessibilityStatus)")
+                        if status == .absent {
+                            downloadControl(id, name: name)
+                        }
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .background(Theme.fillSubtle, in: Capsule())
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel("\(name) \(status.accessibilityStatus)")
                 }
             }
         }
@@ -593,6 +620,40 @@ private struct PermissionLanguagesCard: View {
         }
     }
 
+    @ViewBuilder
+    private func downloadControl(_ id: String, name: String) -> some View {
+        if downloading.contains(id) {
+            ProgressView()
+                .controlSize(.mini)
+                .accessibilityLabel("Downloading \(name)")
+        } else {
+            let error = downloadErrors[id]
+            Button(error == nil ? "Download" : "Retry") { download(id) }
+                .buttonStyle(.borderless)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(error == nil ? Theme.accent : .orange)
+                .help(error.map { "Download failed: \($0)" } ?? "Download the on-device model for \(name).")
+                .accessibilityLabel(error == nil ? "Download \(name)" : "Retry downloading \(name)")
+        }
+    }
+
+    private func download(_ id: String) {
+        downloading.insert(id)
+        downloadErrors[id] = nil
+        Task {
+            do {
+                // Model downloads are long; keep them off the main actor.
+                try await Task.detached {
+                    try await SpeechModels.ensureInstalled(locale: Locale(identifier: id))
+                }.value
+            } catch {
+                downloadErrors[id] = error.localizedDescription
+            }
+            downloading.remove(id)
+            refreshTick += 1
+        }
+    }
+
     private func refreshInstalled() async {
         let requested = localeIDs
         if LanguageInstallProbe.shouldClearKnown(
@@ -613,16 +674,6 @@ private struct PermissionLanguagesCard: View {
         }
         installedIDs = installed
         checkedLocaleIDs = requested
-    }
-
-    private func languageName(_ id: String) -> String {
-        let locale = Locale(identifier: id)
-        if let code = locale.language.languageCode?.identifier,
-            let name = Locale.current.localizedString(forLanguageCode: code)
-        {
-            return name.capitalized
-        }
-        return Locale.current.localizedString(forIdentifier: id)?.capitalized ?? id
     }
 }
 

@@ -74,11 +74,11 @@ import Testing
                 live: true, captions: false))
     }
 
-    /// SettingsView is a private SwiftUI form; `@AppStorage` only writes when a
+    /// GeneralSettings is a SwiftUI form; `@AppStorage` only writes when a
     /// rendered binding mutates, and this suite has no view host. Same
     /// source-contract pattern as BatteryHelperTests (read the repo file).
     @Test func settingsWritesTheLiveASRKeyPolicyReads() throws {
-        let settings = try granipaSource("Sources/Granipa/UI/SettingsView.swift")
+        let settings = try granipaSource("Sources/Granipa/UI/Settings/GeneralSettings.swift")
         let policy = try granipaSource(
             "Sources/Granipa/Transcription/MeetingASRPolicy.swift")
         let menu = try granipaSource("Sources/Granipa/UI/MenuBarView.swift")
@@ -105,7 +105,7 @@ import Testing
         let overlay = try granipaSource("Sources/Granipa/UI/CaptionsOverlayController.swift")
         let menu = try granipaSource("Sources/Granipa/UI/MenuBarView.swift")
         let dictation = try granipaSource("Sources/Granipa/Dictation/DictationController.swift")
-        let settings = try granipaSource("Sources/Granipa/UI/SettingsView.swift")
+        let settings = try granipaSource("Sources/Granipa/UI/Settings/GeneralSettings.swift")
 
         #expect(overlay.contains("MeetingASRPolicy.shouldShowCaptionsOverlay"))
         #expect(overlay.contains("appState?.transcription"))

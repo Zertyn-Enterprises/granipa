@@ -41,6 +41,40 @@ enum LanguageDetection {
         return parsed.isEmpty ? defaultProbeLocales : Array(parsed.prefix(maxProbeLocales))
     }
 
+    static func languageCode(of localeID: String) -> String {
+        Locale(identifier: localeID).language.languageCode?.identifier ?? localeID
+    }
+
+    /// Settings lists one locale per language (regional pick varies by Mac),
+    /// so probe toggles match on the language, not the exact BCP-47 ID.
+    static func probeIncludesLanguage(_ selection: [String], of localeID: String) -> Bool {
+        let code = languageCode(of: localeID)
+        return selection.contains { languageCode(of: $0) == code }
+    }
+
+    static func toggleProbeLanguage(_ selection: [String], localeID: String, enabled: Bool)
+        -> [String]
+    {
+        var result = selection
+        if !enabled {
+            let code = languageCode(of: localeID)
+            result.removeAll { languageCode(of: $0) == code }
+        } else if !probeIncludesLanguage(result, of: localeID), result.count < maxProbeLocales {
+            result.append(localeID)
+        }
+        return result
+    }
+
+    static func displayName(_ localeID: String) -> String {
+        let locale = Locale(identifier: localeID)
+        if let code = locale.language.languageCode?.identifier,
+            let name = Locale.current.localizedString(forLanguageCode: code)
+        {
+            return name.capitalized
+        }
+        return Locale.current.localizedString(forIdentifier: localeID)?.capitalized ?? localeID
+    }
+
     /// One SpeechAnalyzer per channel. Parallel locale probes (2–3 × mic+system)
     /// peg the CPU and freeze the UI during Record.
     static func startLocales(requested: String, last: String?, probes: [String]? = nil)

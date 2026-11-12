@@ -1,8 +1,17 @@
 import SwiftUI
 
+enum OnboardingDefaults {
+    /// The notes provider to preselect: the first installed CLI, unless the
+    /// user already picked one.
+    static func provider(installedIDs: [String], chosen: String?) -> String? {
+        chosen == nil ? installedIDs.first : nil
+    }
+}
+
 struct OnboardingView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("onboardingCompleted") private var onboardingCompleted = false
+    @AppStorage("windowSnappingEnabled") private var windowSnapping = true
     @State private var step = 0
 
     private let totalSteps = 3
@@ -58,7 +67,7 @@ struct OnboardingView: View {
             Text("Permissions, explained")
                 .font(.system(size: 24, weight: .semibold, design: .serif))
                 .foregroundStyle(Theme.textPrimary)
-            Text("macOS will ask for these as you use each feature — nothing is requested up front. This list shows the live status (revisit it anytime in Settings → Permissions):")
+            Text("Calendars and Notifications are requested when Grañipa first opens, and Accessibility too while the dictation key is Right Option or Right Command. macOS asks for the rest the first time you use the feature that needs it. This list shows the live status (revisit it anytime in Settings → Permissions):")
                 .font(Theme.fontBody)
                 .foregroundStyle(Theme.textSecondary)
 
@@ -70,11 +79,11 @@ struct OnboardingView: View {
     // MARK: - Step 2
 
     private var toolsAndShortcuts: some View {
-        let installedProviderIDs = Set(
-            LLMProviders.all.compactMap { spec in
-                LLMProviders.resolveExecutable(named: spec.executableName) == nil
-                    ? nil : spec.id
-            })
+        let installedIDs = LLMProviders.all.compactMap { spec in
+            LLMProviders.resolveExecutable(named: spec.executableName) == nil
+                ? nil : spec.id
+        }
+        let installedProviderIDs = Set(installedIDs)
         return VStack(alignment: .leading, spacing: 10) {
             Text("Your AI & shortcuts")
                 .font(.system(size: 24, weight: .semibold, design: .serif))
@@ -102,18 +111,19 @@ struct OnboardingView: View {
             .padding(12)
             .card(cornerRadius: Theme.radiusOverlay)
 
-            if installedProviderIDs.isEmpty {
+            if installedProviderIDs.isEmpty, let claude = LLMProviders.spec(id: "claude"),
+                let install = claude.installCommand
+            {
                 HStack(spacing: 6) {
                     Text("None yet? Paste in Terminal:")
                         .font(Theme.fontCaption)
                         .foregroundStyle(Theme.textSecondary)
-                    Text("npm install -g @anthropic-ai/claude-code")
+                    Text(install)
                         .font(Theme.fontSmall.monospaced())
                         .foregroundStyle(Theme.textPrimary)
                     Button {
                         NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(
-                            "npm install -g @anthropic-ai/claude-code", forType: .string)
+                        NSPasteboard.general.setString(install, forType: .string)
                         ToastController.shared.show("Copied")
                     } label: {
                         Image(systemName: "doc.on.doc")
@@ -121,7 +131,7 @@ struct OnboardingView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                Text("Then run \"claude\" once — the browser opens to sign in with your subscription. That's the whole setup.")
+                Text("Then: \(claude.loginHint)")
                     .font(Theme.fontSmall)
                     .foregroundStyle(Theme.textTertiary)
             }
@@ -133,11 +143,16 @@ struct OnboardingView: View {
             VStack(spacing: 6) {
                 shortcutRow("\(DictationController.shortcutLabel) hold", "Dictate into the front app")
                 shortcutRow("During a call", "Live captions if live transcription is on (Settings → General)")
-                shortcutRow("⌥⇧V", "Clipboard history")
-                shortcutRow("⌥⇧T", "Capture screen text (OCR)")
-                shortcutRow("⌥⇧E", "Emoji & Symbols")
-                shortcutRow("⌥⇧H", "Dictation history")
-                shortcutRow("⌃⌥ ← → ↑ ↓ ⏎", "Snap & maximize windows")
+                ForEach(ExtraShortcut.allCases) { item in
+                    shortcutRow(WindowShortcuts.chordLabel(for: item), item.title)
+                }
+                if windowSnapping {
+                    shortcutRow(
+                        [WindowAction.leftHalf, .rightHalf, .maximize]
+                            .map { WindowShortcuts.chordLabel(for: $0) }
+                            .joined(separator: " "),
+                        "Snap & maximize windows")
+                }
             }
             .padding(12)
             .card(cornerRadius: Theme.radiusOverlay)
@@ -146,6 +161,14 @@ struct OnboardingView: View {
                 .foregroundStyle(Theme.textTertiary)
                 .padding(.top, 2)
             Spacer()
+        }
+        .onAppear {
+            if let id = OnboardingDefaults.provider(
+                installedIDs: installedIDs,
+                chosen: UserDefaults.standard.string(forKey: "llmProvider"))
+            {
+                UserDefaults.standard.set(id, forKey: "llmProvider")
+            }
         }
     }
 

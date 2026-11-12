@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import Granipa
@@ -23,6 +24,16 @@ import Testing
         #expect(
             RewriteClient.parseContent(
                 from: #"{"choices":[{"message":{"content":""}}]}"#) == nil)
+    }
+
+    @Test func customEndpointFallsBackToTheValuesSettingsShows() throws {
+        let suite = "RewriteClientTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        #expect(RewriteClient.customEndpoint(defaults) == (RewriteClient.defaultCustomURL, RewriteClient.defaultCustomModel))
+        defaults.set("http://10.0.0.2:8080/v1", forKey: "rewriteCustomURL")
+        defaults.set("", forKey: "rewriteCustomModel")
+        #expect(RewriteClient.customEndpoint(defaults) == ("http://10.0.0.2:8080/v1", ""))
     }
 
     @Test func rewriteErrorDescriptions() {
