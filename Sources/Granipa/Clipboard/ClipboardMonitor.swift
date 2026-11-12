@@ -142,16 +142,17 @@ final class ClipboardMonitor {
         do {
             try database.insertClipboardItem(item)
         } catch {
-            removeFiles([url.path])
+            removeImageFiles([url.path])
         }
     }
 
     nonisolated private static func prune(database: AppDatabase) {
         guard let orphanedImages = try? database.pruneClipboardItems() else { return }
-        removeFiles(orphanedImages)
+        removeImageFiles(orphanedImages)
     }
 
-    nonisolated private static func removeFiles(_ paths: [String]) {
+    /// Removes each clipboard image and its `thumb_` sibling.
+    nonisolated static func removeImageFiles(_ paths: [String]) {
         for path in paths {
             try? FileManager.default.removeItem(atPath: path)
             try? FileManager.default.removeItem(atPath: ImageCache.thumbnailPath(for: path))

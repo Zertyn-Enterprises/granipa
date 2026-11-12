@@ -24,10 +24,7 @@ struct ProductivitySettings: View {
                     .foregroundStyle(.secondary)
                 Button("Clear history", role: .destructive) {
                     if let db = app.database {
-                        let paths = (try? db.clearClipboardItems()) ?? []
-                        for path in paths {
-                            try? FileManager.default.removeItem(atPath: path)
-                        }
+                        ClipboardMonitor.removeImageFiles((try? db.clearClipboardItems()) ?? [])
                     }
                 }
             }
