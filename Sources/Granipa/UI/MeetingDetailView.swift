@@ -72,6 +72,7 @@ struct MeetingDetailView: View {
     @State private var transcriptSearch = ""
     @State private var speakerFilter: String?
     @State private var confirmDelete = false
+    @State private var confirmTranscribeAgain = false
     @FocusState private var notesFocused: Bool
     @State private var quickNoteScrolls = 0
 
@@ -144,7 +145,9 @@ struct MeetingDetailView: View {
                             renameSpeakerTo = speaker
                             renamingSpeaker = speaker
                         },
-                        onRetry: { loadSegments() })
+                        onRetry: { loadSegments() },
+                        onTranscribeAgain: app.canTranscribeAgain(freshMeeting)
+                            ? { Task { await app.transcribeAgain(meetingID: meeting.id) } } : nil)
                 case .actionItems:
                     MeetingActionItemsView(meeting: freshMeeting)
                 case .notes:
@@ -188,6 +191,14 @@ struct MeetingDetailView: View {
             Button("Cancel", role: .cancel) { renamingSpeaker = nil }
         } message: {
             Text("Applies to every line by this speaker in the meeting.")
+        }
+        .alert("Transcribe this recording again?", isPresented: $confirmTranscribeAgain) {
+            Button("Transcribe again") {
+                Task { await app.transcribeAgain(meetingID: meeting.id) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The transcript, speaker names, and AI notes are made again from the saved audio.")
         }
         .alert("Delete this meeting?", isPresented: $confirmDelete) {
             Button("Delete", role: .destructive) { app.deleteMeeting(id: meeting.id) }
@@ -363,6 +374,10 @@ struct MeetingDetailView: View {
                 if let db = app.database {
                     MeetingExporter.copyTranscript(meeting: freshMeeting, database: db)
                 }
+            }
+            if freshMeeting.audioMicPath != nil || freshMeeting.audioSystemPath != nil {
+                Button("Transcribe again…") { confirmTranscribeAgain = true }
+                    .disabled(!app.canTranscribeAgain(freshMeeting))
             }
             if let draft = freshMeeting.emailDraft, !draft.isEmpty {
                 Button("Copy email") {

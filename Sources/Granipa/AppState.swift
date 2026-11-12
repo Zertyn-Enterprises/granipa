@@ -54,11 +54,7 @@ final class AppState {
             database = db
             processor = makeProcessor(database: db)
             meetings = try db.fetchMeetings()
-            // Recover meetings orphaned mid-recording by a quit or crash.
-            for index in meetings.indices where meetings[index].status != .ready {
-                meetings[index].status = .ready
-                try? db.save(meetings[index])
-            }
+            recoverInterruptedMeetings(database: db)
             templates = try db.fetchTemplates()
             webhooks = try db.fetchWebhooks()
             folders = try db.fetchFolders()
@@ -72,6 +68,27 @@ final class AppState {
         setupProductivity()
         purgeOldAudio()
         _ = UpdaterManager.shared
+    }
+
+    /// A quit or crash mid-recording leaves nothing to resume, so that meeting
+    /// just becomes ready. One stopped mid-processing still has its audio and
+    /// goes back through the pipeline, one at a time, once launch is done.
+    private func recoverInterruptedMeetings(database db: AppDatabase) {
+        var interrupted: [String] = []
+        for index in meetings.indices where meetings[index].status != .ready {
+            if meetings[index].status == .processing, recordedAudio(of: meetings[index]) != nil {
+                interrupted.append(meetings[index].id)
+                continue
+            }
+            meetings[index].status = .ready
+            try? db.save(meetings[index])
+        }
+        guard !interrupted.isEmpty else { return }
+        Task { [weak self] in
+            for id in interrupted {
+                await self?.reprocessFromAudio(meetingID: id)
+            }
+        }
     }
 
     #if DEBUG
@@ -488,7 +505,7 @@ final class AppState {
     }
 
     /// Quit path: only waits for the audio files to close. The meeting stays
-    /// `.processing`, which launch recovery turns into a ready meeting.
+    /// `.processing`, which launch recovery processes again from its audio.
     func stopCaptureForQuit() async {
         _ = await stopCapture()
         // A Stop already in flight owns the session; let it finish closing the files.
@@ -499,6 +516,41 @@ final class AppState {
 
     func enhance(meetingID: String) async {
         await processor?.enhance(meetingID: meetingID)
+    }
+
+    /// The meeting's recorded files when at least one is still on disk.
+    func recordedAudio(of meeting: Meeting) -> (micURL: URL, systemURL: URL)? {
+        guard let micPath = meeting.audioMicPath, let systemPath = meeting.audioSystemPath,
+            FileManager.default.fileExists(atPath: micPath)
+                || FileManager.default.fileExists(atPath: systemPath)
+        else { return nil }
+        return (URL(fileURLWithPath: micPath), URL(fileURLWithPath: systemPath))
+    }
+
+    func canTranscribeAgain(_ meeting: Meeting) -> Bool {
+        meeting.status == .ready && recorder.meetingID != meeting.id
+            && recordedAudio(of: meeting) != nil
+    }
+
+    /// Replaces the transcript with a fresh one from the saved audio, then
+    /// diarizes and enhances it like a just-stopped recording.
+    func transcribeAgain(meetingID: String) async {
+        guard let meeting = meetings.first(where: { $0.id == meetingID }),
+            canTranscribeAgain(meeting)
+        else { return }
+        await reprocessFromAudio(meetingID: meetingID)
+    }
+
+    private func reprocessFromAudio(meetingID: String) async {
+        guard let processor, var meeting = try? database?.fetchMeeting(id: meetingID),
+            let urls = recordedAudio(of: meeting)
+        else { return }
+        meeting.status = .processing
+        update(meeting)
+        await processor.process(
+            meetingID: meetingID,
+            source: .files(
+                micURL: urls.micURL, systemURL: urls.systemURL, language: meeting.language))
     }
 
     func folder(for meeting: Meeting) -> Folder? {
@@ -615,7 +667,7 @@ final class AppState {
 
     func deleteMeeting(id: String) {
         guard let db = database else { return }
-        guard recorder.meetingID != id, processingMeetingID != id else {
+        guard recorder.meetingID != id, processor?.cancelQueued(meetingID: id) != false else {
             loadError = "This meeting is still recording or processing. Delete it once it's done."
             return
         }

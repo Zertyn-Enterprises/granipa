@@ -415,6 +415,8 @@ struct MeetingTranscriptView: View {
     @Binding var speakerFilter: String?
     let onRename: (String) -> Void
     let onRetry: () -> Void
+    /// Set when the saved audio can be transcribed again.
+    let onTranscribeAgain: (() -> Void)?
 
     @FocusState private var searchFocused: Bool
     @State private var talkReport: SpeakerTalkTime.Report?
@@ -468,10 +470,18 @@ struct MeetingTranscriptView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if shown.isEmpty && live == nil {
-                EmptyStateView(
-                    icon: "text.quote",
-                    title: "No transcript",
-                    message: "The transcript will appear here once a recording exists.")
+                VStack(spacing: 14) {
+                    EmptyStateView(
+                        icon: "text.quote",
+                        title: "No transcript",
+                        message: onTranscribeAgain == nil
+                            ? "The transcript will appear here once a recording exists."
+                            : "The audio of this recording is saved, so it can be transcribed again.")
+                    if let onTranscribeAgain {
+                        Button("Transcribe again", action: onTranscribeAgain)
+                            .granipaSecondaryControl()
+                    }
+                }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 populated

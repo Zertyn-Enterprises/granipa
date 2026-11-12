@@ -4,7 +4,7 @@ import os
 
 /// Post-recording pipeline: transcript (from the recorded files, or the live
 /// coordinator draining) → diarize → enhance → ready status and webhooks.
-/// Each meeting's job is kept so callers can await it.
+/// Jobs run one at a time in submission order, like the analyzers they drive.
 @MainActor
 @Observable
 final class MeetingProcessor {
@@ -17,6 +17,7 @@ final class MeetingProcessor {
     }
 
     enum Source {
+        /// Replaces any existing transcript with one made from the files.
         case files(micURL: URL, systemURL: URL, language: String)
         /// Waits for the live coordinator to finish; returns whether the
         /// system channel was transcribed by Muse (which also diarizes).
@@ -31,6 +32,7 @@ final class MeetingProcessor {
     @ObservationIgnored private let database: AppDatabase
     @ObservationIgnored private let host: Host
     @ObservationIgnored private var jobs: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored private var tail: Task<Void, Never>?
 
     init(database: AppDatabase, host: Host) {
         self.database = database
@@ -38,10 +40,30 @@ final class MeetingProcessor {
     }
 
     func process(meetingID id: String, source: Source) async {
-        let job = Task { await run(meetingID: id, source: source) }
+        guard jobs[id] == nil else { return }
+        let previous = tail
+        let job = Task {
+            await previous?.value
+            guard !Task.isCancelled else { return }
+            await run(meetingID: id, source: source)
+        }
         jobs[id] = job
+        tail = job
         await job.value
+        if jobs[id] == job {
+            jobs[id] = nil
+        }
+    }
+
+    /// Drops a job still waiting for its turn. The running job is never
+    /// interrupted (analyzers and the LLM CLI do not stop cleanly), so this
+    /// returns false for it.
+    func cancelQueued(meetingID id: String) -> Bool {
+        guard let job = jobs[id] else { return true }
+        guard processingMeetingID != id else { return false }
+        job.cancel()
         jobs[id] = nil
+        return true
     }
 
     private func run(meetingID id: String, source: Source) async {
@@ -57,6 +79,15 @@ final class MeetingProcessor {
             await postProcess(meetingID: id, skipLocalDiarize: usedMuseForSystem)
         case .files(let micURL, let systemURL, let language):
             let db = database
+            do {
+                for channel in [AudioChannel.mic, .system] {
+                    try db.replaceSegments(meetingID: id, channel: channel, with: [])
+                }
+            } catch {
+                host.reportError("Couldn't replace the transcript: \(error.localizedDescription)")
+                finish(meetingID: id)
+                return
+            }
             let outcome = await Task.detached {
                 await FileMeetingTranscriber.transcribe(
                     micURL: micURL,
