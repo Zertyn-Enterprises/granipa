@@ -176,6 +176,8 @@ private struct BatteryMenuSection: View {
         let snap = battery.snapshot
         Text(BatteryMenuHeadline.text(for: snap))
             .foregroundStyle(.secondary)
+            .onAppear { BatteryService.shared.beginObservingReadout() }
+            .onDisappear { BatteryService.shared.endObservingReadout() }
         // Turning a control off stays possible so a broken helper never
         // traps the Mac in a limited state.
         let helperHealthy = battery.helperHealthy

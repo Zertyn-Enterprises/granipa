@@ -97,19 +97,22 @@ import Testing
     }
 
     @Test(arguments: [
-        (false, nil as ChargeAction?, nil as UInt8?, false),  // launch with every feature off
-        (true, nil, nil, true),
-        (false, .inhibit, nil, true),  // limit switched off but charging not yet restored
-        (false, nil, 1, true),  // LED left in a custom mode
-        (false, nil, 0, false),  // LED back on system control
+        (false, nil as ChargeAction?, nil as UInt8?, false, BatteryLoopMode.off),  // launch, nothing on
+        (false, nil, nil, true, .readout),  // battery view open, no feature
+        (true, nil, nil, true, .control),
+        (false, .inhibit, nil, false, .control),  // limit off but charging not yet restored
+        (false, nil, 1, false, .control),  // LED left in a custom mode
     ])
-    func batteryPollsOnlyWhileNeeded(
-        featureOn: Bool, action: ChargeAction?, ledByte: UInt8?, polls: Bool
+    func batteryLoopRunsOnlyWhileNeeded(
+        featureOn: Bool, action: ChargeAction?, ledByte: UInt8?, viewOpen: Bool,
+        mode: BatteryLoopMode
     ) {
         var applied = AppliedBatteryState()
         applied.action = action
         applied.ledByte = ledByte
-        #expect(BatteryPollingPolicy.needsPolling(featureOn: featureOn, applied: applied) == polls)
+        #expect(
+            BatteryPollingPolicy.loopMode(
+                featureOn: featureOn, applied: applied, readoutObserved: viewOpen) == mode)
     }
 
     @Test(arguments: [
