@@ -711,8 +711,15 @@ final class AppState {
 
     func deleteMeeting(id: String) {
         guard let db = database else { return }
+        guard recorder.meetingID != id, processingMeetingID != id else {
+            loadError = "This meeting is still recording or processing. Delete it once it's done."
+            return
+        }
         do {
             try db.deleteMeeting(id: id)
+            if let dir = try? AppPaths.audioDirectory(meetingID: id) {
+                try? FileManager.default.removeItem(at: dir)
+            }
             meetings.removeAll { $0.id == id }
             if selectedMeetingID == id {
                 selectedMeetingID = nil
