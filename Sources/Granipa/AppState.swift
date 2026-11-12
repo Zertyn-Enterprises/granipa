@@ -64,6 +64,7 @@ final class AppState {
         } catch {
             loadError = error.localizedDescription
         }
+        AppDelegate.appState = self
         calendar.start()
         setupDetection()
         setupProductivity()
@@ -392,6 +393,9 @@ final class AppState {
             }
             meeting.status = .recording
             meeting.startedAt = .now
+            // Linked now so a crash still leaves the row pointing at its audio folder.
+            meeting.audioMicPath = session.micURL.path
+            meeting.audioSystemPath = session.systemURL.path
             update(meeting)
             selectedMeetingID = targetID
             startMeetingEndWatch()
@@ -415,37 +419,22 @@ final class AppState {
     }
 
     func stopRecording() async {
-        autoStopTask?.cancel()
-        autoStopTask = nil
-        let wasStarting = recorder.isStarting && !recorder.isRecording
-        recordingStartTask?.cancel()
-        dictation.meetingIsRecording = false
-        CaptionsOverlayController.shared.setVisible(false)
-        guard let id = recorder.meetingID, let urls = await recorder.stop() else { return }
-        if wasStarting {
-            try? FileManager.default.removeItem(at: urls.micURL.deletingLastPathComponent())
-            return
-        }
+        guard let capture = await stopCapture() else { return }
+        let id = capture.id
+        let urls = capture.urls
         processingMeetingID = id
         defer {
             if processingMeetingID == id {
                 processingMeetingID = nil
             }
         }
-        // Re-fetch: the transcription coordinator may have written the detected
-        // language while the array copy was stale.
-        guard let db = database, var meeting = try? db.fetchMeeting(id: id) else {
+        guard let db = database, let meeting = capture.meeting else {
             if let live = transcription {
                 await live.finishAndWait()
             }
             transcription = nil
             return
         }
-        meeting.status = .processing
-        meeting.endedAt = .now
-        meeting.audioMicPath = urls.micURL.path
-        meeting.audioSystemPath = urls.systemURL.path
-        update(meeting)
 
         if let live = transcription {
             await live.finishAndWait()
@@ -467,6 +456,43 @@ final class AppState {
                 meetingID: id,
                 skipLocalDiarize: false,
                 fileTranscription: outcome)
+        }
+    }
+
+    /// Stops capture, closes the audio files and marks the meeting processing.
+    /// Returns nil when nothing was captured (idle, or cancelled while starting).
+    private func stopCapture() async -> (
+        id: String, urls: (micURL: URL, systemURL: URL), meeting: Meeting?
+    )? {
+        autoStopTask?.cancel()
+        autoStopTask = nil
+        let wasStarting = recorder.isStarting && !recorder.isRecording
+        recordingStartTask?.cancel()
+        dictation.meetingIsRecording = false
+        CaptionsOverlayController.shared.setVisible(false)
+        guard let id = recorder.meetingID, let urls = await recorder.stop() else { return nil }
+        if wasStarting {
+            try? FileManager.default.removeItem(at: urls.micURL.deletingLastPathComponent())
+            return nil
+        }
+        // Re-fetch: the transcription coordinator may have written the detected
+        // language while the array copy was stale.
+        guard var meeting = try? database?.fetchMeeting(id: id) else { return (id, urls, nil) }
+        meeting.status = .processing
+        meeting.endedAt = .now
+        meeting.audioMicPath = urls.micURL.path
+        meeting.audioSystemPath = urls.systemURL.path
+        update(meeting)
+        return (id, urls, meeting)
+    }
+
+    /// Quit path: only waits for the audio files to close. The meeting stays
+    /// `.processing`, which launch recovery turns into a ready meeting.
+    func stopCaptureForQuit() async {
+        _ = await stopCapture()
+        // A Stop already in flight owns the session; let it finish closing the files.
+        while recorder.isBusy {
+            try? await Task.sleep(for: .milliseconds(50))
         }
     }
 
