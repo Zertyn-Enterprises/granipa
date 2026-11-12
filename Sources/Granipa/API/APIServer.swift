@@ -4,6 +4,13 @@ import Network
 actor APIServer {
     private var listener: NWListener?
 
+    /// The stored setting is a plain Int; 0 (unset) or anything outside UInt16
+    /// falls back to the default instead of trapping.
+    static func port(stored: Int) -> UInt16 {
+        guard let port = UInt16(exactly: stored), port != 0 else { return 7799 }
+        return port
+    }
+
     func start(
         port: UInt16,
         token: String,

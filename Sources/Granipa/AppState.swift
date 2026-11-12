@@ -250,11 +250,11 @@ final class AppState {
         let defaults = UserDefaults.standard
         let apiEnabled = defaults.object(forKey: "apiEnabled") as? Bool ?? false
         if apiEnabled {
-            let port = UInt16(defaults.integer(forKey: "apiPort"))
+            let port = APIServer.port(stored: defaults.integer(forKey: "apiPort"))
             let token = Self.apiToken()
             Task {
                 try? await apiServer.start(
-                    port: port == 0 ? 7799 : port,
+                    port: port,
                     token: token,
                     database: db,
                     enhanceTrigger: { meetingID in

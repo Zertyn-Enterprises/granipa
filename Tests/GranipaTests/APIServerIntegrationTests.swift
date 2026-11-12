@@ -30,6 +30,11 @@ import Testing
         #expect(list.1.contains("Socket test"))
     }
 
+    @Test(arguments: [(0, 7799), (8080, 8080), (65_535, 65_535), (-1, 7799), (70_000, 7799)])
+    func storedPortOutsideUInt16FallsBackToDefault(stored: Int, expected: UInt16) {
+        #expect(APIServer.port(stored: stored) == expected)
+    }
+
     private func fetch(url: String, token: String?) async throws -> (Int, String) {
         var request = URLRequest(url: URL(string: url)!, timeoutInterval: 5)
         if let token {
