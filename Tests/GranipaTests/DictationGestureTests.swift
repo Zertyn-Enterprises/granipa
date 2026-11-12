@@ -126,6 +126,90 @@
             }
         }
 
+        @Test func micBusyReturnsToIdleWithoutOfferingRetry() async {
+            let controller = hookedController(captureError: DictationError.micBusy)
+            defer { controller.cancel() }
+
+            controller.toggleFromMenu()
+            #expect(await waitUntil { controller.phase == .idle })
+            #expect(!controller.lastFailureRetryable)
+            #expect(!controller.hasOpenCapture)
+        }
+
+        @Test func silentMicWhileListeningFailsRetryablyWithoutCommitting() async {
+            var committed: String?
+            let controller = DictationController(
+                testHooks: DictationTestHooks(
+                    transcribe: { chunks in
+                        for await _ in chunks {}
+                        return "partial"
+                    },
+                    micStallLimit: .milliseconds(90)))
+            controller.onCommitted = { text, _, _ in committed = text }
+            defer { controller.cancel() }
+
+            controller.toggleFromMenu()
+            #expect(
+                await waitUntil {
+                    if case .failed = controller.phase { return true }
+                    return false
+                })
+            try? await Task.sleep(for: .milliseconds(40))
+            #expect(controller.phase == .failed("Microphone changed — try again."))
+            #expect(controller.lastFailureRetryable)
+            #expect(!controller.hasOpenCapture)
+            #expect(committed == nil)
+        }
+
+        @Test func escDuringRewriteNeitherCommitsNorFinishes() async {
+            var committed: String?
+            var rewriting = false
+            let gate = CaptureGate()
+            let controller = DictationController(
+                testHooks: DictationTestHooks(
+                    transcribe: saysHello,
+                    rewrite: { text in
+                        rewriting = true
+                        await gate.wait()
+                        return text + " rewritten"
+                    }))
+            controller.onCommitted = { text, _, _ in committed = text }
+            defer {
+                gate.open()
+                controller.cancel()
+            }
+
+            controller.toggleFromMenu()
+            #expect(await waitUntil { controller.phase == .listening })
+            controller.toggleFromMenu()
+            #expect(await waitUntil { rewriting })
+            controller.cancel()
+            gate.open()
+            try? await Task.sleep(for: .milliseconds(40))
+
+            #expect(committed == nil)
+            #expect(controller.phase == .idle)
+        }
+
+        @Test func storedDurationExcludesRewriteTime() async {
+            var duration: TimeInterval?
+            let controller = DictationController(
+                testHooks: DictationTestHooks(
+                    transcribe: saysHello,
+                    rewrite: { text in
+                        try? await Task.sleep(for: .milliseconds(400))
+                        return text
+                    }))
+            controller.onCommitted = { _, seconds, _ in duration = seconds }
+            defer { controller.cancel() }
+
+            controller.toggleFromMenu()
+            #expect(await waitUntil { controller.phase == .listening })
+            controller.toggleFromMenu()
+            #expect(await waitUntil(timeout: .seconds(2)) { duration != nil })
+            #expect((duration ?? .infinity) < 0.3)
+        }
+
         @Test func holdAfterListeningCommitsBufferedText() async {
             var committed: String?
             let controller = hookedController(transcribe: { chunks in
@@ -159,6 +243,20 @@
             #expect(await waitUntil { controller.phase.isActive })
             controller.publishPreviewForTesting("stale", generation: oldGeneration)
             #expect(controller.preview != "stale")
+        }
+
+        @Test func chordWhileHeldCancelsThePressAndNeverLatches() async {
+            let controller = hookedController()
+            defer { controller.cancel() }
+
+            controller.handlePress(at: 5.0)
+            #expect(await waitUntil { controller.phase == .listening })
+            controller.handleChord()
+            controller.handleRelease(at: 5.05)
+
+            #expect(controller.phase == .idle)
+            #expect(!controller.isToggle)
+            #expect(!controller.hasOpenCapture)
         }
 
         @Test func unmatchedReleaseDoesNotStartASession() {
@@ -304,6 +402,23 @@
             #expect(releases == 1)
         }
 
+        @Test(arguments: [
+            ([.modifierDown, .modifierUp], [.press, .release]),
+            ([.modifierDown, .otherKeyDown, .modifierUp], [.press, .chord]),
+            ([.modifierDown, .otherKeyDown, .otherKeyDown], [.press, .chord]),
+            ([.otherKeyDown, .modifierDown, .modifierUp], [.press, .release]),
+            (
+                [.modifierDown, .otherKeyDown, .modifierUp, .modifierDown, .modifierUp],
+                [.press, .chord, .press, .release]
+            ),
+        ] as [([ModifierGesture.Event], [ModifierGesture.Output])])
+        func modifierGestureSeparatesChordsFromPresses(
+            events: [ModifierGesture.Event], expected: [ModifierGesture.Output]
+        ) {
+            var gesture = ModifierGesture()
+            #expect(events.compactMap { gesture.handle($0) } == expected)
+        }
+
         @Test @MainActor func carbonHotkeyIgnoresRepeatAndUnmatchedRelease() {
             let id: UInt32 = 943
             var presses = 0
@@ -346,6 +461,12 @@
         func open() {
             opened = true
         }
+    }
+
+    @MainActor
+    private func saysHello(_ chunks: AsyncStream<AudioChunk>) async -> String {
+        for await _ in chunks {}
+        return "hello"
     }
 
     @MainActor

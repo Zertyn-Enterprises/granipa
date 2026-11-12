@@ -3,6 +3,7 @@ import AVFoundation
 import Carbon.HIToolbox
 import Foundation
 import Observation
+import os
 
 @MainActor
 @Observable
@@ -21,6 +22,8 @@ final class DictationController {
     var onCommitted: (@MainActor (String, TimeInterval, String?) -> Void)?
 
     private var pressStartedAt: Date?
+    private var stoppedAt: Date?
+    private var pasteTarget: pid_t?
     private var pressEventTimestamp: TimeInterval?
     private var sourceApp: String?
     private var sessionGeneration = 0
@@ -29,10 +32,15 @@ final class DictationController {
     private var chunkContinuation: AsyncStream<AudioChunk>.Continuation?
     private var transcribeTask: Task<Void, Never>?
     private var hideTask: Task<Void, Never>?
+    private var stallTask: Task<Void, Never>?
     private var mic: MicRecorder?
     private let appleEngine = AppleDictationEngine()
     private let museEngine = MuseDictationEngine()
     @ObservationIgnored private let waveformGate = LevelGate(minInterval: 0.08)
+    /// Last mic buffer arrival. A device change (AirPods in/out) stops the
+    /// engine without an error, so silence from the tap is the only signal.
+    @ObservationIgnored private let micHeartbeat = OSAllocatedUnfairLock(
+        initialState: ContinuousClock.now)
     #if DEBUG
         @ObservationIgnored var testHooks: DictationTestHooks?
     #endif
@@ -85,6 +93,15 @@ final class DictationController {
         }
     }
 
+    /// The held dictation modifier turned out to be part of a shortcut (Right ⌘+C):
+    /// drop the session that press started instead of latching it open.
+    func handleChord() {
+        guard pressEventTimestamp != nil, !isToggle,
+            phase == .preparing || phase == .listening
+        else { return }
+        cancel()
+    }
+
     func toggleFromMenu() {
         if phase.isActive {
             Task { await stop() }
@@ -109,8 +126,28 @@ final class DictationController {
         #if DEBUG
         if V2FixtureRuntime.isActive { return }
         #endif
+        if meetingIsRecording {
+            fail(DictationError.micBusy)
+            return
+        }
+        let generation = beginSession(latched: latched)
+        if presentsChrome {
+            DictationOverlayController.shared.attach(self)
+            DictationOverlayController.shared.setClickThrough(false)
+            DictationOverlayController.shared.setVisible(true)
+            CaptionsOverlayController.shared.setVisible(false)
+            registerEscape()
+        }
+        transcribeTask = Task { [weak self] in
+            await self?.runSession(generation: generation)
+        }
+    }
+
+    /// Resets per-session state, enters `.preparing` and returns the new generation.
+    private func beginSession(latched: Bool) -> Int {
         hideTask?.cancel()
         pressStartedAt = .now
+        stoppedAt = nil
         if latched { pressEventTimestamp = nil }
         isToggle = latched
         isRewriting = false
@@ -121,62 +158,61 @@ final class DictationController {
             rawValue: UserDefaults.standard.string(forKey: "dictationEngine") ?? "local")
             ?? .local
         sessionGeneration += 1
-        let generation = sessionGeneration
         let front = NSWorkspace.shared.frontmostApplication
         sourceApp =
             front?.bundleIdentifier == Bundle.main.bundleIdentifier
             ? nil : front?.localizedName
         phase = .preparing
         reachedListening = false
-        if presentsChrome {
-            DictationOverlayController.shared.attach(self)
-            DictationOverlayController.shared.setClickThrough(false)
-            DictationOverlayController.shared.setVisible(true)
-            CaptionsOverlayController.shared.setVisible(false)
-            registerEscape()
-        }
+        return sessionGeneration
+    }
 
-        transcribeTask = Task { [weak self] in
-            guard let self else { return }
-            do {
-                #if DEBUG
-                    if let beforeCapture = self.testHooks?.beforeCapture {
-                        await beforeCapture()
-                    }
-                #endif
-                guard !Task.isCancelled, generation == self.sessionGeneration,
-                    self.phase == .preparing
-                else { return }
-                let stream = try self.beginCapture()
-                guard !Task.isCancelled, generation == self.sessionGeneration else {
-                    if self.captureGeneration == generation { self.finishMic() }
-                    return
-                }
-                if self.phase == .preparing {
-                    self.phase = .listening
-                    self.reachedListening = true
-                    if self.presentsChrome {
-                        DictationOverlayController.shared.setClickThrough(false)
-                    }
-                }
-                guard self.phase == .listening || self.phase == .processing else {
-                    if self.captureGeneration == generation { self.finishMic() }
-                    return
-                }
-                try await self.prepareEngine()
-                guard !Task.isCancelled, generation == self.sessionGeneration else { return }
-                let text = try await self.runEngine(chunks: stream, generation: generation)
-                guard !Task.isCancelled, generation == self.sessionGeneration else { return }
-                await self.finish(text: text)
-            } catch is CancellationError {
-                return
-            } catch let error as DictationError where error.isCancelled {
-                return
-            } catch {
-                guard generation == self.sessionGeneration else { return }
-                self.fail(error)
-            }
+    private func runSession(generation: Int) async {
+        do {
+            guard let stream = try await openCapture(generation: generation) else { return }
+            try await prepareEngine()
+            guard !Task.isCancelled, generation == sessionGeneration else { return }
+            let text = try await runEngine(chunks: stream, generation: generation)
+            guard !Task.isCancelled, generation == sessionGeneration else { return }
+            await finish(text: text)
+        } catch is CancellationError {
+            return
+        } catch let error as DictationError where error.isCancelled {
+            return
+        } catch {
+            guard generation == sessionGeneration else { return }
+            fail(error)
         }
+    }
+
+    /// Opens the mic and enters `.listening`; nil when the session was
+    /// cancelled or stopped before the capture was usable.
+    private func openCapture(generation: Int) async throws -> AsyncStream<AudioChunk>? {
+        #if DEBUG
+            if let beforeCapture = testHooks?.beforeCapture {
+                await beforeCapture()
+            }
+        #endif
+        guard !Task.isCancelled, generation == sessionGeneration, phase == .preparing
+        else { return nil }
+        let stream = try beginCapture()
+        guard !Task.isCancelled, generation == sessionGeneration else {
+            if captureGeneration == generation { finishMic() }
+            return nil
+        }
+        if phase == .preparing {
+            phase = .listening
+            reachedListening = true
+            if presentsChrome {
+                DictationOverlayController.shared.setClickThrough(false)
+            }
+            watchForMicStall(generation: generation)
+        }
+        guard phase == .listening || phase == .processing else {
+            if captureGeneration == generation { finishMic() }
+            return nil
+        }
+        return stream
     }
 
     private func prepareEngine() async throws {
@@ -217,6 +253,7 @@ final class DictationController {
 
     func beginCapture() throws -> AsyncStream<AudioChunk> {
         if meetingIsRecording { throw DictationError.micBusy }
+        micHeartbeat.withLock { $0 = .now }
         #if DEBUG
             if testHooks != nil {
                 if let error = testHooks?.captureError { throw error }
@@ -233,11 +270,10 @@ final class DictationController {
         chunkContinuation = continuation
         do {
             let recorder = MicRecorder()
-            let echo = meetingIsRecording
-                ? (UserDefaults.standard.object(forKey: "echoCancellation") as? Bool ?? true)
-                : false
             let gate = waveformGate
-            try recorder.start(echoCancellation: echo) { [weak self] buffer, _ in
+            let heartbeat = micHeartbeat
+            try recorder.start(echoCancellation: false) { [weak self] buffer, _ in
+                heartbeat.withLock { $0 = .now }
                 let level = buffer.rmsLevel
                 if gate.shouldPublish(.mic) {
                     Task { @MainActor [weak self] in
@@ -254,6 +290,32 @@ final class DictationController {
             continuation.finish()
             if meetingIsRecording { throw DictationError.micBusy }
             throw error
+        }
+    }
+
+    private var micStallLimit: Duration? {
+        #if DEBUG
+            if testHooks != nil { return testHooks?.micStallLimit }
+        #endif
+        return .seconds(3)
+    }
+
+    private func watchForMicStall(generation: Int) {
+        guard let limit = micStallLimit else { return }
+        stallTask?.cancel()
+        stallTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: limit / 3)
+                guard let self, generation == self.sessionGeneration, self.phase == .listening
+                else { return }
+                if ContinuousClock.now - self.micHeartbeat.withLock({ $0 }) > limit {
+                    let task = self.transcribeTask
+                    self.invalidateSession()
+                    task?.cancel()
+                    self.fail(MicrophoneChanged())
+                    return
+                }
+            }
         }
     }
 
@@ -320,24 +382,26 @@ final class DictationController {
             return
         }
         phase = .processing
+        stoppedAt = .now
+        pasteTarget = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let generation = sessionGeneration
         if presentsChrome {
             DictationOverlayController.shared.setClickThrough(true)
         }
-        unregisterEscape()
         chunkContinuation?.finish()
         chunkContinuation = nil
         mic?.stop()
         mic = nil
         await transcribeTask?.value
-        if phase == .processing {
+        if phase == .processing, generation == sessionGeneration {
             resetToIdle()
         }
     }
 
     private func finish(text: String) async {
         let trimmed = DictationText.resolved(finals: text, partial: preview)
+        let generation = sessionGeneration
         finishMic()
-        unregisterEscape()
         guard !trimmed.isEmpty else {
             if !reachedListening {
                 resetToIdle()
@@ -347,13 +411,20 @@ final class DictationController {
             return
         }
         preview = trimmed
+        // Speaking time only: the rewrite's network time is not part of the dictation.
+        let duration = (stoppedAt ?? .now).timeIntervalSince(pressStartedAt ?? .now)
+        let target =
+            stoppedAt == nil
+            ? NSWorkspace.shared.frontmostApplication?.processIdentifier : pasteTarget
         let rewritten = await rewriteIfNeeded(trimmed)
+        // Esc during the rewrite cancelled the session: nothing to paste.
+        guard generation == sessionGeneration else { return }
+        unregisterEscape()
         if shouldPaste {
-            paste(rewritten)
+            paste(rewritten, into: target)
         }
         preview = rewritten
         phase = .done
-        let duration = Date.now.timeIntervalSince(pressStartedAt ?? .now)
         onCommitted?(rewritten, duration, sourceApp)
         isRewriting = false
         DictationOverlayController.shared.setClickThrough(true)
@@ -362,7 +433,7 @@ final class DictationController {
 
     private func rewriteIfNeeded(_ text: String) async -> String {
         #if DEBUG
-            if testHooks != nil { return text }
+            if testHooks != nil { return await testHooks?.rewrite?(text) ?? text }
         #endif
         let provider = UserDefaults.standard.string(forKey: "dictationRewrite") ?? "off"
         guard provider != "off" else { return text }
@@ -370,38 +441,53 @@ final class DictationController {
         do {
             return try await RewriteClient.rewrite(text)
         } catch {
-            ToastController.shared.show(error.localizedDescription, style: .warning)
+            if !Task.isCancelled {
+                ToastController.shared.show(error.localizedDescription, style: .warning)
+            }
             return text
         }
     }
 
-    private func paste(_ text: String) {
+    /// Auto-pastes only into the app that was frontmost when dictation stopped;
+    /// the rewrite can take seconds, and the user may have switched apps meanwhile.
+    private func paste(_ text: String, into target: pid_t?) {
+        let autoPaste = UserDefaults.standard.object(forKey: "dictationAutoPaste") as? Bool ?? true
+        let sameApp = NSWorkspace.shared.frontmostApplication?.processIdentifier == target
+        if autoPaste, sameApp, PasteService.pastePreservingClipboard(text) {
+            return
+        }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
-        let autoPaste = UserDefaults.standard.object(forKey: "dictationAutoPaste") as? Bool ?? true
-        if autoPaste {
-            if PasteService.pasteToFrontmostApp() {
-                return
-            }
+        if !autoPaste {
+            ToastController.shared.show("Copied")
+        } else if !sameApp {
+            ToastController.shared.show(
+                "Copied — app changed, press ⌘V to paste", style: .warning)
+        } else {
             ToastController.shared.show(
                 "Copied — grant Accessibility to auto-paste", style: .warning)
-        } else {
-            ToastController.shared.show("Copied")
         }
     }
 
     private func fail(_ error: Error) {
         finishMic()
-        unregisterEscape()
-        let retryable = (error as? DictationError)?.isRetryable ?? false
+        if case .micBusy? = error as? DictationError {
+            // The meeting owns the mic until it ends; an overlay offering
+            // Retry would only fail the same way.
+            resetToIdle()
+            if presentsChrome {
+                ToastController.shared.show(error.localizedDescription, style: .warning)
+            }
+            return
+        }
+        let retryable =
+            error is MicrophoneChanged || ((error as? DictationError)?.isRetryable ?? false)
         lastFailureRetryable = retryable
         phase = .failed(error.localizedDescription)
-        if retryable {
-            DictationOverlayController.shared.setClickThrough(false)
-        } else {
-            DictationOverlayController.shared.setClickThrough(true)
-            scheduleHide()
-        }
+        restoreCaptionsIfRecording()
+        // Esc stays registered until the overlay hides, so a failure always has a way out.
+        DictationOverlayController.shared.setClickThrough(!retryable)
+        scheduleHide()
     }
 
     private func finishMic() {
@@ -453,16 +539,16 @@ final class DictationController {
 
     private func scheduleHide() {
         hideTask?.cancel()
-        hideTask = Task {
-            try? await Task.sleep(for: .milliseconds(phase == .done ? 720 : 1600))
-            guard !Task.isCancelled else { return }
-            if !phase.isActive {
-                phase = .idle
-                preview = ""
-                isToggle = false
-                DictationOverlayController.shared.setVisible(false)
-                restoreCaptionsIfRecording()
+        let delay: Duration =
+            switch phase {
+            case .done: .milliseconds(720)
+            case .failed where lastFailureRetryable: .seconds(5)
+            default: .milliseconds(1600)
             }
+        hideTask = Task {
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled, !phase.isActive else { return }
+            resetToIdle()
         }
     }
 
@@ -502,6 +588,11 @@ final class DictationController {
     }
 }
 
+/// Not a `DictationError` case: meeting code switches over that enum exhaustively.
+private struct MicrophoneChanged: LocalizedError {
+    var errorDescription: String? { "Microphone changed — try again." }
+}
+
 extension DictationError {
     fileprivate var isCancelled: Bool {
         if case .cancelled = self { return true }
@@ -517,5 +608,7 @@ extension DictationError {
         var transcribe: (@MainActor (AsyncStream<AudioChunk>) async throws -> String)?
         var presentsOverlay = false
         var pastes = false
+        var micStallLimit: Duration?
+        var rewrite: (@MainActor (String) async -> String)?
     }
 #endif

@@ -18,6 +18,33 @@ final class MuseDictationEngine: Sendable {
         guard let targetFormat = PCM16Encoder.format24kMono() else {
             throw DictationError.audioFormat
         }
+        let socket = try await connect(configuration: configuration)
+        let finals = FinalTextBox()
+        let receiver = startReceiver(on: socket, finals: finals, onPartial: onPartial)
+        do {
+            try await sendAndDrain(
+                chunks, to: socket, format: targetFormat, receiver: receiver)
+        } catch is CancellationError {
+            receiver.cancel()
+            socket.cancel(with: .goingAway, reason: nil)
+            throw DictationError.cancelled
+        } catch {
+            receiver.cancel()
+            socket.cancel(with: .goingAway, reason: nil)
+            if !finals.current().isEmpty { return finals.current() }
+            throw error
+        }
+
+        socket.cancel(with: .normalClosure, reason: nil)
+        let text = finals.current()
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw DictationError.empty
+        }
+        return text
+    }
+
+    /// Opens the socket and completes the handshake.
+    private func connect(configuration: Configuration) async throws -> URLSessionWebSocketTask {
         let sessionID = UUID().uuidString
         guard let url = URL(string: "wss://api.meta.ai/v1/asr/realtime?sessionId=\(sessionID)")
         else {
@@ -58,9 +85,15 @@ final class MuseDictationEngine: Sendable {
             socket.cancel(with: .goingAway, reason: nil)
             throw DictationError.museConnect
         }
+        return socket
+    }
 
-        let finals = FinalTextBox()
-        let receiver = Task {
+    private func startReceiver(
+        on socket: URLSessionWebSocketTask,
+        finals: FinalTextBox,
+        onPartial: @escaping @Sendable (String) -> Void
+    ) -> Task<Void, Error> {
+        Task {
             do {
                 while !Task.isCancelled {
                     let json = try await receiveJSON(from: socket)
@@ -86,36 +119,30 @@ final class MuseDictationEngine: Sendable {
                 return
             }
         }
+    }
 
+    /// Streams the audio, ends the stream and waits (bounded) for the last results.
+    private func sendAndDrain(
+        _ chunks: AsyncStream<AudioChunk>,
+        to socket: URLSessionWebSocketTask,
+        format targetFormat: AVAudioFormat,
+        receiver: Task<Void, Error>
+    ) async throws {
         let converter = BufferConverter()
-        do {
-            for await chunk in chunks {
-                guard let converted = try? converter.convert(chunk.buffer, to: targetFormat),
-                    let pcm = PCM16Encoder.data(from: converted), !pcm.isEmpty
-                else { continue }
-                try await socket.send(.data(pcm))
-            }
-            try await socket.send(.string(#"{"type":"endStream"}"#))
-            try await withTimeout(seconds: 8) {
-                try await receiver.value
-            }
-        } catch is CancellationError {
-            receiver.cancel()
-            socket.cancel(with: .goingAway, reason: nil)
-            throw DictationError.cancelled
-        } catch {
-            receiver.cancel()
-            socket.cancel(with: .goingAway, reason: nil)
-            if !finals.current().isEmpty { return finals.current() }
-            throw error
+        for await chunk in chunks {
+            guard let converted = try? converter.convert(chunk.buffer, to: targetFormat),
+                let pcm = PCM16Encoder.data(from: converted), !pcm.isEmpty
+            else { continue }
+            try await socket.send(.data(pcm))
         }
-
-        socket.cancel(with: .normalClosure, reason: nil)
-        let text = finals.current()
-        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            throw DictationError.empty
-        }
-        return text
+        try await socket.send(.string(#"{"type":"endStream"}"#))
+        try await AsyncDeadline.wait(
+            seconds: 8,
+            onTimeout: {
+                receiver.cancel()
+                socket.cancel(with: .goingAway, reason: nil)
+            },
+            operation: { try await receiver.value })
     }
 
     private func receiveJSON(from socket: URLSessionWebSocketTask) async throws -> String {
@@ -127,23 +154,6 @@ final class MuseDictationEngine: Sendable {
             return String(data: data, encoding: .utf8) ?? ""
         @unknown default:
             return ""
-        }
-    }
-
-    private func withTimeout(seconds: Double, operation: @escaping @Sendable () async throws -> Void)
-        async throws
-    {
-        try await withThrowingTaskGroup(of: Bool.self) { group in
-            group.addTask {
-                try await operation()
-                return true
-            }
-            group.addTask {
-                try await Task.sleep(for: .seconds(seconds))
-                return false
-            }
-            _ = try await group.next()
-            group.cancelAll()
         }
     }
 }
@@ -174,12 +184,12 @@ enum DictationError: LocalizedError {
     case cancelled
 
     /// One retry is worth it when the cause may have cleared on its own
-    /// (silence, a busy mic, a transient connection). A rejected server
-    /// response or a cancellation will fail identically again.
+    /// (silence, a transient connection). A rejected server response, a
+    /// cancellation or a meeting holding the mic will fail identically again.
     var isRetryable: Bool {
         switch self {
-        case .empty, .micBusy, .audioFormat, .museConnect: true
-        case .museFailed, .cancelled: false
+        case .empty, .audioFormat, .museConnect: true
+        case .museFailed, .cancelled, .micBusy: false
         }
     }
 

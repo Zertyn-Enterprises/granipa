@@ -1,3 +1,4 @@
+import AppKit
 import AVFoundation
 import Testing
 
@@ -45,6 +46,40 @@ import Testing
             DictationTrigger.actionOnRelease(press: 10.0, release: 10.219) == .keepAsToggle)
         #expect(DictationTrigger.actionOnRelease(press: 10.0, release: 10.22) == .stop)
         #expect(DictationTrigger.actionOnRelease(press: 10.0, release: 9.5) == .keepAsToggle)
+    }
+
+    @Test func deadlineReturnsEvenWhenTheOperationIgnoresCancellation() async throws {
+        let started = ContinuousClock.now
+        let finished = try await AsyncDeadline.wait(seconds: 0.2, onTimeout: {}) {
+            await withCheckedContinuation { continuation in
+                DispatchQueue.global().asyncAfter(deadline: .now() + 3) { continuation.resume() }
+            }
+        }
+        #expect(!finished)
+        #expect(ContinuousClock.now - started < .seconds(1))
+        #expect(try await AsyncDeadline.wait(seconds: 5, onTimeout: {}) {})
+    }
+
+    @Test func clipboardSnapshotRestoresUnlessSomethingNewerWasCopied() {
+        let pasteboard = NSPasteboard(name: .init("granipa-test-\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        let custom = NSPasteboard.PasteboardType("com.example.rich")
+        pasteboard.clearContents()
+        pasteboard.setString("mine", forType: .string)
+        pasteboard.setData(Data([1, 2]), forType: custom)
+
+        let saved = ClipboardSnapshot(pasteboard)
+        pasteboard.clearContents()
+        pasteboard.setString("dictated", forType: .string)
+        saved.restore(to: pasteboard, ifUnchangedSince: pasteboard.changeCount)
+        #expect(pasteboard.string(forType: .string) == "mine")
+        #expect(pasteboard.data(forType: custom) == Data([1, 2]))
+
+        let stale = pasteboard.changeCount
+        pasteboard.clearContents()
+        pasteboard.setString("copied later", forType: .string)
+        ClipboardSnapshot(pasteboard).restore(to: pasteboard, ifUnchangedSince: stale)
+        #expect(pasteboard.string(forType: .string) == "copied later")
     }
 
     @Test func museParsesHandshakeWithoutType() {

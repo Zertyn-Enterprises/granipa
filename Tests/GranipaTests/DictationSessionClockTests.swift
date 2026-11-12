@@ -4,20 +4,40 @@ import Testing
 @testable import Granipa
 
 @Suite @MainActor struct DictationSessionClockTests {
-    @Test func sessionStartsOnPreparingAndSurvivesTheWholeRun() {
-        let clock = DictationSessionClock()
-        clock.track(.idle)
-        #expect(clock.sessionStartedAt == nil)
+    #if DEBUG
+        @Test func sessionStartsOnEnteringPreparingAndSurvivesTheWholeRun() async {
+            var captureAllowed = false
+            let controller = DictationController(
+                testHooks: DictationTestHooks(beforeCapture: {
+                    while !captureAllowed, !Task.isCancelled {
+                        try? await Task.sleep(for: .milliseconds(2))
+                    }
+                }))
+            let clock = DictationSessionClock(controller: controller)
+            clock.beginObserving()
+            #expect(clock.sessionStartedAt == nil)
+            defer { controller.cancel() }
 
-        clock.track(.preparing)
-        let started = clock.sessionStartedAt
-        #expect(started != nil)
+            controller.toggleFromMenu()
+            #expect(await eventually { clock.sessionStartedAt != nil })
+            // Still preparing: the start is stamped on entering it, not on leaving it.
+            #expect(controller.phase == .preparing)
+            let started = clock.sessionStartedAt
 
-        clock.track(.listening)
-        clock.track(.processing)
-        clock.track(.done)
-        #expect(clock.sessionStartedAt == started)
-    }
+            captureAllowed = true
+            #expect(await eventually { controller.phase == .listening })
+            controller.cancel()
+            #expect(await eventually { controller.phase == .idle })
+            #expect(clock.sessionStartedAt == started)
+        }
+
+        private func eventually(_ condition: @MainActor () -> Bool) async -> Bool {
+            for _ in 0..<160 where !condition() {
+                try? await Task.sleep(for: .milliseconds(5))
+            }
+            return condition()
+        }
+    #endif
 
     @Test func listeningAloneDoesNotInventAStart() {
         // Armed mid-session (start missed): the clock stays unknown, never guesses.

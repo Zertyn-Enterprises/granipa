@@ -16,11 +16,22 @@ import QuartzCore
         CAMediaTimingFunction(controlPoints: 0.4, 0.0, 1.0, 1.0)
     }
 
+    /// Bumped on every appear/disappear, so the completion of a hide that was
+    /// interrupted by a re-show does not order the panel out again.
+    private static var generations: [ObjectIdentifier: Int] = [:]
+
+    private static func bump(_ panel: NSPanel) -> Int {
+        let next = (generations[ObjectIdentifier(panel)] ?? 0) + 1
+        generations[ObjectIdentifier(panel)] = next
+        return next
+    }
+
     static var reduceMotion: Bool {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     }
 
     static func appear(_ panel: NSPanel, at origin: NSPoint, makeKey: Bool = false) {
+        _ = bump(panel)
         panel.contentView?.wantsLayer = true
         let start = NSPoint(x: origin.x, y: origin.y - rise)
         panel.setFrameOrigin(start)
@@ -52,6 +63,7 @@ import QuartzCore
             then?()
             return
         }
+        let token = bump(panel)
         let dest = NSPoint(x: panel.frame.origin.x, y: panel.frame.origin.y - rise)
         NSAnimationContext.runAnimationGroup(
             { ctx in
@@ -62,7 +74,10 @@ import QuartzCore
             },
             completionHandler: {
                 Task { @MainActor in
-                    panel.orderOut(nil)
+                    if generations[ObjectIdentifier(panel)] == token {
+                        generations[ObjectIdentifier(panel)] = nil
+                        panel.orderOut(nil)
+                    }
                     then?()
                 }
             })

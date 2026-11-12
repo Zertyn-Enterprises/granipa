@@ -13,16 +13,21 @@ final class HyperKeyMonitor: @unchecked Sendable {
     private let lock = NSLock()
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
+    private var runLoop: CFRunLoop?
     private var hyperKeyCode: UInt32 = 0
     private var bindings: [UInt32: UInt32] = [:]
     private var hyperDown = false
     private var onAction: (@MainActor (UInt32) -> Void)?
 
+    /// Returns false when the event tap cannot be created (no Accessibility).
+    /// The tap runs on its own thread so system-wide typing never waits on the
+    /// app's main thread; actions still run on the main actor.
+    @discardableResult
     func start(
         hyperKeyCode: UInt32,
         bindings: [UInt32: UInt32],
         onAction: @escaping @MainActor (UInt32) -> Void
-    ) {
+    ) -> Bool {
         stop()
         lock.lock()
         self.hyperKeyCode = hyperKeyCode
@@ -31,6 +36,47 @@ final class HyperKeyMonitor: @unchecked Sendable {
         self.hyperDown = false
         lock.unlock()
 
+        let ready = DispatchSemaphore(value: 0)
+        let thread = Thread { [self] in
+            runTap(signal: ready)
+        }
+        thread.name = "com.zertyn.granipa.hyper-key"
+        thread.qualityOfService = .userInteractive
+        thread.start()
+        ready.wait()
+
+        lock.lock()
+        let started = tap != nil
+        lock.unlock()
+        if started {
+            Self.log.info("hyper key monitor on code=\(hyperKeyCode)")
+        } else {
+            Self.log.error("CGEvent tap failed — grant Accessibility for the macro key")
+        }
+        return started
+    }
+
+    func stop() {
+        lock.lock()
+        let tap = self.tap
+        let source = self.source
+        let runLoop = self.runLoop
+        self.tap = nil
+        self.source = nil
+        self.runLoop = nil
+        self.hyperDown = false
+        lock.unlock()
+        if let tap {
+            CGEvent.tapEnable(tap: tap, enable: false)
+            CFMachPortInvalidate(tap)
+        }
+        if let runLoop {
+            if let source { CFRunLoopRemoveSource(runLoop, source, .commonModes) }
+            CFRunLoopStop(runLoop)
+        }
+    }
+
+    private func runTap(signal ready: DispatchSemaphore) {
         let mask =
             (1 << CGEventType.keyDown.rawValue)
             | (1 << CGEventType.keyUp.rawValue)
@@ -49,33 +95,20 @@ final class HyperKeyMonitor: @unchecked Sendable {
                 },
                 userInfo: Unmanaged.passUnretained(self).toOpaque())
         else {
-            Self.log.error("CGEvent tap failed — grant Accessibility for the macro key")
+            ready.signal()
             return
         }
         let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        let runLoop = CFRunLoopGetCurrent()
+        CFRunLoopAddSource(runLoop, source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
         lock.lock()
         self.tap = tap
         self.source = source
+        self.runLoop = runLoop
         lock.unlock()
-        Self.log.info("hyper key monitor on code=\(hyperKeyCode)")
-    }
-
-    func stop() {
-        lock.lock()
-        let tap = self.tap
-        let source = self.source
-        self.tap = nil
-        self.source = nil
-        self.hyperDown = false
-        lock.unlock()
-        if let tap {
-            CGEvent.tapEnable(tap: tap, enable: false)
-        }
-        if let source {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
-        }
+        ready.signal()
+        CFRunLoopRun()
     }
 
     private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
@@ -88,38 +121,87 @@ final class HyperKeyMonitor: @unchecked Sendable {
         }
 
         let code = UInt32(event.getIntegerValueField(.keyboardEventKeycode))
+        let synthetic =
+            event.getIntegerValueField(.eventSourceUserData) == PasteService.syntheticEventTag
         lock.lock()
-        let hyper = hyperKeyCode
-        let bindings = bindings
-        let down = hyperDown
+        let route = HyperKeyRoute.route(
+            type: type, code: code, flags: event.flags, synthetic: synthetic,
+            hyper: hyperKeyCode, bindings: bindings, armed: &hyperDown)
         let actionMap = onAction
         lock.unlock()
 
-        if code == hyper {
-            lock.lock()
-            if hyper == UInt32(kVK_CapsLock) {
-                // Caps Lock usually arrives as flagsChanged, not keyDown/keyUp.
-                // Toggle a layer: press ⇪ to arm, press ⇪ again to disarm.
-                if type == .flagsChanged { hyperDown.toggle() }
-            } else if type == .keyDown {
-                hyperDown = true
-            } else if type == .keyUp {
-                hyperDown = false
+        switch route {
+        case .pass:
+            return Unmanaged.passUnretained(event)
+        case .swallow:
+            return nil
+        case .fire(let hotkeyID):
+            if let actionMap {
+                Task { @MainActor in actionMap(hotkeyID) }
             }
-            lock.unlock()
             return nil
         }
+    }
+}
 
-        if type == .flagsChanged {
-            return Unmanaged.passUnretained(event)
+/// What the macro-key tap does with one keyboard event. Pure, so the
+/// arming rules are testable without a real event tap.
+enum HyperKeyRoute: Equatable {
+    case pass
+    case swallow
+    case fire(UInt32)
+
+    static func route(
+        type: CGEventType,
+        code: UInt32,
+        flags: CGEventFlags,
+        synthetic: Bool,
+        hyper: UInt32,
+        bindings: [UInt32: UInt32],
+        armed: inout Bool
+    ) -> HyperKeyRoute {
+        // The app's own ⌘V must reach the target app even while the layer is armed.
+        if synthetic { return .pass }
+        if code == hyper {
+            return arm(type: type, flags: flags, hyper: hyper, armed: &armed)
         }
 
-        guard down, type == .keyDown, let hotkeyID = bindings[code] else {
-            return Unmanaged.passUnretained(event)
+        guard armed, type == .keyDown, let hotkeyID = bindings[code] else { return .pass }
+        let hyperModifier = HotkeyBinding.modifierFlag(forKeyCode: hyper)
+        // ⌘/⌃ shortcuts (⌘C, ⌃A) belong to the frontmost app, unless that
+        // modifier is the macro key itself.
+        var foreign: CGEventFlags = [.maskCommand, .maskControl]
+        if hyperModifier == .command { foreign.remove(.maskCommand) }
+        if hyperModifier == .control { foreign.remove(.maskControl) }
+        guard flags.intersection(foreign).isEmpty else { return .pass }
+        return .fire(hotkeyID)
+    }
+
+    /// An event of the macro key itself: updates whether the layer is armed.
+    private static func arm(
+        type: CGEventType, flags: CGEventFlags, hyper: UInt32, armed: inout Bool
+    ) -> HyperKeyRoute {
+        if hyper == UInt32(kVK_CapsLock) {
+            // Caps Lock usually arrives as flagsChanged, not keyDown/keyUp.
+            // Toggle a layer: press ⇪ to arm, press ⇪ again to disarm.
+            if type == .flagsChanged { armed.toggle() }
+            return .swallow
         }
-        if let actionMap {
-            Task { @MainActor in actionMap(hotkeyID) }
+        if HotkeyBinding.modifierFlag(forKeyCode: hyper) != nil {
+            // Modifiers only emit flagsChanged. Pass it on: other features
+            // (the Right ⌥ dictation key) listen to the same modifier.
+            if type == .flagsChanged {
+                armed = HotkeyBinding.eventReportsModifierDown(
+                    keyCode: hyper,
+                    flags: NSEvent.ModifierFlags(rawValue: UInt(flags.rawValue)))
+            }
+            return .pass
         }
-        return nil
+        if type == .keyDown {
+            armed = true
+        } else if type == .keyUp {
+            armed = false
+        }
+        return .swallow
     }
 }

@@ -1,4 +1,5 @@
 import Carbon.HIToolbox
+import CoreGraphics
 import Testing
 
 @testable import Granipa
@@ -70,6 +71,30 @@ import Testing
             defaults.set(previous, forKey: key)
         } else {
             defaults.removeObject(forKey: key)
+        }
+    }
+
+    @Test func macroKeyRouting() {
+        let rShift = UInt32(kVK_RightShift)
+        let rCmd = UInt32(kVK_RightCommand)
+        let key = UInt32(kVK_ANSI_V)
+        let rShiftDown = CGEventFlags(
+            rawValue: CGEventFlags.maskShift.rawValue | UInt64(NX_DEVICERSHIFTKEYMASK))
+        let cases: [(UInt32, CGEventType, UInt32, CGEventFlags, Bool, Bool, HyperKeyRoute, Bool)] = [
+            // hyper, type, code, flags, synthetic, armed before → route, armed after
+            (rShift, .flagsChanged, rShift, rShiftDown, false, false, .pass, true),
+            (rShift, .keyDown, key, rShiftDown, false, true, .fire(7), true),
+            (rShift, .keyDown, key, [.maskCommand], false, true, .pass, true),
+            (rCmd, .keyDown, key, [.maskCommand], false, true, .fire(7), true),
+            (rCmd, .keyDown, key, [.maskCommand], true, true, .pass, true),
+        ]
+        for (hyper, type, code, flags, synthetic, before, route, after) in cases {
+            var armed = before
+            #expect(
+                HyperKeyRoute.route(
+                    type: type, code: code, flags: flags, synthetic: synthetic,
+                    hyper: hyper, bindings: [key: 7], armed: &armed) == route)
+            #expect(armed == after)
         }
     }
 }
