@@ -181,10 +181,16 @@ struct MeetingOverviewView: View {
         }
     }
 
+    /// The pipeline's current step names the work better than the generic title.
+    private func title(_ busy: OverviewPresentation.Busy) -> String {
+        busy == .processing
+            ? app.processingStage(for: meeting.id)?.title ?? busy.title : busy.title
+    }
+
     private func fullProgress(_ busy: OverviewPresentation.Busy) -> some View {
         VStack(spacing: 10) {
             ProgressView()
-            Text(busy.title)
+            Text(title(busy))
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(Theme.textSecondary)
             Text(busy.detail)
@@ -217,13 +223,13 @@ struct MeetingOverviewView: View {
         HStack(alignment: .center, spacing: 8) {
             ProgressView()
                 .controlSize(.small)
-            Text(busy.title)
+            Text(title(busy))
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(Theme.textSecondary)
             Spacer(minLength: 0)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(busy.title)
+        .accessibilityLabel(title(busy))
     }
 
     @ViewBuilder
@@ -412,6 +418,7 @@ struct MeetingTranscriptView: View {
     let loadPhase: TranscriptLoadPhase
     let live: TranscriptionCoordinator?
     let isProcessing: Bool
+    let processingStage: MeetingProcessor.Stage?
     @Bindable var playback: MeetingPlaybackController
     @Binding var autoscroll: Bool
     @Binding var selectedID: String?
@@ -465,7 +472,7 @@ struct MeetingTranscriptView: View {
             } else if shown.isEmpty, live == nil, isProcessing {
                 VStack(spacing: 10) {
                     ProgressView()
-                    Text("Processing this recording…")
+                    Text(processingStage?.title ?? "Processing this recording…")
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(Theme.textSecondary)
                     Text("The transcript and AI notes appear when processing finishes.")

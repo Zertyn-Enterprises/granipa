@@ -31,10 +31,31 @@ final class MeetingProcessor {
         case failed(String)
     }
 
+    enum Stage: Equatable, Sendable {
+        case transcribingAudio
+        case transcribingCall
+        case identifyingSpeakers
+        case writingNotes
+
+        var title: String {
+            switch self {
+            case .transcribingAudio: "Transcribing your audio…"
+            case .transcribingCall: "Transcribing the call…"
+            case .identifyingSpeakers: "Identifying speakers…"
+            case .writingNotes: "Writing notes…"
+            }
+        }
+    }
+
     private static let log = Logger(subsystem: "com.zertyn.granipa", category: "transcription")
 
     private(set) var processingMeetingID: String?
     private(set) var enhancingMeetingIDs: Set<String> = []
+    /// Step of the running job (`processingMeetingID`); nil while a live
+    /// coordinator drains.
+    private(set) var stage: Stage?
+    /// Last enhancement failure per meeting, kept for this session only.
+    private(set) var enhanceErrors: [String: String] = [:]
 
     @ObservationIgnored private let database: AppDatabase
     @ObservationIgnored private let host: Host
@@ -79,57 +100,104 @@ final class MeetingProcessor {
         defer {
             if processingMeetingID == id {
                 processingMeetingID = nil
+                stage = nil
             }
         }
+        var transcription: FileMeetingTranscriber.Outcome?
+        var skipLocalDiarize = false
         switch source {
         case .live(let drain):
-            let usedMuseForSystem = await drain()
-            await postProcess(meetingID: id, skipLocalDiarize: usedMuseForSystem)
+            skipLocalDiarize = await drain()
         case .files(let micURL, let systemURL, let language):
-            let db = database
-            do {
-                for channel in [AudioChannel.mic, .system] {
-                    try db.replaceSegments(meetingID: id, channel: channel, with: [])
-                }
-            } catch {
-                host.reportError("Couldn't replace the transcript: \(error.localizedDescription)")
+            guard clearTranscript(meetingID: id) else {
                 finish(meetingID: id)
                 return
             }
-            let outcome = await Task.detached {
-                await FileMeetingTranscriber.transcribe(
-                    micURL: micURL,
-                    systemURL: systemURL,
-                    meetingID: id,
-                    language: language,
-                    database: db)
-            }.value
-            await postProcess(meetingID: id, skipLocalDiarize: false, fileTranscription: outcome)
+            transcription = await transcribe(
+                meetingID: id, micURL: micURL, systemURL: systemURL, language: language)
+        }
+        stage = .identifyingSpeakers
+        await diarize(meetingID: id, skipLocalDiarize: skipLocalDiarize)
+        stage = .writingNotes
+        // A request that started before this job must not stand in for the
+        // pipeline's pass: it read the transcript before diarization.
+        if let running = enhanceTasks[id] {
+            _ = await running.value
+        }
+        let enhanced = await runEnhance(meetingID: id)
+        finish(meetingID: id)
+        if let meeting = try? database.fetchMeeting(id: id) {
+            let notice = Self.completionNotice(
+                title: meeting.title, transcription: transcription, enhancement: enhanced)
+            NotificationManager.shared.notify(title: notice.title, body: notice.body)
         }
     }
 
-    private func postProcess(
-        meetingID: String,
-        skipLocalDiarize: Bool,
-        fileTranscription: FileMeetingTranscriber.Outcome? = nil
-    ) async {
-        if case .failed(let failure) = fileTranscription {
+    private func clearTranscript(meetingID id: String) -> Bool {
+        do {
+            for channel in [AudioChannel.mic, .system] {
+                try database.replaceSegments(meetingID: id, channel: channel, with: [])
+            }
+            return true
+        } catch {
+            host.reportError("Couldn't replace the transcript: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    private func transcribe(
+        meetingID id: String, micURL: URL, systemURL: URL, language: String
+    ) async -> FileMeetingTranscriber.Outcome {
+        stage = .transcribingAudio
+        let db = database
+        let outcome = await Task.detached {
+            await FileMeetingTranscriber.transcribe(
+                micURL: micURL,
+                systemURL: systemURL,
+                meetingID: id,
+                language: language,
+                database: db,
+                onChannel: { channel in
+                    await self.setStage(channel == .mic ? .transcribingAudio : .transcribingCall)
+                })
+        }.value
+        if case .failed(let failure) = outcome {
             // Generic toast for the user; the underlying error is logged at
             // the catch site in FileMeetingTranscriber.
             Self.log.error(
-                "post-meeting transcription failed for \(meetingID, privacy: .public): \(failure.logDescription, privacy: .public)"
+                "post-meeting transcription failed for \(id, privacy: .public): \(failure.logDescription, privacy: .public)"
             )
             ToastController.shared.show(
                 "Transcription failed — your audio was saved", style: .warning)
         }
-        await diarize(meetingID: meetingID, skipLocalDiarize: skipLocalDiarize)
-        // A request that started before this job must not stand in for the
-        // pipeline's pass: it read the transcript before diarization.
-        if let running = enhanceTasks[meetingID] {
-            _ = await running.value
+        return outcome
+    }
+
+    private func setStage(_ next: Stage) {
+        stage = next
+    }
+
+    /// What the user is told when a meeting finishes processing.
+    static func completionNotice(
+        title: String,
+        transcription: FileMeetingTranscriber.Outcome?,
+        enhancement: EnhanceOutcome
+    ) -> (title: String, body: String) {
+        if case .failed = transcription {
+            return (
+                "Transcription failed",
+                "\(title): your audio was saved. Open the meeting and choose Transcribe again.")
         }
-        _ = await runEnhance(meetingID: meetingID)
-        finish(meetingID: meetingID)
+        switch enhancement {
+        case .ran:
+            return ("Notes ready", title)
+        case .failed(let message):
+            return ("Notes not written", "\(title): \(message)")
+        case .nothingToEnhance:
+            return ("Recording processed", "\(title): no speech or notes to write up.")
+        case .alreadyRunning:
+            return ("Recording processed", title)
+        }
     }
 
     private func diarize(meetingID: String, skipLocalDiarize: Bool) async {
@@ -203,6 +271,7 @@ final class MeetingProcessor {
 
     private func generateNotes(meetingID: String) async -> EnhanceOutcome {
         let db = database
+        enhanceErrors[meetingID] = nil
         guard let meeting = try? db.fetchMeeting(id: meetingID) else { return .nothingToEnhance }
         let segments = (try? db.fetchSegments(meetingID: meetingID, finalOnly: true)) ?? []
         let hasNotes = !meeting.notesMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -225,6 +294,7 @@ final class MeetingProcessor {
             raw = try await LLMService.generate(providerID: providerID, prompt: prompt)
         } catch {
             let message = Self.enhancementFailureMessage(error)
+            enhanceErrors[meetingID] = message
             host.reportError(message)
             return .failed(message)
         }

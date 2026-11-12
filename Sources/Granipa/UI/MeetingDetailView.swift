@@ -142,6 +142,7 @@ struct MeetingDetailView: View {
                         loadPhase: transcript.phase,
                         live: liveTranscription,
                         isProcessing: isPostStopProcessing,
+                        processingStage: app.processingStage(for: meeting.id),
                         playback: playback,
                         autoscroll: $autoscroll,
                         selectedID: $selectedSegmentID,

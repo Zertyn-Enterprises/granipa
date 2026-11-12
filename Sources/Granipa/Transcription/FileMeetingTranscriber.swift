@@ -67,6 +67,7 @@ enum FileMeetingTranscriber {
         meetingID: String,
         language: String,
         database: AppDatabase,
+        onChannel: @Sendable (AudioChannel) async -> Void = { _ in },
         boundary: Boundary = .live
     ) async -> Outcome {
         let localeIDs = LanguageDetection.fileProbeLocales(
@@ -92,6 +93,7 @@ enum FileMeetingTranscriber {
         var failedChannels: [AudioChannel] = []
         for (url, channel) in [(micURL, AudioChannel.mic), (systemURL, AudioChannel.system)] {
             guard hasAudioToTranscribe(at: url) else { continue }
+            await onChannel(channel)
             do {
                 try await boundary.analyzeChannel(
                     ChannelAnalysis(

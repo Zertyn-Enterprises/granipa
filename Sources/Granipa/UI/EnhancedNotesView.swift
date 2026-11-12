@@ -85,9 +85,17 @@ struct EnhancedNotesView: View {
                     Text("No enhanced notes yet")
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(Theme.textSecondary)
-                    Text("Enhancement runs automatically when a recording ends.")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Theme.textTertiary)
+                    if let error = app.enhancementError(for: meetingID) {
+                        Text(error)
+                            .font(.system(size: 13))
+                            .foregroundStyle(Theme.statusFailed)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: 420)
+                    } else {
+                        Text("Enhancement runs automatically when a recording ends.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Theme.textTertiary)
+                    }
                     enhanceButton(title: "Enhance now")
                         .padding(.top, 6)
                 }

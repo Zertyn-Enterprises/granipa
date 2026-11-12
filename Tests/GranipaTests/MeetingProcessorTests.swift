@@ -73,4 +73,26 @@ import Testing
         release.finish()
         await job.value
     }
+
+    @Test(arguments: [
+        (FileMeetingTranscriber.Outcome?.some(.failed(.modelInstall(localeID: "en-US"))),
+         MeetingProcessor.EnhanceOutcome.ran, "Transcription failed"),
+        (.completed(localeID: "en-US"), .ran, "Notes ready"),
+        (nil, .ran, "Notes ready"),
+        (.completed(localeID: "en-US"), .failed("CLI missing"), "Notes not written"),
+        (.completed(localeID: "en-US"), .nothingToEnhance, "Recording processed"),
+    ])
+    func completionNoticeNamesTheOutcome(
+        _ transcription: FileMeetingTranscriber.Outcome?,
+        _ enhancement: MeetingProcessor.EnhanceOutcome,
+        _ expectedTitle: String
+    ) {
+        let notice = MeetingProcessor.completionNotice(
+            title: "Standup", transcription: transcription, enhancement: enhancement)
+        #expect(notice.title == expectedTitle)
+        #expect(notice.body.hasPrefix("Standup"))
+        if case .failed(let message) = enhancement {
+            #expect(notice.body.contains(message))
+        }
+    }
 }

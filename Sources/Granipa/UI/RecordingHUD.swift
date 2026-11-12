@@ -21,6 +21,11 @@ struct RecordingHUD: View {
         }
     }
 
+    private var processingStageTitle: String {
+        app.processingMeetingID.flatMap { app.processingStage(for: $0)?.title }
+            ?? "Processing notes…"
+    }
+
     var body: some View {
         Group {
             if app.recorder.isRecording {
@@ -34,7 +39,7 @@ struct RecordingHUD: View {
                     Image(systemName: "gearshape.2")
                         .foregroundStyle(Theme.statusProcessing)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Processing notes…")
+                        Text(processingStageTitle)
                             .font(Theme.fontBody.weight(.semibold))
                             .foregroundStyle(Theme.textPrimary)
                         Text(title)

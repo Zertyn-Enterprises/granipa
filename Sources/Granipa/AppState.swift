@@ -35,6 +35,14 @@ final class AppState {
     var processingMeetingID: String? { processor?.processingMeetingID }
     var enhancingMeetingIDs: Set<String> { processor?.enhancingMeetingIDs ?? [] }
 
+    func processingStage(for meetingID: String) -> MeetingProcessor.Stage? {
+        processingMeetingID == meetingID ? processor?.stage : nil
+    }
+
+    func enhancementError(for meetingID: String) -> String? {
+        processor?.enhanceErrors[meetingID]
+    }
+
     var selectedMeeting: Meeting? {
         guard let id = selectedMeetingID else { return nil }
         return meetings.first { $0.id == id }
@@ -44,7 +52,9 @@ final class AppState {
         MeetingPipeline.phase(
             status: meeting.status,
             isRecording: recorder.isRecording && recorder.meetingID == meeting.id,
-            transcriptionPhase: recorder.meetingID == meeting.id ? transcription?.phase : nil,
+            // Keyed on the coordinator: it outlives the recorder's meeting
+            // while it drains after Stop (`.finishing`).
+            transcriptionPhase: transcription?.meetingID == meeting.id ? transcription?.phase : nil,
             isEnhancing: enhancingMeetingIDs.contains(meeting.id))
     }
 
