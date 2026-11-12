@@ -36,8 +36,11 @@ Native macOS (26+) SwiftUI meeting recorder/transcriber. SPM executable targets
 - `Calendar/`, `Detection/` — EventKit upcoming meetings; CoreAudio process list
   polling to detect meeting apps using the mic.
 - `Storage/AppDatabase.swift` — GRDB, append-only migrations (v1..v8).
-- `AppState.swift` — MainActor orchestrator: record -> transcribe -> postProcess
-  (diarize -> enhance -> webhooks).
+- `AppState.swift` — MainActor orchestrator: recording, the meeting list, and
+  thin entry points (stop, enhance, transcribe again, launch recovery) that
+  forward to `MeetingProcessor.swift`, which runs one job at a time:
+  transcript (from the files, or the live coordinator) -> diarize -> enhance ->
+  ready + webhooks.
 - `UI/` — V2 shell: `MainWindow`, `HomeView` (All/Notes/Recordings filters),
   Dictation library, meeting detail/live, in-app `SettingsView`, `Theme`.
   Sidebar destinations are Home and Dictation only.
