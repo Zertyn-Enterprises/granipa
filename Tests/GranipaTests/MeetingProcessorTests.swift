@@ -94,4 +94,38 @@ import Testing
             #expect(notice.body.contains(message))
         }
     }
+
+    @Test(arguments: [
+        (MeetingStatus.processing, true, false, MeetingReprocessing.LaunchAction.reprocess),
+        (.processing, true, true, .markReady),
+        (.processing, false, false, .markReady),
+        (.recording, true, false, .markReady),
+        (.ready, true, true, .keep),
+    ])
+    func launchRecoveryRerunsAnInterruptedMeetingOnce(
+        _ status: MeetingStatus, _ hasAudio: Bool, _ attemptUnfinished: Bool,
+        _ expected: MeetingReprocessing.LaunchAction
+    ) {
+        #expect(
+            MeetingReprocessing.launchAction(
+                status: status, hasAudio: hasAudio, attemptUnfinished: attemptUnfinished)
+                == expected)
+    }
+
+    @Test(arguments: [
+        (MeetingStatus.ready, false, false, true, true),
+        (.processing, false, false, true, false),
+        (.ready, true, false, true, false),
+        (.ready, false, true, true, false),
+        (.ready, false, false, false, false),
+    ])
+    func transcribeAgainNeedsAnIdleMeetingWithAudio(
+        _ status: MeetingStatus, _ isRecording: Bool, _ isEnhancing: Bool, _ hasAudio: Bool,
+        _ expected: Bool
+    ) {
+        #expect(
+            MeetingReprocessing.canTranscribeAgain(
+                status: status, isRecording: isRecording, isEnhancing: isEnhancing,
+                hasAudio: hasAudio) == expected)
+    }
 }

@@ -356,3 +356,49 @@ final class MeetingProcessor {
     }
 }
 
+/// When a meeting may go through the pipeline again from its saved audio.
+enum MeetingReprocessing {
+    enum LaunchAction: Equatable {
+        case keep
+        case reprocess
+        case markReady
+    }
+
+    /// A meeting left processing goes back through the pipeline once. One
+    /// whose previous re-run never finished (it may have crashed or hung the
+    /// app) becomes ready instead, as does one without audio or one left
+    /// recording; Transcribe again stays available for them.
+    static func launchAction(
+        status: MeetingStatus, hasAudio: Bool, attemptUnfinished: Bool
+    ) -> LaunchAction {
+        switch status {
+        case .ready: .keep
+        case .recording: .markReady
+        case .processing: hasAudio && !attemptUnfinished ? .reprocess : .markReady
+        }
+    }
+
+    static func canTranscribeAgain(
+        status: MeetingStatus, isRecording: Bool, isEnhancing: Bool, hasAudio: Bool
+    ) -> Bool {
+        status == .ready && !isRecording && !isEnhancing && hasAudio
+    }
+
+    private static let attemptsKey = "recoveryAttemptMeetingIDs"
+
+    static func unfinishedAttempts(_ defaults: UserDefaults = .standard) -> Set<String> {
+        Set(defaults.stringArray(forKey: attemptsKey) ?? [])
+    }
+
+    static func forgetAttempts(_ defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: attemptsKey)
+    }
+
+    static func recordAttempt(
+        meetingID: String, unfinished: Bool, _ defaults: UserDefaults = .standard
+    ) {
+        var ids = unfinishedAttempts(defaults)
+        if unfinished { ids.insert(meetingID) } else { ids.remove(meetingID) }
+        defaults.set(Array(ids).sorted(), forKey: attemptsKey)
+    }
+}

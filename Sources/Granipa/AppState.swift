@@ -80,23 +80,35 @@ final class AppState {
         _ = UpdaterManager.shared
     }
 
-    /// A quit or crash mid-recording leaves nothing to resume, so that meeting
-    /// just becomes ready. One stopped mid-processing still has its audio and
-    /// goes back through the pipeline, one at a time, once launch is done.
+    /// Meetings a quit or crash left recording or processing: see
+    /// `MeetingReprocessing.launchAction`. Re-runs go through the pipeline one
+    /// at a time once launch is done.
     private func recoverInterruptedMeetings(database db: AppDatabase) {
+        let unfinished = MeetingReprocessing.unfinishedAttempts()
+        MeetingReprocessing.forgetAttempts()
         var interrupted: [String] = []
-        for index in meetings.indices where meetings[index].status != .ready {
-            if meetings[index].status == .processing, recordedAudio(of: meetings[index]) != nil {
-                interrupted.append(meetings[index].id)
+        for index in meetings.indices {
+            let meeting = meetings[index]
+            switch MeetingReprocessing.launchAction(
+                status: meeting.status,
+                hasAudio: recordedAudio(of: meeting) != nil,
+                attemptUnfinished: unfinished.contains(meeting.id))
+            {
+            case .keep:
                 continue
+            case .reprocess:
+                interrupted.append(meeting.id)
+            case .markReady:
+                meetings[index].status = .ready
+                try? db.save(meetings[index])
             }
-            meetings[index].status = .ready
-            try? db.save(meetings[index])
         }
         guard !interrupted.isEmpty else { return }
         Task { [weak self] in
             for id in interrupted {
+                MeetingReprocessing.recordAttempt(meetingID: id, unfinished: true)
                 await self?.reprocessFromAudio(meetingID: id)
+                MeetingReprocessing.recordAttempt(meetingID: id, unfinished: false)
             }
         }
     }
@@ -561,8 +573,11 @@ final class AppState {
     }
 
     func canTranscribeAgain(_ meeting: Meeting) -> Bool {
-        meeting.status == .ready && recorder.meetingID != meeting.id
-            && !enhancingMeetingIDs.contains(meeting.id) && recordedAudio(of: meeting) != nil
+        MeetingReprocessing.canTranscribeAgain(
+            status: meeting.status,
+            isRecording: recorder.meetingID == meeting.id,
+            isEnhancing: enhancingMeetingIDs.contains(meeting.id),
+            hasAudio: recordedAudio(of: meeting) != nil)
     }
 
     /// Replaces the transcript with a fresh one from the saved audio, then
