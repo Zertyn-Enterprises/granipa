@@ -96,9 +96,13 @@ final class MuseDictationEngine: Sendable {
                 try await socket.send(.data(pcm))
             }
             try await socket.send(.string(#"{"type":"endStream"}"#))
-            try await withTimeout(seconds: 8) {
-                try await receiver.value
-            }
+            try await AsyncDeadline.wait(
+                seconds: 8,
+                onTimeout: {
+                    receiver.cancel()
+                    socket.cancel(with: .goingAway, reason: nil)
+                },
+                operation: { try await receiver.value })
         } catch is CancellationError {
             receiver.cancel()
             socket.cancel(with: .goingAway, reason: nil)
@@ -127,23 +131,6 @@ final class MuseDictationEngine: Sendable {
             return String(data: data, encoding: .utf8) ?? ""
         @unknown default:
             return ""
-        }
-    }
-
-    private func withTimeout(seconds: Double, operation: @escaping @Sendable () async throws -> Void)
-        async throws
-    {
-        try await withThrowingTaskGroup(of: Bool.self) { group in
-            group.addTask {
-                try await operation()
-                return true
-            }
-            group.addTask {
-                try await Task.sleep(for: .seconds(seconds))
-                return false
-            }
-            _ = try await group.next()
-            group.cancelAll()
         }
     }
 }

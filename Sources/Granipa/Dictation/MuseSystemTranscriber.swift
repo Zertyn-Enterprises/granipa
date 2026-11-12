@@ -169,9 +169,13 @@ private actor Session {
         guard let socket, !dead else { return }
         try? await socket.send(.string(#"{"type":"endStream"}"#))
         if let drain = drainTask {
-            _ = try? await Self.withTimeout(seconds: 12) {
-                _ = await drain.value
-            }
+            _ = try? await AsyncDeadline.wait(
+                seconds: 12,
+                onTimeout: {
+                    drain.cancel()
+                    socket.cancel(with: .goingAway, reason: nil)
+                },
+                operation: { await drain.value })
         }
         socket.cancel(with: .normalClosure, reason: nil)
         self.socket = nil
@@ -280,23 +284,6 @@ private actor Session {
         dead = true
         drainTask?.cancel()
         socket?.cancel(with: .goingAway, reason: nil)
-    }
-
-    private static func withTimeout(
-        seconds: Double, operation: @escaping @Sendable () async throws -> Void
-    ) async throws {
-        try await withThrowingTaskGroup(of: Bool.self) { group in
-            group.addTask {
-                try await operation()
-                return true
-            }
-            group.addTask {
-                try await Task.sleep(for: .seconds(seconds))
-                return false
-            }
-            _ = try await group.next()
-            group.cancelAll()
-        }
     }
 }
 

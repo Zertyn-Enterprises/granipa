@@ -47,6 +47,18 @@ import Testing
         #expect(DictationTrigger.actionOnRelease(press: 10.0, release: 9.5) == .keepAsToggle)
     }
 
+    @Test func deadlineReturnsEvenWhenTheOperationIgnoresCancellation() async throws {
+        let started = ContinuousClock.now
+        let finished = try await AsyncDeadline.wait(seconds: 0.2, onTimeout: {}) {
+            await withCheckedContinuation { continuation in
+                DispatchQueue.global().asyncAfter(deadline: .now() + 3) { continuation.resume() }
+            }
+        }
+        #expect(!finished)
+        #expect(ContinuousClock.now - started < .seconds(1))
+        #expect(try await AsyncDeadline.wait(seconds: 5, onTimeout: {}) {})
+    }
+
     @Test func museParsesHandshakeWithoutType() {
         let event = MuseEventParser.parse(#"{"sessionId":"abc-123"}"#)
         #expect(event == .handshake(sessionID: "abc-123"))

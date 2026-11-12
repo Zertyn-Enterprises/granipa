@@ -329,24 +329,24 @@ final class DictationController {
             return
         }
         phase = .processing
+        let generation = sessionGeneration
         if presentsChrome {
             DictationOverlayController.shared.setClickThrough(true)
         }
-        unregisterEscape()
         chunkContinuation?.finish()
         chunkContinuation = nil
         mic?.stop()
         mic = nil
         await transcribeTask?.value
-        if phase == .processing {
+        if phase == .processing, generation == sessionGeneration {
             resetToIdle()
         }
     }
 
     private func finish(text: String) async {
         let trimmed = DictationText.resolved(finals: text, partial: preview)
+        let generation = sessionGeneration
         finishMic()
-        unregisterEscape()
         guard !trimmed.isEmpty else {
             if !reachedListening {
                 resetToIdle()
@@ -357,6 +357,9 @@ final class DictationController {
         }
         preview = trimmed
         let rewritten = await rewriteIfNeeded(trimmed)
+        // Esc during the rewrite cancelled the session: nothing to paste.
+        guard generation == sessionGeneration else { return }
+        unregisterEscape()
         if shouldPaste {
             paste(rewritten)
         }
@@ -379,7 +382,9 @@ final class DictationController {
         do {
             return try await RewriteClient.rewrite(text)
         } catch {
-            ToastController.shared.show(error.localizedDescription, style: .warning)
+            if !Task.isCancelled {
+                ToastController.shared.show(error.localizedDescription, style: .warning)
+            }
             return text
         }
     }
