@@ -22,7 +22,16 @@ enum WebhookService {
         try? database.enqueueDeliveries(event: event, payload: String(decoding: data, as: UTF8.self))
     }
 
+    private static let deliveries = SingleFlight()
+
+    /// Single-flight: the 30 s loop and the post-meeting triggers overlap,
+    /// and a second pass reading the queue while the first awaits the network
+    /// would send the same delivery twice.
     static func deliverDue(database: AppDatabase) async {
+        await deliveries.run { await deliverDuePass(database: database) }
+    }
+
+    private static func deliverDuePass(database: AppDatabase) async {
         guard let due = try? database.dueDeliveries() else { return }
         for (delivery, webhook) in due {
             var updated = delivery
@@ -60,6 +69,27 @@ enum WebhookService {
             return false
         }
         return (200..<300).contains(http.statusCode)
+    }
+}
+
+/// Runs one pass at a time. A request made while a pass runs causes exactly
+/// one more pass of the running caller's work once it ends (requests made in
+/// the meantime coalesce) and returns at once.
+actor SingleFlight {
+    private var running = false
+    private var requestedAgain = false
+
+    func run(_ pass: @Sendable () async -> Void) async {
+        guard !running else {
+            requestedAgain = true
+            return
+        }
+        running = true
+        repeat {
+            requestedAgain = false
+            await pass()
+        } while requestedAgain
+        running = false
     }
 }
 
