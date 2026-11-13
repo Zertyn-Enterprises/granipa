@@ -5,8 +5,6 @@ enum MeetingWaveform {
     static let barCount = 128
     static let windowFrames: AVAudioFrameCount = 2_048
 
-    /// Peak envelope sampled in a bounded number of windows. Returns nil when
-    /// the file is missing, unreadable, or empty — callers show a plain slider.
     /// Bars spread across each file's own length, and a track can end early
     /// (system audio stops before the meeting does), so each track is mapped
     /// onto the longest track's timeline; the louder bar is what was heard.
@@ -30,6 +28,8 @@ enum MeetingWaveform {
         return Double(file.length) / file.fileFormat.sampleRate
     }
 
+    /// Peak envelope sampled in a bounded number of windows. Returns nil when
+    /// the file is missing, unreadable, or empty — callers show a plain slider.
     static func decode(url: URL, barCount: Int = barCount) -> [Float]? {
         let bars = max(1, barCount)
         var isDirectory: ObjCBool = false

@@ -54,10 +54,10 @@ and enhancement all ran at user-interactive priority.
 
 ## Changes
 
-- `AppState.stopRecording` hands the pipeline (`finishMeeting`) to an
-  unawaited `Task.detached(priority: .utility)`; callers keep their
-  signature and `processingMeetingID` still marks the meeting until the
-  pipeline ends. File ASR keeps its own utility detached task.
+- `AppState.stopRecording` hands the pipeline (`MeetingProcessor.process`)
+  to an unawaited `Task(priority: .utility)`; callers keep their signature
+  and `processingMeetingID` still marks the meeting until the pipeline ends.
+  File ASR keeps its own utility detached task.
 - `TranscriptionDelivery.batch` (finals only, `.utility`) for the locale
   probes: no volatile decoding, ~10% less recognizer CPU and 40% less wall per
   probe.
