@@ -21,8 +21,7 @@ enum EchoBleedFilter {
     /// Below this share of mic words the meeting most likely had no speaker
     /// bleed (headphones), and exact repeats are the user's own read-backs.
     static let minimumBleedShare = 0.25
-    /// One file per rewriting pass (a meeting can be recorded again), so
-    /// every pre-filter version survives.
+    /// One file per rewriting pass, so every pre-filter version survives.
     static func backupFileName(meetingID: String, date: Date = .now) -> String {
         "\(meetingID)-mic-before-bleed-filter-\(Int(date.timeIntervalSince1970 * 1000)).json"
     }
@@ -48,7 +47,11 @@ enum EchoBleedFilter {
         guard cleaned != mic else { return false }
         let backup = backupDirectory.appendingPathComponent(backupFileName(meetingID: meetingID))
         try JSONEncoder().encode(mic).write(to: backup, options: .atomic)
-        try database.replaceSegments(ids: mic.map(\.id), with: cleaned)
+        guard try database.replaceSegments(mic, with: cleaned) else {
+            // Another pass or an edit changed these rows since the fetch.
+            try? FileManager.default.removeItem(at: backup)
+            return false
+        }
         return true
     }
 

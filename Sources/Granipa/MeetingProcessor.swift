@@ -289,8 +289,9 @@ final class MeetingProcessor {
         }
     }
 
-    /// The cleanup replaces the whole mic channel, so it would delete finals
-    /// saved after its fetch; until the pipeline settles the meeting, skip it.
+    /// While recording or processing, finals are still being saved and the
+    /// pipeline rewrites the transcript itself; until it settles the meeting,
+    /// a manual cleanup is skipped.
     nonisolated static func canRewriteTranscript(status: MeetingStatus?) -> Bool {
         status == .ready
     }
@@ -328,19 +329,28 @@ final class MeetingProcessor {
     /// before the filter existed get it too; once cleaned it is a no-op.
     func regenerateNotes(meetingID: String) async -> EnhanceOutcome {
         guard jobs[meetingID] == nil, enhanceTasks[meetingID] == nil else { return .alreadyRunning }
-        if Self.canRewriteTranscript(status: try? database.fetchMeeting(id: meetingID)?.status) {
-            // Explicit request: meetings without word timings get the coarse matcher.
-            await cleanSpeakerBleed(meetingID: meetingID, allowCoarseTiming: true)
-        }
-        return await enhance(meetingID: meetingID)
+        return await runEnhance(meetingID: meetingID, cleaningBleed: true)
     }
 
-    private func runEnhance(meetingID: String) async -> EnhanceOutcome {
-        let task = Task { await generateNotes(meetingID: meetingID) }
+    /// Reserves the meeting (enhanceTasks, enhancingMeetingIDs) before its
+    /// first suspension, so a second request, Transcribe again or the
+    /// pipeline sees it busy from the start.
+    private func runEnhance(meetingID: String, cleaningBleed: Bool = false) async -> EnhanceOutcome {
+        enhancingMeetingIDs.insert(meetingID)
+        let task = Task {
+            if cleaningBleed,
+                Self.canRewriteTranscript(status: try? database.fetchMeeting(id: meetingID)?.status)
+            {
+                // Explicit request: meetings without word timings get the coarse matcher.
+                await cleanSpeakerBleed(meetingID: meetingID, allowCoarseTiming: true)
+            }
+            return await generateNotes(meetingID: meetingID)
+        }
         enhanceTasks[meetingID] = task
         let outcome = await task.value
         if enhanceTasks[meetingID] == task {
             enhanceTasks[meetingID] = nil
+            enhancingMeetingIDs.remove(meetingID)
         }
         return outcome
     }
@@ -352,9 +362,6 @@ final class MeetingProcessor {
         let segments = (try? db.fetchSegments(meetingID: meetingID, finalOnly: true)) ?? []
         let hasNotes = !meeting.notesMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         guard !segments.isEmpty || hasNotes else { return .nothingToEnhance }
-
-        enhancingMeetingIDs.insert(meetingID)
-        defer { enhancingMeetingIDs.remove(meetingID) }
 
         let template =
             meeting.templateID.flatMap { try? db.fetchTemplate(id: $0) }

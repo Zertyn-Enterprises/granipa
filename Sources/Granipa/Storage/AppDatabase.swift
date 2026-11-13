@@ -524,13 +524,24 @@ extension AppDatabase {
     }
 
     /// Replaces exactly the given segments, so rows saved after the caller
-    /// fetched them (e.g. a recording that started meanwhile) survive.
-    func replaceSegments(ids: [String], with segments: [TranscriptSegment]) throws {
+    /// fetched them (e.g. a recording that started meanwhile) survive. Does
+    /// nothing and returns false when any of them was deleted or edited since
+    /// (another rewrite, a speaker rename): a stale snapshot written back
+    /// would duplicate or revert those rows.
+    @discardableResult
+    func replaceSegments(
+        _ originals: [TranscriptSegment], with segments: [TranscriptSegment]
+    ) throws -> Bool {
         try writer.write { db in
-            _ = try TranscriptSegment.deleteAll(db, keys: ids)
+            let current = try TranscriptSegment.fetchAll(db, keys: originals.map(\.id))
+            guard Set(current) == Set(originals), current.count == originals.count else {
+                return false
+            }
+            _ = try TranscriptSegment.deleteAll(db, keys: originals.map(\.id))
             for segment in segments {
                 try segment.save(db)
             }
+            return true
         }
     }
 }

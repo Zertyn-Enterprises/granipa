@@ -114,9 +114,35 @@ import Testing
 
         var cleaned = fetched
         cleaned.text = "cleaned"
-        try db.replaceSegments(ids: [fetched.id], with: [cleaned])
+        try db.replaceSegments([fetched], with: [cleaned])
 
         let all = try db.fetchSegments(meetingID: meeting.id)
         #expect(all.map(\.text) == ["cleaned", "arrived later"])
+    }
+
+    @Test func aStaleRewriteNeitherDuplicatesNorRevertsSegments() throws {
+        let db = try makeDatabase()
+        let meeting = Meeting.new(title: "Test", language: "en-US")
+        try db.save(meeting)
+        func mic(_ text: String) -> TranscriptSegment {
+            TranscriptSegment.new(
+                meetingID: meeting.id, channel: .mic, speaker: "Me",
+                text: text, startSeconds: 0, endSeconds: 1, isFinal: true)
+        }
+        let original = mic("hola qué tal")
+        try db.save(original)
+        let snapshot = try db.fetchSegments(meetingID: meeting.id)
+
+        // Two passes read the same rows; each writes pieces under new IDs.
+        let first = mic("hola")
+        #expect(try db.replaceSegments(snapshot, with: [first]))
+        #expect(try !db.replaceSegments(snapshot, with: [mic("hola")]))
+        #expect(try db.fetchSegments(meetingID: meeting.id) == [first])
+
+        // A rename after the fetch must not be written back over.
+        let renamedSnapshot = try db.fetchSegments(meetingID: meeting.id)
+        try db.renameSpeaker(meetingID: meeting.id, from: "Me", to: "Ana")
+        #expect(try !db.replaceSegments(renamedSnapshot, with: [mic("hola")]))
+        #expect(try db.fetchSegments(meetingID: meeting.id).map(\.speaker) == ["Ana"])
     }
 }
