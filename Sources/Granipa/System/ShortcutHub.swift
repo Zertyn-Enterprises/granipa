@@ -28,7 +28,8 @@ final class ShortcutHub {
             }
         }
 
-        if let hyperCode = WindowHyperKey.current.keyCode {
+        let hyper = WindowHyperKey.current
+        if let hyperCode = hyper.tapKeyCode {
             if !PasteService.isTrusted {
                 PasteService.requestTrust()
             }
@@ -37,10 +38,13 @@ final class ShortcutHub {
             ) { id in
                 Self.dispatch(id)
             }
+            // Without a running tap, F18 would leave Caps Lock dead.
+            CapsLockRemap.apply(enabled: hyper == .capsLock && started)
             // Without Accessibility there is no tap; the Carbon chords below
             // need no permission, so shortcuts keep working until it is granted.
             if started { return }
         }
+        CapsLockRemap.apply(enabled: false)
 
         for extra in ExtraShortcut.allCases {
             HotkeyManager.shared.register(

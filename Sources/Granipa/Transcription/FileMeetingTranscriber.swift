@@ -188,7 +188,8 @@ enum FileMeetingTranscriber {
         try await transcribeChannel(
             channel: .mic,
             locale: Locale(identifier: localeID),
-            chunks: stream
+            chunks: stream,
+            delivery: .batch
         ) { update in
             accumulator.withLock {
                 $0.register(
@@ -249,7 +250,8 @@ enum FileMeetingTranscriber {
                 text: text,
                 startSeconds: start.isFinite ? start : 0,
                 endSeconds: end.isFinite ? end : (start.isFinite ? start : 0),
-                isFinal: true)
+                isFinal: true,
+                words: TranscriptWords.from(result.text))
             segments.append(segment)
         }
         return segments

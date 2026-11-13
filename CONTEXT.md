@@ -8,7 +8,7 @@ Native macOS 26+ (Apple Silicon) meeting recorder and notes app. No bot joins
 the call. Mic + system audio, on-device live transcription, speaker diarization,
 AI-enhanced notes via the user's existing CLI subscriptions (claude / codex /
 gemini / grok — no API keys). Also: hold-to-talk dictation, clipboard history,
-OCR, window snapping, optional battery charge limit.
+OCR, window snapping and app-window grid tiling.
 
 Local by default. Optional cloud: Muse (system-channel ASR only), dictation
 text rewrite (SpaceXAI or a custom OpenAI-compatible URL).
@@ -19,7 +19,7 @@ Bundle id `com.zertyn.granipa`. Data:
 ## Stack
 
 Swift 6 · SwiftUI · SwiftPM (no Xcode project) · GRDB · FluidAudio 0.15.2 ·
-Sparkle 2.7+ · two executables: `Granipa` and `GranipaBatteryHelper`.
+Sparkle 2.7+ · executable `Granipa` plus the no-op stub `GranipaBatteryHelper`.
 Bundled by `Scripts/bundle.sh` into `build/Grañipa.app`.
 
 ## Where it lives
@@ -35,10 +35,10 @@ Verified this session against git, GitHub, `Info.plist`, and source.
 
 | Surface | What is actually there |
 |---|---|
-| `main` / `origin/main` | `bd05f9d` — v1.0.4 (2026-06-19). This is what `git clone` and the GitHub homepage show. |
+| `main` / `origin/main` | V2 landed by #27 (`2264605`), then audit PRs #36–#48. No longer v1.0.4. |
 | `feat/granipa-v2` | `5505ee3`, **already pushed**. 145 commits ahead of `main`. Source version **2.0.1**, Sparkle build **8**. |
 | GitHub Release Latest | **v2.0.0** (build 6), published 2026-09-06. Zip + `appcast.xml`. Tag `v2.0.0` = `337d0f4`, not the branch tip. |
-| PR V2 → `main` | [#27](https://github.com/Zertyn-Enterprises/granipa/pull/27) open (hold). Do not merge from an agent. |
+| PR V2 → `main` | [#27](https://github.com/Zertyn-Enterprises/granipa/pull/27) merged; V2 PRs #28–#35 were not in it. `fix/reconcile-v2` merges them into `main`. |
 | PR #25 | `chore/optimize-2026-09-04` → `main`. Open. That commit **is** an ancestor of `feat/granipa-v2`. |
 | PR #26 | `perf/post-recording-cpu` → `feat/granipa-v2`. Open, **not** in the V2 tip. |
 
@@ -59,17 +59,49 @@ The updates **were pushed**. They were not merged to the default branch.
 
 Do not treat "no commits on `main` since June" as "V2 never left this Mac".
 
-### Helper / battery (not done)
+### Battery control removed (2026-10-05)
 
-Build 8 was notarized after explicit approval (submission
-`89606c75-71ac-4f9a-81bf-85d30b9c31aa`) and was **not** installed over
-build 7. Helper launch on the development Mac was still `EX_CONFIG` (78) /
-`needs LWCR update`. That is an OS launch-constraint failure, not a
-verified app-logic miss. Do not publish 2.0.1 as a helper fix.
+The root helper never launched (`EX_CONFIG` 78 / `needs LWCR update`), and on
+macOS 27 the SMC charge keys are gone (`CHTE`/`CH0B`/`CH0C` not found on a
+Mac16,12) while their replacements (`bfD0`/`bfE0`/`bfF0`) return
+`kIOReturnNotPrivileged`. macOS has a native charge limit (80–100%,
+System Settings → Battery). The user chose to drop battery control from
+Grañipa. `LegacyBatteryHelper` unregisters a daemon left by 2.0.0/2.0.1
+builds; the plist and stub must keep shipping until no such installs remain.
 
-Last recorded suite (2026-09-06, not re-run this session): 465 tests /
-77 suites, `swift test --no-parallel`. 53 test files are in
-`Tests/GranipaTests/` on this branch.
+### Meeting audio, notes and shortcuts (2026-10-16, stacked hold PRs)
+
+Stack on `feat/granipa-v2`: #28 windows → #29 battery → `fix/v2-dictation-mic`
+→ `fix/v2-macro-hold` → `fix/v2-meeting-mic-file` → `feat/v2-meeting-voice`
+(this branch also carries #26's two commits).
+
+- Meetings since 2026-09-28 had a 557-byte `mic.m4a` (a late tap buffer
+  reopened the file after stop); fixed, so "Me" is transcribed again.
+- Meetings record the mic without echo cancellation. After a meeting,
+  `EchoBleedFilter` removes "Me" words the system channel said at the same
+  time, using recognizer word timings (migration `v9`,
+  `transcriptSegment.words`). Each rewrite is backed up to
+  `transcript-backups/` and deleted with its meeting. Live-ASR finals carry no
+  word timings yet, so the automatic pass skips them.
+- Playback plays mic + system together by default (Both / Mic / System).
+- AI notes address the user ("Me") in the second person; the email draft is
+  first person. Re-enhance cleans bleed first.
+- Grok runs `grok-4.7-build-fast --reasoning-effort low` (~2 min on a 50-min
+  meeting; the CLI default hit the 600 s timeout).
+- Caps Lock macro works while held (HID remap to F18, owned and removed by
+  Grañipa); the dictation failure overlay can be dismissed.
+
+- Single taps that "didn't catch that": the user's Right ⌘ taps last
+  0.40–0.60 s (logs), over the 0.22 s tap threshold, so they stopped as
+  holds before anything was heard. A release under 1.5 s with nothing
+  recognized now keeps listening (`fix/v2-dictation-tap`).
+
+Open: holds of 2.2 s and 6.5 s with AirPods also ended empty on 2026-10-16;
+not known whether the user spoke. Live transcription on one mixed stream is
+not started (CPU to be measured first).
+
+Last recorded suite (2026-11-13, `fix/reconcile-v2`): 520 tests / 83 suites,
+`swift test --no-parallel`. 56 test files are in `Tests/GranipaTests/`.
 
 ## Open decisions
 
@@ -83,13 +115,12 @@ Still human one-way doors (plan + T0 contract). Not implemented as if decided:
 - Participants / contacts.
 - Accuracy substitute (omit vs real metric). Light appearance (app forces dark).
 - Tags, standalone tasks, collections tables (T7 postponed 2026-09-05).
-- Merge `feat/granipa-v2` to `main`.
-- Publish 2.0.1 (blocked on helper + safe install of build 8).
+- Merge `fix/reconcile-v2` (V2 PRs #28–#35 reconciled with `main`) to `main`.
+- Publish 2.0.1 (the helper blocker went away with battery control).
 
 ## Next
 
-1. Human merges [#27](https://github.com/Zertyn-Enterprises/granipa/pull/27) (or sets the default branch). Until then clones stay on 1.0.4.
-2. Decide PR #26 (post-recording CPU) into `feat/granipa-v2` before or after that merge.
-3. Helper LWCR / build-8 install remains a machine-local gate, not a docs gate.
-4. Replace `docs/home.png` with a V2 shot when one exists.
-5. Panel xreview 2026-09-19 vs `main`: Claude ISSUES + GLM ISSUES (listed on #27). Codex/Kimi did not run. Not fixed in the docs commit.
+1. Merge `fix/reconcile-v2` into `main`.
+2. Remove the legacy helper plist and stub once no 2.0.0/2.0.1 installs can hold a registration.
+3. Replace `docs/home.png` with a V2 shot when one exists.
+4. Panel xreview 2026-09-19 vs `main`: Claude ISSUES + GLM ISSUES (listed on #27). Codex/Kimi did not run. Not fixed in the docs commit.

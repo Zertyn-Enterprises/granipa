@@ -1,8 +1,8 @@
 # Grañipa — agent notes
 
-Native macOS (26+) SwiftUI meeting recorder/transcriber. SPM executable targets
-`Granipa` and `GranipaBatteryHelper`, bundled into `build/Grañipa.app` by
-`Scripts/bundle.sh`. No Xcode project. Product state: `CONTEXT.md`.
+Native macOS (26+) SwiftUI meeting recorder/transcriber. SPM executable target
+`Granipa` (plus a no-op legacy helper stub), bundled into `build/Grañipa.app` by `Scripts/bundle.sh`. No Xcode
+project. Product state: `CONTEXT.md`.
 
 ## Commands
 
@@ -38,19 +38,20 @@ Native macOS (26+) SwiftUI meeting recorder/transcriber. SPM executable targets
   retry queue.
 - `Calendar/`, `Detection/` — EventKit upcoming meetings; CoreAudio process list
   polling to detect meeting apps using the mic.
-- `Storage/AppDatabase.swift` — GRDB, append-only migrations (v1..v8).
+- `Storage/AppDatabase.swift` — GRDB, append-only migrations (v1..v9).
 - `AppState.swift` — MainActor orchestrator: recording, the meeting list, and
   thin entry points (stop, enhance, transcribe again, launch recovery) that
   forward to `MeetingProcessor.swift`, which runs one job at a time:
-  transcript (from the files, or the live coordinator) -> diarize -> enhance ->
-  ready + webhooks.
+  transcript (from the files, or the live coordinator) -> speaker-bleed
+  cleanup (`EchoBleedFilter`) -> diarize -> enhance -> ready + webhooks.
 - `UI/` — V2 shell: `MainWindow`, `HomeView` (All/Notes/Recordings filters),
   Dictation library, meeting detail/live, in-app `SettingsView`, `Theme`.
   Sidebar destinations are Home and Dictation only.
 - `System/` — hotkeys/macro key, Sparkle, permission health, window manager.
-  `BatteryService` is IOKit readout + optional SMC charge limit (opt-in).
-  Writes go through `GranipaBatteryHelper` (SMAppService daemon). Restores
-  charging on quit.
+  Battery control was removed (macOS 27 blocks the SMC charge keys; macOS
+  has a native charge limit). `LegacyBatteryHelper` unregisters the root
+  daemon earlier builds registered; its launchd plist and the no-op stub
+  `GranipaBatteryHelper` still ship for that.
 - `Fixture/` — DEBUG-only `--v2-fixture`. Refuses to open the production DB.
 
 ## Conventions

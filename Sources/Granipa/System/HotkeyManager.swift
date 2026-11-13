@@ -225,7 +225,9 @@ final class HotkeyManager: @unchecked Sendable {
             var gesture = modifierGestures[id] ?? ModifierGesture()
             let output = gesture.handle(event)
             modifierGestures[id] = gesture
-            guard let output, let handler = handlers[id] else { continue }
+            guard let output else { continue }
+            Self.log.info("modifier id=\(id) \(String(describing: output), privacy: .public) t=\(timestamp, privacy: .public)")
+            guard let handler = handlers[id] else { continue }
             switch output {
             case .press: handler.onPress(timestamp)
             case .release: handler.onRelease?(timestamp)

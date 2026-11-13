@@ -5,7 +5,7 @@ import Carbon.HIToolbox
 @MainActor
 final class WindowManager {
     static let shared = WindowManager()
-    private var lastSnap: (window: AXUIElement, frame: CGRect)?
+    private var lastSnap: [(window: AXUIElement, frame: CGRect)] = []
 
     private var isEnabled: Bool {
         UserDefaults.standard.object(forKey: "windowSnappingEnabled") as? Bool ?? true
@@ -25,26 +25,81 @@ final class WindowManager {
         guard let window = focusedWindow(), let current = frame(of: window) else { return }
 
         if action == .restore {
-            if let last = lastSnap, CFEqual(last.window, window) {
-                setFrame(last.frame, on: window)
-                lastSnap = nil
+            if lastSnap.contains(where: { CFEqual($0.window, window) }) {
+                for snap in lastSnap { setFrame(snap.frame, on: snap.window) }
+                lastSnap = []
             }
             return
         }
 
         guard let screen = visibleFrameAX(forWindowFrame: current) else { return }
-        let occupied = WindowInventory.occupiedFrames(on: screen, ignoring: current)
+        let usable = WindowLayout.usableFrame(
+            screen: screen, stageStrip: WindowInventory.stageStripSide)
+
+        if action == .tileAppWindows {
+            tileFrontmostAppWindows(on: screen, into: usable)
+            return
+        }
+
+        let occupied = WindowInventory.occupiedFrames(on: usable, ignoring: current)
         guard let target = WindowLayout.frame(
-            for: action, screen: screen, current: current, occupied: occupied)
+            for: action, screen: usable, current: current, occupied: occupied)
         else { return }
 
-        if lastSnap == nil || !CFEqual(lastSnap!.window, window) {
-            lastSnap = (window, current)
-        }
+        remember([(window, current)])
         setFrame(target, on: window)
     }
 
+    /// Grids the frontmost app's windows that sit on this screen and on the
+    /// current stage; windows parked in the Stage Manager strip stay there.
+    private func tileFrontmostAppWindows(on screen: CGRect, into usable: CGRect) {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return }
+        let onStage = WindowInventory.onscreenFrames(pid: app.processIdentifier)
+        let axApp = AXUIElementCreateApplication(app.processIdentifier)
+        var ref: CFTypeRef?
+        guard
+            AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &ref)
+                == .success,
+            let windows = ref as? [AXUIElement]
+        else { return }
+
+        let candidates: [(window: AXUIElement, frame: CGRect)] = windows.compactMap { window in
+            guard isTileable(window), let frame = frame(of: window),
+                screen.contains(CGPoint(x: frame.midX, y: frame.midY))
+            else { return nil }
+            return (window, frame)
+        }
+        let tileable = WindowLayout.claimDrawn(candidates.map(\.frame), drawn: onStage)
+            .map { candidates[$0] }
+        guard !tileable.isEmpty else { return }
+        remember(tileable)
+        let order = WindowLayout.tileOrder(tileable.map(\.frame))
+        let targets = WindowLayout.gridFrames(count: tileable.count, screen: usable)
+        for (target, index) in zip(targets, order) {
+            setFrame(target, on: tileable[index].window)
+        }
+    }
+
+    /// Windows already moved since their last restore keep their original frame.
+    private func remember(_ moved: [(window: AXUIElement, frame: CGRect)]) {
+        lastSnap = WindowLayout.remembering(moved, previous: lastSnap) {
+            CFEqual($0.window, $1.window)
+        }
+    }
+
     // MARK: - Accessibility plumbing
+
+    private func isTileable(_ window: AXUIElement) -> Bool {
+        var subrole: CFTypeRef?
+        var minimized: CFTypeRef?
+        var fullScreen: CFTypeRef?
+        AXUIElementCopyAttributeValue(window, kAXSubroleAttribute as CFString, &subrole)
+        AXUIElementCopyAttributeValue(window, kAXMinimizedAttribute as CFString, &minimized)
+        AXUIElementCopyAttributeValue(window, "AXFullScreen" as CFString, &fullScreen)
+        return subrole as? String == kAXStandardWindowSubrole as String
+            && minimized as? Bool != true
+            && fullScreen as? Bool != true
+    }
 
     private func focusedWindow() -> AXUIElement? {
         guard let app = NSWorkspace.shared.frontmostApplication else { return nil }

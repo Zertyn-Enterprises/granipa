@@ -23,26 +23,21 @@ import Testing
         #expect(!releaseExtra.contains("EmptyView()"))
     }
 
-    @Test func fixtureAppDelegateSkipsRelocatorAndBatterySingletons() throws {
+    @Test func fixtureAppDelegateSkipsRelocatorAndLegacyHelperCleanup() throws {
         let source = try granipaSource("Sources/Granipa/GranipaApp.swift")
         let launching = try #require(methodBody(source, named: "applicationDidFinishLaunching"))
-        let terminating = try #require(methodBody(source, named: "applicationWillTerminate"))
-        let becomingActive = try #require(methodBody(source, named: "applicationDidBecomeActive"))
 
-        #expect(launching.contains("V2FixtureRuntime.isActive"))
-        #expect(terminating.contains("V2FixtureRuntime.isActive"))
-        #expect(becomingActive.contains("V2FixtureRuntime.isActive"))
-
-        let relocator = try #require(launching.range(of: "AppRelocator.offerMoveIfNeeded()"))
-        let stop = try #require(terminating.range(of: "BatteryService.shared.stop()"))
-        let invalidate = try #require(
-            becomingActive.range(of: "BatteryHelperClient.shared.invalidateStatusCache()"))
         let skipLaunch = try #require(launching.range(of: "V2FixtureRuntime.isActive"))
-        let skipTerminate = try #require(terminating.range(of: "V2FixtureRuntime.isActive"))
-        let skipActive = try #require(becomingActive.range(of: "V2FixtureRuntime.isActive"))
+        let relocator = try #require(launching.range(of: "AppRelocator.offerMoveIfNeeded()"))
+        let cleanup = try #require(
+            launching.range(of: "LegacyBatteryHelper.unregisterIfRegistered()"))
         #expect(skipLaunch.lowerBound < relocator.lowerBound)
-        #expect(skipTerminate.lowerBound < stop.lowerBound)
-        #expect(skipActive.lowerBound < invalidate.lowerBound)
+        #expect(skipLaunch.lowerBound < cleanup.lowerBound)
+
+        let terminating = try #require(methodBody(source, named: "applicationWillTerminate"))
+        let skipTerminate = try #require(terminating.range(of: "V2FixtureRuntime.isActive"))
+        let remap = try #require(terminating.range(of: "CapsLockRemap.apply(enabled: false)"))
+        #expect(skipTerminate.lowerBound < remap.lowerBound)
     }
 
     @Test func fixtureCaptureStartsFailBeforeHardware() throws {

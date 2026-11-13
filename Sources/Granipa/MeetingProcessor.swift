@@ -63,25 +63,39 @@ final class MeetingProcessor {
     private(set) var stage: Stage?
     /// Last enhancement failure per meeting, kept for this session only.
     private(set) var enhanceErrors: [String: String] = [:]
+    /// Bumped when a meeting's stored transcript is rewritten outside a
+    /// status change, so an open detail view reloads it.
+    private(set) var transcriptRevisions: [String: Int] = [:]
 
     @ObservationIgnored private let database: AppDatabase
     @ObservationIgnored private let host: Host
+    /// Where the speaker-bleed cleanup saves the mic transcript it rewrites;
+    /// the argument says whether to create the directory.
+    @ObservationIgnored private let transcriptBackups: @Sendable (Bool) throws -> URL?
     @ObservationIgnored private var jobs: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var tail: Task<Void, Never>?
     @ObservationIgnored private var enhanceTasks: [String: Task<EnhanceOutcome, Never>] = [:]
 
-    init(database: AppDatabase, host: Host) {
+    init(
+        database: AppDatabase, host: Host,
+        transcriptBackups: @escaping @Sendable (Bool) throws -> URL?
+    ) {
         self.database = database
         self.host = host
+        self.transcriptBackups = transcriptBackups
     }
 
-    func process(meetingID id: String, source: Source) async {
+    /// `earlierPassIDs` are the segments the meeting had before this
+    /// recording; the speaker-bleed cleanup never compares them.
+    func process(
+        meetingID id: String, source: Source, earlierPassIDs: Set<String> = []
+    ) async {
         guard jobs[id] == nil else { return }
         let previous = tail
         let job = Task {
             await previous?.value
             guard !Task.isCancelled else { return }
-            await run(meetingID: id, source: source)
+            await run(meetingID: id, source: source, earlierPassIDs: earlierPassIDs)
         }
         jobs[id] = job
         tail = job
@@ -102,7 +116,7 @@ final class MeetingProcessor {
         return true
     }
 
-    private func run(meetingID id: String, source: Source) async {
+    private func run(meetingID id: String, source: Source, earlierPassIDs: Set<String>) async {
         processingMeetingID = id
         defer {
             if processingMeetingID == id {
@@ -115,6 +129,9 @@ final class MeetingProcessor {
         switch source {
         case .live(let drain):
             let result = await drain()
+            // The open transcript reloaded when live ASR detached; the drained
+            // tail landed afterwards.
+            transcriptRevisions[id, default: 0] += 1
             skipLocalDiarize = result.usedMuseForSystem
             transcriptionFailed = result.failure != nil
             if let failure = result.failure {
@@ -129,6 +146,8 @@ final class MeetingProcessor {
             ToastController.shared.show(
                 "Transcription failed — your audio was saved", style: .warning)
         }
+        await cleanSpeakerBleed(
+            meetingID: id, allowCoarseTiming: false, earlierPassIDs: earlierPassIDs)
         stage = .identifyingSpeakers
         await diarize(meetingID: id, skipLocalDiarize: skipLocalDiarize)
         stage = .writingNotes
@@ -152,7 +171,7 @@ final class MeetingProcessor {
     ) async -> Bool {
         stage = .transcribingAudio
         let db = database
-        let result = await Task.detached {
+        let result = await Task.detached(priority: .utility) {
             await FileMeetingTranscriber.transcribe(
                 micURL: micURL,
                 systemURL: systemURL,
@@ -240,6 +259,42 @@ final class MeetingProcessor {
         }
     }
 
+    private func cleanSpeakerBleed(
+        meetingID: String, allowCoarseTiming: Bool, earlierPassIDs: Set<String> = []
+    ) async {
+        let db = database
+        let backups = transcriptBackups
+        do {
+            // Fetch, backup write and rewrite stay off the main actor.
+            let rewritten = try await Task.detached(priority: .utility) {
+                try EchoBleedFilter.apply(
+                    meetingID: meetingID, database: db, backupDirectory: try backups(true),
+                    allowCoarseTiming: allowCoarseTiming, earlierPassIDs: earlierPassIDs)
+            }.value
+            if rewritten { transcriptRevisions[meetingID, default: 0] += 1 }
+        } catch {
+            Self.log.error(
+                "speaker-bleed cleanup failed for \(meetingID, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+        }
+        // deleteMeeting runs on the main actor, so once the pass is awaited
+        // a delete that raced it is visible here.
+        do {
+            try EchoBleedFilter.removeOrphanedBackups(
+                meetingID: meetingID, database: db, backupDirectory: try backups(false))
+        } catch {
+            Self.log.error(
+                "bleed backup sweep failed for \(meetingID, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
+    /// The cleanup replaces the whole mic channel, so it would delete finals
+    /// saved after its fetch; until the pipeline settles the meeting, skip it.
+    nonisolated static func canRewriteTranscript(status: MeetingStatus?) -> Bool {
+        status == .ready
+    }
+
     /// Marks the meeting ready and announces it with its final transcript.
     private func finish(meetingID: String) {
         let db = database
@@ -267,6 +322,17 @@ final class MeetingProcessor {
     func enhance(meetingID: String) async -> EnhanceOutcome {
         guard jobs[meetingID] == nil, enhanceTasks[meetingID] == nil else { return .alreadyRunning }
         return await runEnhance(meetingID: meetingID)
+    }
+
+    /// The notes buttons clean speaker bleed first, so meetings processed
+    /// before the filter existed get it too; once cleaned it is a no-op.
+    func regenerateNotes(meetingID: String) async -> EnhanceOutcome {
+        guard jobs[meetingID] == nil, enhanceTasks[meetingID] == nil else { return .alreadyRunning }
+        if Self.canRewriteTranscript(status: try? database.fetchMeeting(id: meetingID)?.status) {
+            // Explicit request: meetings without word timings get the coarse matcher.
+            await cleanSpeakerBleed(meetingID: meetingID, allowCoarseTiming: true)
+        }
+        return await enhance(meetingID: meetingID)
     }
 
     private func runEnhance(meetingID: String) async -> EnhanceOutcome {

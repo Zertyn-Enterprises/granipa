@@ -39,7 +39,7 @@ enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
         case .shortcuts: "Hotkeys and window actions"
         case .permissions: "Access and system permissions"
         case .ai: "Providers and note templates"
-        case .extras: "Clipboard, windows and battery"
+        case .extras: "Clipboard and windows"
         case .integrations: "Local API and webhooks"
         }
     }
@@ -47,7 +47,7 @@ enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
     var subPages: [SettingsSubPage] {
         switch self {
         case .ai: [.providers, .templates]
-        case .extras: [.clipboardAndOCR, .windows, .battery]
+        case .extras: [.clipboardAndOCR, .windows]
         case .integrations: [.api, .webhooks]
         case .general, .dictation, .shortcuts, .permissions: []
         }
@@ -56,7 +56,7 @@ enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
 
 enum SettingsSubPage: String, Hashable, Identifiable {
     case providers, templates
-    case clipboardAndOCR, windows, battery
+    case clipboardAndOCR, windows
     case api, webhooks
 
     var id: String { rawValue }
@@ -67,7 +67,6 @@ enum SettingsSubPage: String, Hashable, Identifiable {
         case .templates: "Templates"
         case .clipboardAndOCR: "Clipboard & OCR"
         case .windows: "Windows"
-        case .battery: "Battery"
         case .api: "API"
         case .webhooks: "Webhooks"
         }
@@ -185,13 +184,11 @@ struct SettingsView: View {
         case .extras:
             SettingsPage(
                 title: "Extras",
-                subtitle: "Clipboard history, text capture, window snapping and battery."
+                subtitle: "Clipboard history, text capture and window snapping."
             ) {
                 SettingsSubNav(pages: SettingsSection.extras.subPages, selection: $session.extrasPane)
                 if session.extrasPane == .windows {
                     WindowSettings()
-                } else if session.extrasPane == .battery {
-                    BatterySettings()
                 } else {
                     ProductivitySettings()
                 }

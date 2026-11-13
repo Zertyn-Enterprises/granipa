@@ -46,7 +46,13 @@ enum LLMProviders {
             id: "grok",
             displayName: "Grok",
             executableName: "grok",
-            arguments: ["-p", LLMProviderSpec.promptPlaceholder],
+            // The CLI's default (grok-4.7 at the user's configured effort,
+            // often xhigh) spent >10 min on a 50-minute meeting; this pair
+            // returned the same notes in ~2 min.
+            arguments: [
+                "-m", "grok-4.7-build-fast", "--reasoning-effort", "low",
+                "-p", LLMProviderSpec.promptPlaceholder,
+            ],
             promptViaStdin: false,
             installCommand: nil,
             loginHint: "Install the Grok CLI from xAI's documentation, then run \"grok\" once to sign in."),
