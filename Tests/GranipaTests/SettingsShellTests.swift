@@ -31,7 +31,7 @@ import Testing
 
     @Test func compositeSectionsKeepTheirSubPages() {
         #expect(SettingsSection.ai.subPages == [.providers, .templates])
-        #expect(SettingsSection.extras.subPages == [.clipboardAndOCR, .windows, .battery])
+        #expect(SettingsSection.extras.subPages == [.clipboardAndOCR, .windows])
         #expect(SettingsSection.integrations.subPages == [.api, .webhooks])
         #expect(SettingsSection.general.subPages.isEmpty)
         #expect(SettingsSection.dictation.subPages.isEmpty)
@@ -44,7 +44,6 @@ import Testing
         #expect(SettingsSubPage.templates.title == "Templates")
         #expect(SettingsSubPage.clipboardAndOCR.title == "Clipboard & OCR")
         #expect(SettingsSubPage.windows.title == "Windows")
-        #expect(SettingsSubPage.battery.title == "Battery")
         #expect(SettingsSubPage.api.title == "API")
         #expect(SettingsSubPage.webhooks.title == "Webhooks")
     }

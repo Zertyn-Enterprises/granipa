@@ -40,6 +40,23 @@ private final class DataBox: @unchecked Sendable {
     }
 }
 
+private final class Flag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+
+    func set() {
+        lock.lock()
+        value = true
+        lock.unlock()
+    }
+
+    func get() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+}
+
 enum LLMRunner {
     struct Output: Sendable {
         let stdout: String
@@ -108,8 +125,10 @@ enum LLMRunner {
             feed(stdin, to: stdinPipe.fileHandleForWriting)
         }
 
+        let timedOut = Flag()
         let watchdog = DispatchWorkItem {
             if process.isRunning {
+                timedOut.set()
                 process.terminate()
             }
         }
@@ -131,13 +150,11 @@ enum LLMRunner {
         let stdout = String(decoding: stdoutData, as: UTF8.self)
         let stderr = String(decoding: stderrBox.get(), as: UTF8.self)
 
-        if process.terminationReason == .uncaughtSignal {
-            throw LLMError.terminated
-        }
-        guard process.terminationStatus == 0 else {
-            throw LLMError.nonZeroExit(
-                process.terminationStatus,
-                String(stderr.suffix(500)).trimmingCharacters(in: .whitespacesAndNewlines))
+        if let error = exitError(
+            signalled: process.terminationReason == .uncaughtSignal, timedOut: timedOut.get(),
+            status: process.terminationStatus, stdout: stdout, stderr: stderr)
+        {
+            throw error
         }
         return Output(stdout: stdout)
     }
@@ -151,5 +168,21 @@ enum LLMRunner {
             try? writer.write(contentsOf: data)
             try? writer.close()
         }
+    }
+
+    /// The error a finished CLI process stands for, nil when it succeeded.
+    static func exitError(
+        signalled: Bool, timedOut: Bool, status: Int32, stdout: String, stderr: String
+    ) -> LLMError? {
+        // A CLI that traps SIGTERM exits normally (grok: 143), so the
+        // termination reason alone does not reveal the timeout.
+        if signalled || timedOut { return .terminated }
+        guard status != 0 else { return nil }
+        // Some CLIs (claude -p) print API errors on stdout and leave
+        // stderr empty; without this the user saw a blank reason.
+        let reason = stderr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? stdout : stderr
+        return .nonZeroExit(
+            status, String(reason.suffix(500)).trimmingCharacters(in: .whitespacesAndNewlines))
     }
 }

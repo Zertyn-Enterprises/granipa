@@ -50,7 +50,7 @@ struct ShortcutsSettings: View {
                     ForEach(
                         [
                             WindowAction.leftHalf, .rightHalf, .topHalf, .bottomHalf,
-                            .maximize, .center, .restore,
+                            .maximize, .center, .restore, .tileAppWindows,
                         ], id: \.self
                     ) { windowRow($0) }
                 }
@@ -83,7 +83,7 @@ struct ShortcutsSettings: View {
         case .off:
             "Each shortcut keeps its built-in modifiers (⌥⇧ for clipboard, ⌃⌥ for windows)."
         case .capsLock:
-            "Press Caps Lock to arm, then any shortcut (⇪V clipboard, ⇪← left half). Press Caps Lock again to exit. Needs Accessibility."
+            "Hold Caps Lock and press a shortcut (⇪V clipboard, ⇪← left half). While it is the macro key, Caps Lock no longer toggles capitals. Needs Accessibility."
         case .rightShift, .rightCommand, .rightOption:
             "Hold the macro key, then any shortcut. Other apps never see that chord. Needs Accessibility."
         }

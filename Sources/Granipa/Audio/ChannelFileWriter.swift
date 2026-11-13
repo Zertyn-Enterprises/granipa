@@ -19,6 +19,10 @@ final class ChannelFileWriter {
     private var padSeconds: Double = 0
     // Opening fails the same way for the same format; retry only on a new one.
     private var failedOpenFormat: AVAudioFormat?
+    // A buffer still in flight from the engine's tap after close() must not
+    // reopen the file: AVAudioFile(forWriting:) would replace the finished
+    // recording with a header-only one.
+    private var closed = false
     private let audioFrames = Mutex<AVAudioFramePosition>(0)
 
     /// Captured-audio frames (not silence padding) written so far, across file
@@ -31,7 +35,7 @@ final class ChannelFileWriter {
     }
 
     func write(_ buffer: AVAudioPCMBuffer, startSeconds: Double?) {
-        guard let file = openIfNeeded(format: buffer.format) else { return }
+        guard !closed, let file = openIfNeeded(format: buffer.format) else { return }
         let fileFormat = file.processingFormat
         if let start = startSeconds, start > 0 {
             let expectedFrame = AVAudioFramePosition((start * fileFormat.sampleRate).rounded())
@@ -69,6 +73,7 @@ final class ChannelFileWriter {
 
     func close() {
         file = nil
+        closed = true
     }
 
     private func openIfNeeded(format: AVAudioFormat) -> AVAudioFile? {

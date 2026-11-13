@@ -21,7 +21,8 @@ import Testing
         }
         let processor = MeetingProcessor(
             database: db,
-            host: .init(update: { try? db.save($0) }, folder: { _ in nil }, reportError: { _ in }))
+            host: .init(update: { try? db.save($0) }, folder: { _ in nil }, reportError: { _ in }),
+            transcriptBackups: { _ in nil })
         let events = Events()
         let (gate, release) = AsyncStream.makeStream(of: Void.self)
         func drain(_ name: String, waits: Bool) -> MeetingProcessor.Source {
@@ -57,7 +58,8 @@ import Testing
         try db.save(meeting)
         let processor = MeetingProcessor(
             database: db,
-            host: .init(update: { try? db.save($0) }, folder: { _ in nil }, reportError: { _ in }))
+            host: .init(update: { try? db.save($0) }, folder: { _ in nil }, reportError: { _ in }),
+            transcriptBackups: { _ in nil })
         #expect(await processor.enhance(meetingID: meeting.id) == .nothingToEnhance)
 
         let (gate, release) = AsyncStream.makeStream(of: Void.self)

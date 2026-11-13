@@ -1,5 +1,4 @@
 import AppKit
-import Carbon.HIToolbox
 import CoreGraphics
 import Foundation
 import os
@@ -115,6 +114,9 @@ final class HyperKeyMonitor: @unchecked Sendable {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             lock.lock()
             let tap = self.tap
+            _ = HyperKeyRoute.route(
+                type: type, code: 0, flags: [], synthetic: false,
+                hyper: hyperKeyCode, bindings: bindings, armed: &hyperDown)
             lock.unlock()
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
             return Unmanaged.passUnretained(event)
@@ -160,6 +162,12 @@ enum HyperKeyRoute: Equatable {
         bindings: [UInt32: UInt32],
         armed: inout Bool
     ) -> HyperKeyRoute {
+        // A disabled tap may have lost the macro key's release; staying armed
+        // would keep swallowing plain bound keys until the next macro press.
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            armed = false
+            return .pass
+        }
         // The app's own ⌘V must reach the target app even while the layer is armed.
         if synthetic { return .pass }
         if code == hyper {
@@ -181,12 +189,6 @@ enum HyperKeyRoute: Equatable {
     private static func arm(
         type: CGEventType, flags: CGEventFlags, hyper: UInt32, armed: inout Bool
     ) -> HyperKeyRoute {
-        if hyper == UInt32(kVK_CapsLock) {
-            // Caps Lock usually arrives as flagsChanged, not keyDown/keyUp.
-            // Toggle a layer: press ⇪ to arm, press ⇪ again to disarm.
-            if type == .flagsChanged { armed.toggle() }
-            return .swallow
-        }
         if HotkeyBinding.modifierFlag(forKeyCode: hyper) != nil {
             // Modifiers only emit flagsChanged. Pass it on: other features
             // (the Right ⌥ dictation key) listen to the same modifier.
@@ -197,6 +199,8 @@ enum HyperKeyRoute: Equatable {
             }
             return .pass
         }
+        // Plain keys, including Caps Lock (remapped to F18 by CapsLockRemap so it
+        // reports a release), arm only while held.
         if type == .keyDown {
             armed = true
         } else if type == .keyUp {

@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         #endif
         AppRelocator.offerMoveIfNeeded()
+        LegacyBatteryHelper.unregisterIfRegistered()
         os_signpost(.event, log: Self.lifecycleLog, name: "appReady")
     }
 
@@ -34,14 +35,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #if DEBUG
         if V2FixtureRuntime.isActive { return }
         #endif
-        BatteryService.shared.stop()
-    }
-
-    func applicationDidBecomeActive(_ notification: Notification) {
-        #if DEBUG
-        if V2FixtureRuntime.isActive { return }
-        #endif
-        BatteryHelperClient.shared.invalidateStatusCache()
+        // Give Caps Lock back to the system; the next launch re-applies it.
+        CapsLockRemap.apply(enabled: false)
     }
 }
 

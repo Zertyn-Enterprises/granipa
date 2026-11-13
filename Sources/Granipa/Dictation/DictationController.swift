@@ -9,6 +9,7 @@ import os
 @Observable
 final class DictationController {
     static let shared = DictationController()
+    private static let log = Logger(subsystem: "com.zertyn.granipa", category: "dictation")
 
     private(set) var phase: DictationPhase = .idle
     private(set) var preview = ""
@@ -69,10 +70,13 @@ final class DictationController {
     }
 
     func handlePress(at timestamp: TimeInterval) {
+        Self.log.info("press t=\(timestamp, privacy: .public) phase=\(String(describing: self.phase), privacy: .public) toggle=\(self.isToggle)")
         switch phase {
         case .preparing:
+            Self.log.info("stop: press while preparing")
             Task { await stop() }
         case .listening where isToggle:
+            Self.log.info("stop: second press of a toggle")
             Task { await stop() }
         case .idle, .done, .failed:
             pressEventTimestamp = timestamp
@@ -85,7 +89,11 @@ final class DictationController {
     func handleRelease(at timestamp: TimeInterval) {
         guard phase == .listening || phase == .preparing, !isToggle else { return }
         guard let pressed = pressEventTimestamp else { return }
-        switch DictationTrigger.actionOnRelease(press: pressed, release: timestamp) {
+        let heardSpeech = !preview.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let action = DictationTrigger.actionOnRelease(
+            press: pressed, release: timestamp, heardSpeech: heardSpeech)
+        Self.log.info("release held=\(timestamp - pressed, privacy: .public)s phase=\(String(describing: self.phase), privacy: .public) -> \(String(describing: action), privacy: .public)")
+        switch action {
         case .keepAsToggle:
             isToggle = true
         case .stop:
@@ -470,6 +478,7 @@ final class DictationController {
     }
 
     private func fail(_ error: Error) {
+        Self.log.error("fail: \(error.localizedDescription, privacy: .public) listened=\(self.reachedListening)")
         finishMic()
         if case .micBusy? = error as? DictationError {
             // The meeting owns the mic until it ends; an overlay offering

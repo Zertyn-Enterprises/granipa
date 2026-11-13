@@ -552,9 +552,9 @@ struct MeetingTranscriptView: View {
                 .accessibilityHidden(true)
             TranscriptPlaybackCursor(playback: playback, rows: rows, currentIDs: $currentIDs)
         }
-        // loadedURL always changes once the other channel's file is open, even
-        // when the preparing state never reaches a render.
-        .onChange(of: playback.loadedURL) {
+        // loadedURLs always changes once the other source's files are open,
+        // even when the preparing state never reaches a render.
+        .onChange(of: playback.loadedURLs) {
             guard let pending = pendingStart else { return }
             pendingStart = nil
             guard playback.state == .ready else { return }
@@ -566,15 +566,16 @@ struct MeetingTranscriptView: View {
         }
     }
 
-    /// Plays or cues a line from its own channel's file.
+    /// Plays or cues a line from its own channel's file (or both together).
     private func start(_ segment: TranscriptSegment, play: Bool) {
         selectedID = segment.id
         guard canPlay else { return }
-        if segment.channel != playback.channel,
-            playback.availableChannels.contains(segment.channel)
+        let own: PlaybackSource = segment.channel == .mic ? .mic : .system
+        if playback.source != .both, playback.source != own,
+            playback.availableSources.contains(own)
         {
             pendingStart = TranscriptPendingStart(seconds: segment.startSeconds, play: play)
-            playback.selectChannel(segment.channel)
+            playback.selectSource(own)
             return
         }
         playback.seek(to: segment.startSeconds)

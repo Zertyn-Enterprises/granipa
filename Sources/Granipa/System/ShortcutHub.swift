@@ -28,19 +28,9 @@ final class ShortcutHub {
             }
         }
 
-        if let hyperCode = WindowHyperKey.current.keyCode {
-            if !PasteService.isTrusted {
-                PasteService.requestTrust()
-            }
-            let started = HyperKeyMonitor.shared.start(
-                hyperKeyCode: hyperCode, bindings: keyToID
-            ) { id in
-                Self.dispatch(id)
-            }
-            // Without Accessibility there is no tap; the Carbon chords below
-            // need no permission, so shortcuts keep working until it is granted.
-            if started { return }
-        }
+        // Without Accessibility there is no tap; the Carbon chords below
+        // need no permission, so shortcuts keep working until it is granted.
+        if startMacroKey(bindings: keyToID) { return }
 
         for extra in ExtraShortcut.allCases {
             HotkeyManager.shared.register(
@@ -61,6 +51,26 @@ final class ShortcutHub {
                 Self.dispatch(action.hotkeyID)
             }
         }
+    }
+
+    /// Starts the macro-key tap when a macro key is chosen; returns whether it runs.
+    private func startMacroKey(bindings: [UInt32: UInt32]) -> Bool {
+        let hyper = WindowHyperKey.current
+        guard let hyperCode = hyper.tapKeyCode else {
+            CapsLockRemap.apply(enabled: false)
+            return false
+        }
+        if !PasteService.isTrusted {
+            PasteService.requestTrust()
+        }
+        let started = HyperKeyMonitor.shared.start(
+            hyperKeyCode: hyperCode, bindings: bindings
+        ) { id in
+            Self.dispatch(id)
+        }
+        // Without a running tap, F18 would leave Caps Lock dead.
+        CapsLockRemap.apply(enabled: hyper == .capsLock && started)
+        return started
     }
 
     private static func dispatch(_ id: UInt32) {

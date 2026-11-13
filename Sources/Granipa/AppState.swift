@@ -16,6 +16,8 @@ final class AppState {
     private var clipboardMonitor: ClipboardMonitor?
     private var autoStopTask: Task<Void, Never>?
     @ObservationIgnored private var recordingStartTask: Task<Void, Never>?
+    /// Segments the meeting already had when the current pass started.
+    @ObservationIgnored private var earlierPassSegmentIDs: Set<String> = []
     private(set) var transcription: TranscriptionCoordinator?
     private(set) var processor: MeetingProcessor?
     let dictation = DictationController.shared
@@ -42,6 +44,8 @@ final class AppState {
     func enhancementError(for meetingID: String) -> String? {
         processor?.enhanceErrors[meetingID]
     }
+
+    var transcriptRevisions: [String: Int] { processor?.transcriptRevisions ?? [:] }
 
     var selectedMeeting: Meeting? {
         guard let id = selectedMeetingID else { return nil }
@@ -143,7 +147,8 @@ final class AppState {
             host: .init(
                 update: { [weak self] in self?.update($0) },
                 folder: { [weak self] in self?.folder(for: $0) },
-                reportError: { [weak self] in self?.loadError = $0 }))
+                reportError: { [weak self] in self?.loadError = $0 }),
+            transcriptBackups: { try AppPaths.transcriptBackupDirectory(create: $0) })
     }
 
     private func setupProductivity() {
@@ -160,7 +165,6 @@ final class AppState {
             self?.recordDictation(text: text, duration: duration, sourceApp: appName)
         }
         registerDictationHotkey()
-        BatteryService.shared.start()
         ShortcutHub.shared.rebind()
     }
 
@@ -433,6 +437,8 @@ final class AppState {
 
     private func activateRecording(targetID: String) async {
         guard var meeting = meetings.first(where: { $0.id == targetID }) else { return }
+        earlierPassSegmentIDs = Set(
+            (try? database?.fetchSegments(meetingID: targetID))?.map(\.id) ?? [])
         do {
             let session = try await recorder.start(meetingID: targetID)
             if MeetingASRPolicy.usesLiveASR(), let db = database {
@@ -472,6 +478,7 @@ final class AppState {
     }
 
     func stopRecording() async {
+        let earlierPass = earlierPassSegmentIDs
         guard let capture = await stopCapture() else { return }
         let id = capture.id
         let urls = capture.urls
@@ -484,21 +491,24 @@ final class AppState {
             return
         }
 
+        let source: MeetingProcessor.Source
         if let live {
-            await processor.process(
-                meetingID: id,
-                source: .live { [weak self] in
-                    await live.finishAndWait()
-                    self?.releaseTranscription(live)
-                    var failure: String?
-                    if case .failed(let message) = live.phase { failure = message }
-                    return .init(usedMuseForSystem: live.systemUsedMuse, failure: failure)
-                })
+            source = .live { [weak self] in
+                await live.finishAndWait()
+                self?.releaseTranscription(live)
+                var failure: String?
+                if case .failed(let message) = live.phase { failure = message }
+                return .init(usedMuseForSystem: live.systemUsedMuse, failure: failure)
+            }
         } else {
-            await processor.process(
-                meetingID: id,
-                source: .files(
-                    micURL: urls.micURL, systemURL: urls.systemURL, language: meeting.language))
+            source = .files(
+                micURL: urls.micURL, systemURL: urls.systemURL, language: meeting.language)
+        }
+        // Not awaited: awaiting a task escalates it to the awaiter's priority,
+        // so Stop from the UI would run minutes of transcription and
+        // diarization at user-interactive priority on the performance cores.
+        Task(priority: .utility) {
+            await processor.process(meetingID: id, source: source, earlierPassIDs: earlierPass)
         }
     }
 
@@ -553,7 +563,7 @@ final class AppState {
 
     /// Enhance buttons: say why nothing happened instead of staying silent.
     func enhanceNow(meetingID: String) async {
-        switch await enhance(meetingID: meetingID) {
+        switch await processor?.regenerateNotes(meetingID: meetingID) {
         case .nothingToEnhance:
             ToastController.shared.show("No transcript or notes to enhance", style: .warning)
         case .alreadyRunning:
@@ -720,6 +730,8 @@ final class AppState {
             return
         }
         do {
+            try EchoBleedFilter.removeBackups(
+                meetingID: id, from: try AppPaths.transcriptBackupDirectory(create: false))
             try db.deleteMeeting(id: id)
             if let dir = try? AppPaths.audioDirectory(meetingID: id) {
                 try? FileManager.default.removeItem(at: dir)
